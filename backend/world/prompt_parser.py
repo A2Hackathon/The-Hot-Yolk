@@ -3,12 +3,13 @@ import spacy
 # Load spaCy English model
 nlp = spacy.load("en_core_web_sm")
 
-# --- Keyword lists ---
+#  Keyword lists 
 biomes = ["arctic", "city"]
 times = ["sunset", "noon", "night"]
 sky_keywords = ["sun", "cloud", "star", "clouds", "stars"]
 ground_keywords = ["snow", "street"]
-structure_keywords = ["mountain", "building", "rock", "tree"]
+structure_keywords = ["mountain", "hill", "river"]
+object_keywords = ["tree", "building", "street lamp", "graffiti"]
 
 def parse_prompt(prompt: str) -> dict:
     doc = nlp(prompt.lower())
@@ -18,7 +19,8 @@ def parse_prompt(prompt: str) -> dict:
         "time": [t for t in times if t in prompt.lower()],
         "sky": [s for s in sky_keywords if s in prompt.lower()],
         "ground": [g for g in ground_keywords if g in prompt.lower()],
-        "structure": {}
+        "structure": {},
+        "object": {}
     }
 
     for token in doc:
@@ -39,6 +41,9 @@ def parse_prompt(prompt: str) -> dict:
         lemma = token.lemma_
         if lemma in structure_keywords and lemma not in extracted["structure"]:
             extracted["structure"][lemma] = 1
+
+        if lemma in object_keywords and lemma not in extracted["object"]:
+            extracted["object"][lemma] = 1
 
     return extracted
 
