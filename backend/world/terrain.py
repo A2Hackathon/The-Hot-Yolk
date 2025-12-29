@@ -158,14 +158,6 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=128, he
 def generate_heightmap(biome_name, structures=None):
     """
     Generate and save heightmap PNG, return URLs and placement mask
-    This is the function called by main.py
-    
-    Args:
-        biome_name: string like "arctic" or "city"
-        structures: dict like {"mountain": 3, "hill": 2}
-    
-    Returns:
-        dict with texture_url, heightmap_url, placement_mask
     """
     heightmap, colour_map_array, placement_mask = generate_heightmap_data(biome_name, structures)
     
@@ -206,17 +198,33 @@ def save_heightmap_png(prompt_parser_response, filename="assets/heightmaps/terra
     img.save(filename)
     print(f"Terrain saved as {filename}")
 
-# Example usage 
-if __name__ == "__main__":
-    # Test with new format (string biome)
-    print("=== Testing Arctic with Mountains ===")
-    result = generate_heightmap("arctic", {"mountain": 3, "hill": 2, "river": 1})
-    print(f"Generated terrain:")
-    print(f"  Texture: {result['texture_url']}")
-    print(f"  Heightmap: {result['heightmap_url']}")
-    
-    print("\n=== Testing City ===")
-    result = generate_heightmap("city", {})
-    print(f"Generated terrain:")
-    print(f"  Texture: {result['texture_url']}")
-    print(f"  Heightmap: {result['heightmap_url']}")
+
+def get_valid_spawn_points(placement_mask, heightmap_raw, radius=5):
+    """
+    Returns a valid spawn point from the placement mask
+    Args:
+        placement_mask: 2D list of 0/1
+        heightmap_raw: 2D list of heights
+        radius: min distance from map edges
+    Returns:
+        dict with x, y, z
+    """
+    height = len(placement_mask)
+    width = len(placement_mask[0])
+    candidates = []
+
+    # Avoid edges and pick walkable points
+    for z in range(radius, height - radius):
+        for x in range(radius, width - radius):
+            if placement_mask[z][x] == 1:
+                candidates.append((x, z))
+
+    if not candidates:
+        # Fallback: center
+        x = width // 2
+        z = height // 2
+    else:
+        x, z = random.choice(candidates)
+
+    y = heightmap_raw[z][x] + 0.5  # add player height offset
+    return {"x": float(x), "y": float(y), "z": float(z)}
