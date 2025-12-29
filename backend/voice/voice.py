@@ -5,9 +5,9 @@ import numpy as np
 import queue
 import time
 import speech_recognition as sr
-from ..world.prompt_parser import parse_prompt, extract_mechanic_from_command
-from ..world.physics_config import get_combined_config, modify_physics
-from ..world.lighting import get_lighting_preset, interpolate_lighting
+from world.prompt_parser import parse_prompt, extract_mechanic_from_command
+from world.physics_config import get_combined_config, modify_physics
+from world.lighting import get_lighting_preset, interpolate_lighting
 
 # Create a queue to hold audio chunks
 audio_queue = queue.Queue()

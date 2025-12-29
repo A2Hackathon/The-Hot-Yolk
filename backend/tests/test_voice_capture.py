@@ -1,15 +1,29 @@
-# test_voice_capture.py
+# backend/tests/test_voice_capture.py
 import sys
+import os
+from pathlib import Path
+
+# Make sure backend modules are importable
+BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.append(str(BASE_DIR))
+
 from voice.voice import capture_and_parse_command
 
-def main():
-    print("Starting voice capture test...")
-    parsed = capture_and_parse_command(duration=5.0)  # record 5 seconds
-    if parsed:
-        print("Parsed parameters from voice command:")
-        print(parsed)
+def test_voice_capture():
+    """
+    Simple test to capture audio from the microphone and parse it
+    using your voice.py pipeline.
+    """
+    print("=== Voice Capture Test ===")
+    print("Please speak a test command into your microphone...")
+    
+    parsed_params = capture_and_parse_command()
+    
+    if parsed_params:
+        print("Parsed command output:")
+        print(parsed_params)
     else:
-        print("No command detected or could not understand audio.")
+        print("No command detected or recognition failed.")
 
 if __name__ == "__main__":
-    main()
+    test_voice_capture()

@@ -3,9 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 # Import API routers
-from .api.routes.generate import router as generate_router
-from .api.routes.update import router as update_router
-from .api.routes.health import router as health_router
+from api.routes.generate import router as generate_router
+from api.routes.update import router as update_router
+from api.routes.health import router as health_router
 
 
 # Create FastAPI app

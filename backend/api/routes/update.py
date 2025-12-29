@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Optional
 from pydantic import BaseModel
-from ...voice.voice import handle_live_command
+from voice.voice import handle_live_command
 
 router = APIRouter()
 

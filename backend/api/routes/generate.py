@@ -1,10 +1,10 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict
-from ...voice.voice import capture_and_parse_command
-from ...world.terrain import generate_heightmap, get_valid_spawn_points
-from ...world.enemy_placer import place_enemies
-from ...world.lighting import get_lighting_preset, get_sky_color
-from ...world.physics_config import get_combined_config
+from voice.voice import capture_and_parse_command
+from world.terrain import generate_heightmap, get_valid_spawn_points
+from world.enemy_placer import place_enemies
+from world.lighting import get_lighting_preset, get_sky_color
+from world.physics_config import get_combined_config
 
 router = APIRouter()
 
