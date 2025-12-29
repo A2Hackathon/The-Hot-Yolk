@@ -1,0 +1,11 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+pillow==10.1.0
+numpy==1.26.2
+noise==1.2.2
+groq==0.4.2
+python-dotenv==1.0.0
+sounddevice==0.4.6
+SpeechRecognition==3.10.0
+PyAudio==0.2.14
