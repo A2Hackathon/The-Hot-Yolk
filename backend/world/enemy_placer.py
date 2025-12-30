@@ -1,9 +1,8 @@
-
 import random
 import math
 from typing import List, Dict, Tuple
 from .weapon_config import get_enemy_stats
-from .terrain import get_valid_spawn_points 
+from .terrain import get_walkable_points
 
 def distance_2d(x1: float, z1: float, x2: float, z2: float) -> float:
     return math.sqrt((x2 - x1)**2 + (z2 - z1)**2)
@@ -16,53 +15,59 @@ def is_too_close_to_others(x: int, z: int, enemies: List[Dict], min_distance: fl
             return True
     return False
 
-def place_enemies(heightmap_raw: List[List[float]],
-                  placement_mask: List[List[int]],
-                  enemy_count: int,
-                  player_spawn: Dict[str, float],
-                  min_player_distance: float = 20.0,
-                  min_enemy_distance: float = 10.0) -> List[Dict]:
-    """
-    Place enemies with combat stats from weapon_config
-    
-    Returns:
-        List of enemies with position, health, damage, speed
-    """
-    
-    # Get enemy stats
+def place_enemies(
+    heightmap_raw: List[List[float]],
+    placement_mask: List[List[int]],
+    enemy_count: int,
+    player_spawn: Dict[str, float],
+    min_player_distance: float = 20.0,
+    min_enemy_distance: float = 10.0
+) -> List[Dict]:
+
     enemy_stats = get_enemy_stats("sentinel")
-    
-    valid_points = get_valid_spawn_points(placement_mask, player_spawn, min_player_distance)
-    
-    if not valid_points:
-        print(f"[Enemy Placer] WARNING: No valid spawn points found!")
+
+    # 1. Get all walkable points from terrain
+    walkable_points = get_walkable_points(
+        placement_mask=placement_mask,
+        radius=1
+    )
+
+    if not walkable_points:
+        print("[Enemy Placer] WARNING: No valid spawn points found!")
         return []
-    
-    print(f"[Enemy Placer] Found {len(valid_points)} valid spawn points")
-    
+
+    # 2. Filter points far enough from player
+    spawnable_points = [
+        (x, z) for (x, z) in walkable_points
+        if distance_2d(x, z, player_spawn["x"], player_spawn["z"]) >= min_player_distance
+    ]
+
+    if not spawnable_points:
+        print("[Enemy Placer] WARNING: No spawnable points far from player!")
+        return []
+
+    random.shuffle(spawnable_points)
+
     enemies = []
     attempts = 0
     max_attempts = 500
-    
-    random.shuffle(valid_points)
-    
+
+    # 3. Place enemies
     while len(enemies) < enemy_count and attempts < max_attempts:
         attempts += 1
-        
-        if not valid_points:
-            print(f"[Enemy Placer] Ran out of valid points, placed {len(enemies)}/{enemy_count} enemies")
+
+        if not spawnable_points:
             break
-        
-        x, z = valid_points.pop()
-        
+
+        x, z = spawnable_points.pop()
+
         if is_too_close_to_others(x, z, enemies, min_enemy_distance):
             continue
-        
+
         y = heightmap_raw[z][x]
-        
-        enemy_id = len(enemies) + 1
+
         enemies.append({
-            "id": enemy_id,
+            "id": len(enemies) + 1,
             "position": {
                 "x": float(x),
                 "y": float(y) + 0.5,
@@ -71,13 +76,12 @@ def place_enemies(heightmap_raw: List[List[float]],
             "type": "sentinel",
             "behavior": "patrol",
             "health": enemy_stats["health"],
-            "max_health": enemy_stats["health"],  # For health bars
+            "max_health": enemy_stats["health"],
             "damage": enemy_stats["damage"],
             "speed": enemy_stats["speed"],
             "detection_radius": enemy_stats["detection_radius"],
             "attack_radius": enemy_stats["attack_radius"]
         })
-    
+
     print(f"[Enemy Placer] Placed {len(enemies)}/{enemy_count} enemies (attempts: {attempts})")
-    
     return enemies

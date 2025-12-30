@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict
+import random
 from voice.voice import capture_and_parse_command
-from world.terrain import generate_heightmap, get_valid_spawn_points
+from world.terrain import generate_heightmap, get_walkable_points
 from world.enemy_placer import place_enemies
 from world.lighting import get_lighting_preset, get_sky_color
 from world.physics_config import get_combined_config
@@ -27,15 +28,28 @@ async def generate_world() -> Dict:
 
         # Generate terrain
         terrain_data = generate_heightmap(biome, structure_counts)
-        spawn_point = get_valid_spawn_points(
-            terrain_data["placement_mask"],
-            terrain_data["heightmap_raw"]
+        heightmap_raw = terrain_data["heightmap_raw"]
+        placement_mask = terrain_data["placement_mask"]
+
+        # Get all walkable points
+        walkable_points = get_walkable_points(
+            placement_mask=placement_mask,
+            radius=1
         )
+        if not walkable_points:
+            raise HTTPException(status_code=500, detail="No valid player spawn points")
+
+        # Pick a random spawn point from walkable points
+        spawn_x, spawn_z = random.choice(walkable_points)
+        spawn_y = heightmap_raw[spawn_z][spawn_x]
+        spawn_point = {"x": float(spawn_x), "y": float(spawn_y), "z": float(spawn_z)}
+
+        print(f"[API] Player spawn point: {spawn_point}")
 
         # Place enemies
         enemies = place_enemies(
-            heightmap_raw=terrain_data["heightmap_raw"],
-            placement_mask=terrain_data["placement_mask"],
+            heightmap_raw=heightmap_raw,
+            placement_mask=placement_mask,
             enemy_count=enemy_count,
             player_spawn=spawn_point
         )
@@ -52,8 +66,8 @@ async def generate_world() -> Dict:
             "world": {
                 "biome": biome,
                 "time": time_of_day,
-                "heightmap_url": terrain_data["heightmap_url"],
-                "texture_url": terrain_data["texture_url"],
+                "heightmap_url": terrain_data.get("heightmap_url"),
+                "texture_url": terrain_data.get("texture_url"),
                 "lighting_config": lighting_config,
                 "sky_colour": sky_colour
             },

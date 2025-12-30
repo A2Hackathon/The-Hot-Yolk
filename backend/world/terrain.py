@@ -199,32 +199,18 @@ def save_heightmap_png(prompt_parser_response, filename="assets/heightmaps/terra
     print(f"Terrain saved as {filename}")
 
 
-def get_valid_spawn_points(placement_mask, heightmap_raw, radius=5):
+def get_walkable_points(placement_mask, radius=1):
     """
-    Returns a valid spawn point from the placement mask
-    Args:
-        placement_mask: 2D list of 0/1
-        heightmap_raw: 2D list of heights
-        radius: min distance from map edges
-    Returns:
-        dict with x, y, z
+    Returns ALL walkable (x, z) points away from edges.
     """
     height = len(placement_mask)
     width = len(placement_mask[0])
-    candidates = []
+    points = []
 
-    # Avoid edges and pick walkable points
     for z in range(radius, height - radius):
         for x in range(radius, width - radius):
             if placement_mask[z][x] == 1:
-                candidates.append((x, z))
+                points.append((x, z))
 
-    if not candidates:
-        # Fallback: center
-        x = width // 2
-        z = height // 2
-    else:
-        x, z = random.choice(candidates)
+    return points
 
-    y = heightmap_raw[z][x] + 0.5  # add player height offset
-    return {"x": float(x), "y": float(y), "z": float(z)}
