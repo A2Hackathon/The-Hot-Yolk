@@ -10,6 +10,9 @@ const GameState = {
   PLAYING: 'playing',
 };
 
+// Damage per hit
+const ENEMY_DAMAGE = 1;
+
 const VoiceWorldBuilder = () => {
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
@@ -19,7 +22,7 @@ const VoiceWorldBuilder = () => {
 
   const heightmapRef = useRef(null);
   const colorMapRef = useRef(null);
-  const terrainMeshRef = useRef(null); // new ref for the actual terrain mesh
+  const terrainMeshRef = useRef(null);
   const playerRef = useRef(null);
   const enemiesRef = useRef([]);
 
@@ -38,7 +41,6 @@ const VoiceWorldBuilder = () => {
     dashCooldown: 0,
   });
 
-  // Camera orbit offsets
   const cameraOffset = useRef({ distance: 15, height: 8, angle: 0 });
   const pressedKeys = useRef(new Set());
 
@@ -107,8 +109,8 @@ const VoiceWorldBuilder = () => {
 
       const player = playerRef.current;
       const cam = cameraRef.current;
-      const terrainMesh = terrainMeshRef.current; // check mesh exists
-      if (player && cam && terrainMesh) {
+      const terrainMesh = terrainMeshRef.current;
+      if (player && cam) {
         const moveSpeed = 0.25;
         const dashSpeed = 1.0;
         const gravity = -0.015;
@@ -119,10 +121,10 @@ const VoiceWorldBuilder = () => {
 
         // --- WASD movement relative to camera ---
         let moveVector = new THREE.Vector3();
-        if (pressedKeys.current.has('w')) moveVector.z -= 1;
-        if (pressedKeys.current.has('s')) moveVector.z += 1;
-        if (pressedKeys.current.has('a')) moveVector.x -= 1;
-        if (pressedKeys.current.has('d')) moveVector.x += 1;
+        if (pressedKeys.current.has('w')) moveVector.z += 1;
+        if (pressedKeys.current.has('s')) moveVector.z -= 1;
+        if (pressedKeys.current.has('a')) moveVector.x += 1;
+        if (pressedKeys.current.has('d')) moveVector.x -= 1;
 
         if (moveVector.length() > 0) {
           moveVector.normalize();
@@ -158,14 +160,16 @@ const VoiceWorldBuilder = () => {
         let newY = player.position.y + playerState.current.velocity.y;
 
         // Terrain collision using heightmap array
-        const terrainY = getHeightAt(player.position.x, player.position.z) + 2;
-        if (newY < terrainY) {
-          newY = terrainY;
-          playerState.current.velocity.y = 0;
-          playerState.current.isGrounded = true;
-          playerState.current.canDoubleJump = true;
-        } else {
-          playerState.current.isGrounded = false;
+        if (terrainMesh) {
+          const terrainY = getHeightAt(player.position.x, player.position.z) + 2;
+          if (newY < terrainY) {
+            newY = terrainY;
+            playerState.current.velocity.y = 0;
+            playerState.current.isGrounded = true;
+            playerState.current.canDoubleJump = true;
+          } else {
+            playerState.current.isGrounded = false;
+          }
         }
 
         player.position.y = newY;
@@ -181,6 +185,30 @@ const VoiceWorldBuilder = () => {
 
         // Rotate enemies
         enemiesRef.current.forEach((enemy) => (enemy.rotation.y += 0.005));
+
+        // --- Collision detection & damage ---
+        enemiesRef.current.forEach((enemy) => {
+          if (enemy.userData.health <= 0) return;
+
+          const playerBox = new THREE.Box3().setFromObject(player);
+          const enemyBox = new THREE.Box3().setFromObject(enemy);
+
+          if (playerBox.intersectsBox(enemyBox)) {
+            if (playerState.current.isDashing || (!playerState.current.isGrounded && !playerState.current.canDoubleJump)) {
+              enemy.userData.health -= ENEMY_DAMAGE;
+
+              // Flash enemy red
+              enemy.material.color.set(0xff5555);
+              setTimeout(() => {
+                if (enemy.userData.health > 0) enemy.material.color.set(0x990000);
+              }, 100);
+
+              if (enemy.userData.health <= 0) {
+                sceneRef.current.remove(enemy);
+              }
+            }
+          }
+        });
       }
 
       rendererRef.current.render(sceneRef.current, cameraRef.current);
@@ -261,6 +289,7 @@ const VoiceWorldBuilder = () => {
       const enemy = new THREE.Mesh(geometry, material);
       enemy.position.set(e.position.x, getHeightAt(e.position.x, e.position.z) + 2, e.position.z);
       enemy.castShadow = true;
+      enemy.userData = { health: 3 };
       return enemy;
     });
   };
@@ -275,6 +304,12 @@ const VoiceWorldBuilder = () => {
         body: JSON.stringify({ prompt: promptText }),
       });
       const data = await res.json();
+
+      console.log("API response:", data);
+      console.log("World data:", data.world);
+      console.log("Spawn point:", data.spawn_point);
+      console.log("Enemies:", data.combat?.enemies);
+
       const scene = sceneRef.current;
       if (!scene) return;
 
@@ -282,20 +317,30 @@ const VoiceWorldBuilder = () => {
       scene.children.filter((c) => !c.isLight).forEach((c) => scene.remove(c));
       terrainMeshRef.current = null;
 
-      if (data.world.heightmap_raw && data.world.colour_map_array) {
-        heightmapRef.current = data.world.heightmap_raw;
-        colorMapRef.current = data.world.colour_map_array;
-        const terrainMesh = createTerrain(heightmapRef.current, colorMapRef.current, 128);
-        terrainMeshRef.current = terrainMesh;
-        scene.add(terrainMesh);
+      // Terrain
+      if (data.world) {
+        if (data.world.heightmap_raw && data.world.colour_map_array) {
+          heightmapRef.current = data.world.heightmap_raw;
+          colorMapRef.current = data.world.colour_map_array;
+          const terrainMesh = createTerrain(heightmapRef.current, colorMapRef.current, 128);
+          terrainMeshRef.current = terrainMesh;
+          scene.add(terrainMesh);
+        }
       }
 
-      const playerMesh = createPlayer(data.spawn_point);
+      // Player
+      const spawn = data.spawn_point || { x: 0, z: 0 };
+      const playerMesh = createPlayer(spawn);
       playerRef.current = playerMesh;
       scene.add(playerMesh);
 
-      enemiesRef.current = createEnemies(data.combat.enemies || []);
-      enemiesRef.current.forEach((e) => scene.add(e));
+      // Enemies
+      if (data.combat && data.combat.enemies) {
+        enemiesRef.current = createEnemies(data.combat.enemies);
+        enemiesRef.current.forEach((e) => scene.add(e));
+      } else {
+        enemiesRef.current = [];
+      }
 
       setGameState(GameState.PLAYING);
     } catch (err) {
@@ -306,8 +351,12 @@ const VoiceWorldBuilder = () => {
 
   // --- Voice Capture ---
   const startVoiceCapture = () => {
-    if (!('webkitSpeechRecognition' in window)) return alert('Speech recognition not supported');
+    if (!('webkitSpeechRecognition' in window)) {
+      return alert('Speech recognition not supported');
+    }
+
     setIsListening(true);
+
     const recognition = new webkitSpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
@@ -315,26 +364,34 @@ const VoiceWorldBuilder = () => {
 
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
+      
+      console.log("Voice transcript captured:", transcript); // <-- added log
+
       setIsListening(false);
       setSubmittedPrompt(transcript);
       generateWorld(transcript);
     };
+
     recognition.onerror = () => setIsListening(false);
     recognition.onend = () => setIsListening(false);
+
     recognition.start();
   };
+
 
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute' }} />
 
       {gameState === GameState.IDLE && (
-        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100,
-                      display: 'flex', justifyContent: 'center', alignItems: 'center',
-                      backgroundColor: 'rgba(0,0,0,0.85)', flexDirection: 'column', fontFamily: "'Audiowide',sans-serif",
-                      textAlign: 'center'}}>
-          <h1 style={{ fontSize: '3rem', fontWeight: 'bold', background: 'linear-gradient(90deg,#ff0000,#ff5555,#990000)',
-                       WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '24px'}}>
+        <div style={{
+          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100,
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          backgroundColor: 'rgba(0,0,0,0.85)', flexDirection: 'column', fontFamily: "'Audiowide',sans-serif",
+          textAlign: 'center'}}>
+          <h1 style={{
+            fontSize: '3rem', fontWeight: 'bold', background: 'linear-gradient(90deg,#ff0000,#ff5555,#990000)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: '24px'}}>
             Voice World Builder
           </h1>
           <button onClick={startVoiceCapture}>{isListening ? 'Listening...' : '🎤 Speak'}</button>
@@ -344,9 +401,10 @@ const VoiceWorldBuilder = () => {
         </div>
       )}
       {gameState === GameState.GENERATING && (
-        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100,
-                      display: 'flex', justifyContent: 'center', alignItems: 'center',
-                      backgroundColor: 'rgba(0,0,0,0.85)', flexDirection: 'column'}}>
+        <div style={{
+          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100,
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          backgroundColor: 'rgba(0,0,0,0.85)', flexDirection: 'column'}}>
           <h2>Generating World...</h2>
         </div>
       )}

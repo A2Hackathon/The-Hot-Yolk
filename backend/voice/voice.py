@@ -3,9 +3,7 @@ from typing import Dict, Optional
 import sounddevice as sd
 import numpy as np
 import queue
-import re
-import speech_recognition as sr
-from world.prompt_parser import parse_prompt, extract_mechanic_from_command
+from world.prompt_parser import extract_mechanic_from_command
 from world.physics_config import get_combined_config, modify_physics
 from world.lighting import get_lighting_preset, interpolate_lighting
 
@@ -22,64 +20,6 @@ def record_audio(duration: float = 5.0, fs: int = 44100) -> np.ndarray:
     print("[Voice] Recording finished")
     return recording.flatten()
 
-def parse_prompt(prompt_text: str) -> dict:
-    """
-    Convert a raw prompt string into structured parameters for world generation.
-    Returns a dict with keys: biome, time, enemy_count, weapon, structure
-    """
-    prompt_text = prompt_text.lower()
-    
-    # Default values
-    result = {
-        "biome": "city",
-        "time": "noon",
-        "enemy_count": 5,
-        "weapon": "dash",
-        "structure": {}
-    }
-
-    # --- Biome detection ---
-    if "icy" in prompt_text or "snow" in prompt_text:
-        result["biome"] = "icy"
-    elif "desert" in prompt_text:
-        result["biome"] = "desert"
-    elif "forest" in prompt_text:
-        result["biome"] = "forest"
-    elif "city" in prompt_text:
-        result["biome"] = "city"
-
-    # --- Time of day ---
-    if "sunset" in prompt_text:
-        result["time"] = "sunset"
-    elif "night" in prompt_text:
-        result["time"] = "night"
-    elif "dawn" in prompt_text or "morning" in prompt_text:
-        result["time"] = "dawn"
-    elif "noon" in prompt_text:
-        result["time"] = "noon"
-
-    # --- Enemy count ---
-    match = re.search(r'(\d+)\s*enemies?', prompt_text)
-    if match:
-        result["enemy_count"] = int(match.group(1))
-
-    # --- Weapon / mechanic ---
-    if "dash" in prompt_text:
-        result["weapon"] = "dash"
-    elif "double jump" in prompt_text:
-        result["weapon"] = "double_jump"
-    elif "teleport" in prompt_text:
-        result["weapon"] = "teleport"
-
-    # --- Structures (optional, simple example) ---
-    structures = {}
-    for struct in ["tower", "castle", "house", "bridge"]:
-        match = re.search(r'(\d+)\s+' + struct + 's?', prompt_text)
-        if match:
-            structures[struct] = int(match.group(1))
-    result["structure"] = structures
-
-    return result
 
 def handle_live_command(
         command: str,

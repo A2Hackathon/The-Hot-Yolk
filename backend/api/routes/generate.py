@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict
 import random
-from voice.voice import parse_prompt
+from world.prompt_parser import parse_prompt
 from world.terrain import generate_heightmap, get_walkable_points
 from world.enemy_placer import place_enemies
 from world.lighting import get_lighting_preset, get_sky_color
@@ -16,8 +16,9 @@ async def generate_world(prompt: Dict) -> Dict:
         if not prompt_text:
             raise HTTPException(status_code=400, detail="No prompt provided")
 
-        # --- Parse prompt ---
+        print("[Backend] Received prompt:", prompt_text)
         parsed_params = parse_prompt(prompt_text)
+        print("[Backend] Parsed params:", parsed_params)
         biome = parsed_params.get("biome", "city")
         time_of_day = parsed_params.get("time", "noon")
         enemy_count = parsed_params.get("enemy_count", 5)
