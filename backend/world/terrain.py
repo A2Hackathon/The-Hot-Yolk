@@ -1,5 +1,5 @@
 import numpy as np
-from noise import snoise2  # Simplex noise
+from noise import snoise2
 from PIL import Image
 import random
 import os
@@ -13,53 +13,34 @@ BIOME_SETTINGS = {
 }
 
 GROUND_COLORS = {
-    "snow": (255, 255, 255),
+    "snow": (200, 220, 255),
     "street": (128, 128, 128),
     "grass": (34, 177, 76)
 }
 
-# Structure height multipliers 
+# Structure multipliers
 STRUCTURE_KEYWORDS = {
-    "mountain": 1.5,   # multiplier for extra height
-    "hill": 1.2,       # smaller elevation bump
-    "river": 0.5       # depress terrain
+    "mountain": 1.5,
+    "hill": 1.2,
+    "river": 0.5  # river depresses terrain
 }
 
-# Placement rules per biome
 PLACEMENT_RULES = {
-    "arctic": {
-        "min_height": 0.3,   # Avoid frozen lakes
-        "max_height": 1.2,   # Avoid mountain peaks
-        "max_slope": 0.25    # Gentler slopes (ice is slippery)
-    },
-    "city": {
-        "min_height": 0.2,   # Avoid rivers
-        "max_height": 0.8,   # Avoid tall buildings
-        "max_slope": 0.4     # Steeper slopes OK (stairs/ramps)
-    },
-    "default": {
-        "min_height": 0.2,
-        "max_height": 1.0,
-        "max_slope": 0.3
-    }
+    "arctic": {"min_height": 0.3, "max_height": 1.2, "max_slope": 0.25},
+    "city": {"min_height": 0.2, "max_height": 0.8, "max_slope": 0.4},
+    "default": {"min_height": 0.2, "max_height": 1.0, "max_slope": 0.3}
 }
 
+# ---------------- Helpers ----------------
 def get_biome_settings(biome_name, structure_count_dict=None):
-    """
-    Extract biome settings and return config
-    """
     settings = BIOME_SETTINGS.get(biome_name, BIOME_SETTINGS["default"])
     height_multiplier = settings["height_multiplier"]
-    ground_color_name = settings["ground_color"]
-    ground_rgb = GROUND_COLORS[ground_color_name]
-    
+    ground_rgb = GROUND_COLORS[settings["ground_color"]]
     if structure_count_dict is None:
         structure_count_dict = {}
-    
     return height_multiplier, ground_rgb, structure_count_dict
 
 def get_colour(ground_rgb):
-    """Map height to color with small variation"""
     r, g, b = ground_rgb
     r = max(0, min(255, r + random.randint(-5, 5)))
     g = max(0, min(255, g + random.randint(-5, 5)))
@@ -67,150 +48,117 @@ def get_colour(ground_rgb):
     return (r, g, b)
 
 def generate_placement_mask(heightmap, biome_name):
-    """
-    Generate improved placement mask with height and slope checks
-    0 = blocked (water, cliffs, peaks)
-    1 = walkable (safe for enemies and player)
-    """
-    height, width = heightmap.shape
-    placement_mask = np.zeros((height, width), dtype=np.uint8)
-    
-    # Get biome-specific rules
+    h, w = heightmap.shape
+    mask = np.zeros((h, w), dtype=np.uint8)
     rules = PLACEMENT_RULES.get(biome_name, PLACEMENT_RULES["default"])
-    min_h = rules["min_height"]
-    max_h = rules["max_height"]
-    max_slope = rules["max_slope"]
-    
-    # Check each cell (skip edges for slope calculation)
-    for y in range(1, height - 1):
-        for x in range(1, width - 1):
-            h = heightmap[y, x]
-            
-            # 1. Height range check
-            if h < min_h or h > max_h:
-                placement_mask[y, x] = 0
-                continue
-            
-            # 2. Slope check (compare with 4 cardinal neighbors)
-            neighbors = [
-                heightmap[y - 1, x],  # North
-                heightmap[y + 1, x],  # South
-                heightmap[y, x - 1],  # West
-                heightmap[y, x + 1]   # East
-            ]
-            
-            # Calculate maximum slope
-            slopes = [abs(h - n) for n in neighbors]
-            if max(slopes) > max_slope:
-                placement_mask[y, x] = 0  # Too steep
-            else:
-                placement_mask[y, x] = 1  # Walkable
-    
-    return placement_mask
+    min_h, max_h, max_slope = rules["min_height"], rules["max_height"], rules["max_slope"]
 
-def generate_heightmap_data(biome_name, structure_count_dict=None, width=128, height=128, scale=0.15):
-    """
-    Generate heightmap, colormap, and placement mask
-    """
+    for y in range(1, h-1):
+        for x in range(1, w-1):
+            val = heightmap[y, x]
+            if val < min_h or val > max_h:
+                mask[y, x] = 0
+                continue
+            neighbors = [heightmap[y-1,x], heightmap[y+1,x], heightmap[y,x-1], heightmap[y,x+1]]
+            slopes = [abs(val - n) for n in neighbors]
+            mask[y, x] = 1 if max(slopes) <= max_slope else 0
+    return mask
+
+# ---------------- Core Generation ----------------
+def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, height=256, scale=0.3):
     height_multiplier, ground_rgb, structure_count_dict = get_biome_settings(biome_name, structure_count_dict)
     heightmap = np.zeros((height, width))
 
-    # Base Simplex noise heightmap
+    # Base Simplex noise
     for y in range(height):
         for x in range(width):
-            nx = x / width
-            ny = y / height
-            value = snoise2(nx / scale, ny / scale, octaves=4)
-            normalized = (value + 1) / 2 * height_multiplier
-            heightmap[y, x] = normalized
+            nx, ny = x / width, y / height
+            val = snoise2(nx / scale, ny / scale, octaves=4)
+            heightmap[y, x] = (val + 1) / 2 * height_multiplier
 
-    # Apply structure multipliers
+    # Masks
+    river_mask = np.zeros((height, width), dtype=bool)
+    mountain_mask = np.zeros((height, width), dtype=bool)
+
+    # Apply structures
     for structure, count in structure_count_dict.items():
         multiplier = STRUCTURE_KEYWORDS.get(structure, 1.0)
-        radius = 5  # affect nearby pixels
+        radius = 5
         for _ in range(count):
-            cy = random.randint(0, height - 1)
-            cx = random.randint(0, width - 1)
-            for y in range(max(0, cy - radius), min(height, cy + radius + 1)):
-                for x in range(max(0, cx - radius), min(width, cx + radius + 1)):
-                    distance = ((y - cy)**2 + (x - cx)**2)**0.5
-                    factor = max(0, 1 - distance / radius)
-                    heightmap[y, x] *= 1 + factor * (multiplier - 1)
-                    heightmap[y, x] = min(heightmap[y, x], height_multiplier * multiplier)
+            cx, cy = random.randint(0, width-1), random.randint(0, height-1)
+            for y2 in range(max(0, cy-radius), min(height, cy+radius+1)):
+                for x2 in range(max(0, cx-radius), min(width, cx+radius+1)):
+                    dist = np.sqrt((y2-cy)**2 + (x2-cx)**2)
+                    factor = max(0, 1 - dist / radius)
 
-    # Generate colormap
+                    # River depression ensures river is low
+                    if structure == "river":
+                        heightmap[y2, x2] *= 1 - factor * 0.6
+                        river_mask[y2, x2] = True
+                    else:
+                        heightmap[y2, x2] *= 1 + factor * (multiplier - 1)
+                        heightmap[y2, x2] = min(heightmap[y2, x2], height_multiplier * multiplier)
+                        if structure == "mountain":
+                            mountain_mask[y2, x2] = True
+
+    # Placement mask
+    placement_mask = generate_placement_mask(heightmap, biome_name)
+
+    # Colour map
     colour_map_array = np.zeros((height, width, 3), dtype=np.uint8)
     for y in range(height):
         for x in range(width):
-            colour_map_array[y, x] = get_colour(ground_rgb)
+            if river_mask[y, x]:
+                colour_map_array[y, x] = (0, 120, 255)
+            elif mountain_mask[y, x]:
+                colour_map_array[y, x] = (120, 120, 120)
+            else:
+                colour_map_array[y, x] = get_colour(ground_rgb)
 
-    # Generate improved placement mask
-    placement_mask = generate_placement_mask(heightmap, biome_name)
-    
-    # Calculate walkable percentage for debugging
+    # Debug
     walkable_count = np.sum(placement_mask)
-    total_cells = placement_mask.size
-    walkable_percent = (walkable_count / total_cells) * 100
-    print(f"[Terrain] Walkable area: {walkable_percent:.1f}% ({walkable_count}/{total_cells} cells)")
+    print(f"[Terrain] Walkable area: {walkable_count / placement_mask.size * 100:.1f}%")
 
     return heightmap, colour_map_array, placement_mask
 
+# ---------------- Save and Export ----------------
 def generate_heightmap(biome_name, structures=None):
-    """
-    Generate and save heightmap PNG, return URLs and placement mask
-    """
     heightmap, colour_map_array, placement_mask = generate_heightmap_data(biome_name, structures)
-    
-    # Create assets directory if it doesn't exist
+
     os.makedirs("assets/heightmaps", exist_ok=True)
-    
-    # Save colormap as PNG (for texture)
+
     img = Image.fromarray(colour_map_array, "RGB")
     texture_filename = f"terrain_{uuid.uuid4().hex[:8]}.png"
     texture_filepath = f"assets/heightmaps/{texture_filename}"
     img.save(texture_filepath)
-    
-    # Save raw heightmap as grayscale (for Three.js displacement)
-    heightmap_normalized = ((heightmap - heightmap.min()) / (heightmap.max() - heightmap.min()) * 255).astype(np.uint8)
-    heightmap_img = Image.fromarray(heightmap_normalized, mode='L')
+
+    heightmap_norm = ((heightmap - heightmap.min()) / (heightmap.max() - heightmap.min()) * 255).astype(np.uint8)
+    heightmap_img = Image.fromarray(heightmap_norm, mode='L')
     heightmap_filename = f"heightmap_{uuid.uuid4().hex[:8]}.png"
     heightmap_filepath = f"assets/heightmaps/{heightmap_filename}"
     heightmap_img.save(heightmap_filepath)
-    
+
     return {
         "texture_url": f"/assets/heightmaps/{texture_filename}",
         "heightmap_url": f"/assets/heightmaps/{heightmap_filename}",
         "placement_mask": placement_mask.tolist(),
-        "heightmap_raw": heightmap.tolist()  # For enemy Y positioning
+        "heightmap_raw": heightmap.tolist(),
+        "colour_map_array": colour_map_array.tolist()
     }
 
 def save_heightmap_png(prompt_parser_response, filename="assets/heightmaps/terrain.png"):
-    """
-    Legacy function for backward compatibility
-    Accepts old format with biome as list
-    """
-    biome_name = prompt_parser_response["biome"][0] if isinstance(prompt_parser_response["biome"], list) else prompt_parser_response["biome"]
+    biome_name = prompt_parser_response.get("biome", "default")
     structure_count_dict = prompt_parser_response.get("structure", {})
-    
     _, colour_map_array, _ = generate_heightmap_data(biome_name, structure_count_dict)
-    img = Image.fromarray(colour_map_array, "RGB")
     os.makedirs(os.path.dirname(filename), exist_ok=True)
-    img.save(filename)
+    Image.fromarray(colour_map_array, "RGB").save(filename)
     print(f"Terrain saved as {filename}")
 
-
 def get_walkable_points(placement_mask, radius=1):
-    """
-    Returns ALL walkable (x, z) points away from edges.
-    """
-    height = len(placement_mask)
-    width = len(placement_mask[0])
+    h, w = len(placement_mask), len(placement_mask[0])
     points = []
-
-    for z in range(radius, height - radius):
-        for x in range(radius, width - radius):
+    for z in range(radius, h-radius):
+        for x in range(radius, w-radius):
             if placement_mask[z][x] == 1:
                 points.append((x, z))
-
     return points
-
