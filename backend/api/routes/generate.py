@@ -21,7 +21,7 @@ async def generate_world(prompt: Dict) -> Dict:
         biome = parsed_params.get("biome", "city")
         time_of_day = parsed_params.get("time", "noon")
         enemy_count = parsed_params.get("enemy_count", 5)
-        weapon = parsed_params.get("weapon", "dash")
+        weapon = parsed_params.get("weapon", "both")
         structure_counts = parsed_params.get("structure", {})
 
         # --- Generate terrain ---

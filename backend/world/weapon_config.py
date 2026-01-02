@@ -64,18 +64,19 @@ def get_combat_config(mechanic: str) -> Dict:
     Returns:
         Combat config dict
     """
+    mech = mechanic.lower()
     
-    if mechanic == "double_jump":
+    if mech == "double_jump":
         # Double jump = better at stomping enemies
         return COMBAT_CONFIGS["jump_only"].copy()
     
-    elif mechanic == "dash":
+    elif mech == "dash":
         # Dash = attack by dashing through enemies
         return COMBAT_CONFIGS["dash_only"].copy()
     
     else:
-        # Default to jump only
-        return COMBAT_CONFIGS["jump_only"].copy()
+        # Default to both 
+        return COMBAT_CONFIGS["both"].copy()
 
 def get_enemy_stats(enemy_type: str = "sentinel") -> Dict:
     return ENEMY_STATS.get(enemy_type, ENEMY_STATS["sentinel"]).copy()

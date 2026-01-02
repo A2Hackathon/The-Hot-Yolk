@@ -1,5 +1,6 @@
 
 from typing import Dict
+from .weapon_config import get_combat_config
 
 DEFAULT_PHYSICS = {
     "player": {
@@ -9,7 +10,7 @@ DEFAULT_PHYSICS = {
         "acceleration": 20.0,
     },
     "mechanic": {
-        "type": "double_jump",
+        "type": "both",  # default mechanic type
         "dash_speed": 10.0,
         "dash_duration": 0.3,
         "dash_cooldown": 2.0
@@ -26,59 +27,48 @@ PHYSICS_LIMITS = {
 def clamp(value: float, min_val: float, max_val: float) -> float:
     return max(min_val, min(max_val, value))
 
-def get_physics_config(mechanic: str = "double_jump") -> Dict:
+def get_physics_config(mechanic: str = "both") -> Dict:
     """
-    Get physics configuration for given mechanic
-    
-    Args:
-        mechanic: "double_jump", "dash", or "none"
-    
-    Returns:
-        Physics config dict
+    Returns a physics config for the given mechanic type.
     """
+    if mechanic not in ["dash", "double_jump", "both"]:
+        mechanic = "both"
+
     config = {
         "player": DEFAULT_PHYSICS["player"].copy(),
         "mechanic": DEFAULT_PHYSICS["mechanic"].copy()
     }
-    
-    # Set mechanic type
-    if mechanic in ["double_jump", "dash", "none"]:
-        config["mechanic"]["type"] = mechanic
-    else:
-        config["mechanic"]["type"] = "double_jump"
-    
-    # If no combat, disable dash
-    if mechanic == "none":
-        config["mechanic"]["dash_speed"] = 0
-        config["mechanic"]["dash_duration"] = 0
-    
+    config["mechanic"]["type"] = mechanic
     return config
 
-def get_combined_config(mechanic: str) -> Dict:
+
+def get_combined_config(mechanic: str = "both") -> Dict:
     """
-    Get both physics and combat config together
-    Ensures dash properties are consistent
-    
-    Args:
-        mechanic: "double_jump", "dash", or "none"
-    
-    Returns:
-        Combined dict with physics and combat
+    Returns combined physics + combat config.
+    Defaults to 'both' if mechanic is unknown or missing.
     """
-    from .weapon_config import get_combat_config
-    
-    physics = get_physics_config(mechanic)
-    combat = get_combat_config(mechanic)
-    
-    # Sync dash properties from physics to combat
-    if mechanic == "dash":
+    # Ensure mechanic is valid
+    if mechanic not in ["dash", "double_jump", "both"]:
+        effective_mechanic = "both"
+    else:
+        effective_mechanic = mechanic
+
+    # Physics config
+    physics = get_physics_config(effective_mechanic)
+
+    # Combat config
+    combat = get_combat_config(effective_mechanic)
+
+    # Sync dash properties if dash exists
+    if effective_mechanic in ["dash", "both"]:
         combat["dash_speed"] = physics["mechanic"]["dash_speed"]
         combat["dash_duration"] = physics["mechanic"]["dash_duration"]
-    
+
     return {
         "physics": physics,
         "combat": combat
     }
+
 
 def modify_physics(current_config: Dict, command: str) -> Dict:
     """Modify physics based on voice command"""
