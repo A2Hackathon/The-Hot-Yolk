@@ -17,17 +17,51 @@ def generate_trees(
     count: int = 30,
     terrain_size: float = 256.0
 ) -> List[Dict]:
-    """Generate tree positions"""
+    """Generate tree positions with biome-specific characteristics"""
     trees = []
     segments = len(heightmap_raw) - 1
     
+    # CRITICAL: Check if biome is winter/arctic/icy
+    biome_lower = biome.lower()
+    is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen"]
+    
+    print(f"[TREE DEBUG] Biome: '{biome}' | Is Winter: {is_winter}")
+    
     tree_config = {
-        "arctic": {"types": ["pine", "spruce"], "density": 0.5, "min_height": 0.3, "max_height": 1.0},
-        "city": {"types": ["oak", "maple"], "density": 0.3, "min_height": 0.2, "max_height": 0.7},
-        "default": {"types": ["oak", "pine", "birch"], "density": 1.0, "min_height": 0.2, "max_height": 0.9}
+        "arctic": {
+            "types": ["pine", "spruce"], 
+            "density": 0.7, 
+            "min_height": 0.3, 
+            "max_height": 1.0,
+            "scale_boost": 3.0,  # Larger trees in arctic
+            "leafless": True  # No leaves in winter/arctic
+        },
+        "city": {
+            "types": ["oak", "maple"], 
+            "density": 0.3, 
+            "min_height": 0.2, 
+            "max_height": 0.7,
+            "scale_boost": 2.0,
+            "leafless": False  # Normal trees with leaves
+        },
+        "default": {
+            "types": ["oak", "pine", "birch"], 
+            "density": 1.0, 
+            "min_height": 0.2, 
+            "max_height": 0.9,
+            "scale_boost": 1.5,
+            "leafless": False  # Normal trees with leaves
+        }
     }
     
-    config = tree_config.get(biome, tree_config["default"])
+    # Get config for this biome
+    config = tree_config.get(biome_lower, tree_config["default"]).copy()
+    
+    # OVERRIDE leafless based on winter check
+    config["leafless"] = is_winter
+    
+    print(f"[TREE DEBUG] Final config leafless: {config['leafless']}")
+    
     adjusted_count = int(count * config["density"])
     
     valid_points = []
@@ -39,6 +73,7 @@ def generate_trees(
                     valid_points.append((x, z))
     
     if not valid_points:
+        print("[TREE DEBUG] No valid points found!")
         return []
     
     random.shuffle(valid_points)
@@ -49,17 +84,24 @@ def generate_trees(
         world_y = heightmap_raw[z_idx][x_idx] * 10
         
         tree_type = random.choice(config["types"])
-        scale = random.uniform(0.8, 1.4)
+        scale = random.uniform(0.9, 1.5) * config["scale_boost"]
         rotation = random.uniform(0, math.pi * 2)
         
-        trees.append({
+        tree_data = {
             "type": tree_type,
+            "leafless": config["leafless"],  # This should be True for winter
             "position": {"x": float(world_x), "y": float(world_y), "z": float(world_z)},
             "scale": float(scale),
             "rotation": float(rotation)
-        })
+        }
+        
+        # Debug first tree
+        if i == 0:
+            print(f"[TREE DEBUG] First tree data: {tree_data}")
+        
+        trees.append(tree_data)
     
-    print(f"[Structures] Placed {len(trees)} trees")
+    print(f"[Structures] Placed {len(trees)} trees (leafless={config['leafless']}, biome={biome})")
     return trees
 
 def generate_rocks(
@@ -78,7 +120,7 @@ def generate_rocks(
         "default": {"types": ["boulder", "rock"], "density": 1.0, "min_height": 0.3}
     }
     
-    config = rock_config.get(biome, rock_config["default"])
+    config = rock_config.get(biome.lower(), rock_config["default"])
     adjusted_count = int(count * config["density"])
     
     valid_points = []
@@ -121,7 +163,8 @@ def generate_mountain_peaks(
     peaks = []
     segments = len(heightmap_raw) - 1
     
-    if biome not in ["arctic"]:
+    biome_lower = biome.lower()
+    if biome_lower not in ["arctic", "winter", "icy", "snow", "frozen"]:
         return []
     
     threshold = 1.0
@@ -170,14 +213,18 @@ async def generate_world(prompt: Dict) -> Dict:
         if not prompt_text:
             raise HTTPException(status_code=400, detail="No prompt provided")
 
+        print("\n" + "="*60)
         print("[Backend] Received prompt:", prompt_text)
         parsed_params = parse_prompt(prompt_text)
         print("[Backend] Parsed params:", parsed_params)
+        
         biome = parsed_params.get("biome", "city")
         time_of_day = parsed_params.get("time", "noon")
         enemy_count = parsed_params.get("enemy_count", 5)
         weapon = parsed_params.get("weapon", "both")
         structure_counts = parsed_params.get("structure", {})
+
+        print(f"[Backend] Final biome: '{biome}' | time: '{time_of_day}'")
 
         # --- Generate terrain ---
         terrain_data = generate_heightmap(biome, structure_counts)
@@ -185,10 +232,10 @@ async def generate_world(prompt: Dict) -> Dict:
         placement_mask = terrain_data["placement_mask"]
 
         # --- Generate 3D structures ---
-        base_tree_count = 40 if biome == "arctic" else 25 if biome == "city" else 50
+        base_tree_count = 40 if biome.lower() in ["arctic", "winter", "icy"] else 25 if biome.lower() == "city" else 50
         tree_count = structure_counts.get("tree", base_tree_count)
         
-        base_rock_count = 30 if biome == "arctic" else 10 if biome == "city" else 20
+        base_rock_count = 30 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
         rock_count = structure_counts.get("rock", base_rock_count)
         
         structures = {
@@ -223,9 +270,13 @@ async def generate_world(prompt: Dict) -> Dict:
         # --- Physics + combat config ---
         configs = get_combined_config(weapon)
 
-        # --- Lighting and sky ---
-        lighting_config = get_lighting_preset(time_of_day)
-        sky_colour = get_sky_color(time_of_day)
+        # --- Lighting and sky (now biome-aware) ---
+        lighting_config = get_lighting_preset(time_of_day, biome)
+        sky_colour = get_sky_color(time_of_day, biome)
+        
+        print(f"[Backend] Lighting config: {lighting_config}")
+        print(f"[Backend] Sky color: {sky_colour}")
+        print("="*60 + "\n")
 
         # --- Build response ---
         response = {
@@ -252,4 +303,7 @@ async def generate_world(prompt: Dict) -> Dict:
         return response
 
     except Exception as e:
+        print(f"[Backend ERROR] {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

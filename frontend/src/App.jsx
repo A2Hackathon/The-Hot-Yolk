@@ -237,6 +237,8 @@ const VoiceWorldBuilder = () => {
   };
 
   const createTree = (treeData) => {
+    console.log('[FRONTEND TREE DEBUG] Creating tree:', treeData);
+    
     const group = new THREE.Group();
     
     // Trunk
@@ -248,23 +250,32 @@ const VoiceWorldBuilder = () => {
     trunk.castShadow = true;
     group.add(trunk);
     
-    // Foliage
-    let foliage;
-    if (treeData.type === 'pine' || treeData.type === 'spruce') {
-      // Cone shape for pine/spruce
-      const coneGeometry = new THREE.ConeGeometry(1.5, 4, 8);
-      const coneMaterial = new THREE.MeshStandardMaterial({ color: 0x0d5c0d });
-      foliage = new THREE.Mesh(coneGeometry, coneMaterial);
-      foliage.position.y = 5;
+    // CRITICAL: Check leafless property
+    const shouldHaveLeaves = treeData.leafless !== true;
+    console.log(`[FRONTEND TREE DEBUG] leafless=${treeData.leafless}, shouldHaveLeaves=${shouldHaveLeaves}`);
+    
+    // Foliage (only if should have leaves)
+    if (shouldHaveLeaves) {
+      let foliage;
+      if (treeData.type === 'pine' || treeData.type === 'spruce') {
+        // Cone shape for pine/spruce
+        const coneGeometry = new THREE.ConeGeometry(1.5, 4, 8);
+        const coneMaterial = new THREE.MeshStandardMaterial({ color: 0x0d5c0d });
+        foliage = new THREE.Mesh(coneGeometry, coneMaterial);
+        foliage.position.y = 5;
+      } else {
+        // Sphere for oak/maple/birch
+        const sphereGeometry = new THREE.SphereGeometry(2, 8, 8);
+        const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+        foliage = new THREE.Mesh(sphereGeometry, sphereMaterial);
+        foliage.position.y = 4;
+      }
+      foliage.castShadow = true;
+      group.add(foliage);
+      console.log('[FRONTEND TREE DEBUG] Added foliage');
     } else {
-      // Sphere for oak/maple/birch
-      const sphereGeometry = new THREE.SphereGeometry(2, 8, 8);
-      const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22 });
-      foliage = new THREE.Mesh(sphereGeometry, sphereMaterial);
-      foliage.position.y = 4;
+      console.log('[FRONTEND TREE DEBUG] NO foliage - leafless tree!');
     }
-    foliage.castShadow = true;
-    group.add(foliage);
     
     group.position.set(treeData.position.x, treeData.position.y, treeData.position.z);
     group.scale.setScalar(treeData.scale);
@@ -362,7 +373,8 @@ const VoiceWorldBuilder = () => {
       });
       if (!res.ok) throw new Error(`API error: ${res.status}`);
       const data = await res.json();
-      console.log("API response:", data);
+      console.log("=== FRONTEND: Full API response ===");
+      console.log(JSON.stringify(data, null, 2));
 
       const scene = sceneRef.current;
       if (!scene) return;
@@ -378,6 +390,7 @@ const VoiceWorldBuilder = () => {
       structuresRef.current = [];
 
       if (data.world && data.world.lighting_config) {
+        console.log('[FRONTEND LIGHTING DEBUG] Applying lighting:', data.world.lighting_config);
         updateLighting(data.world.lighting_config);
       }
 
@@ -392,7 +405,10 @@ const VoiceWorldBuilder = () => {
       // Add structures (trees, rocks, peaks)
       if (data.structures) {
         if (data.structures.trees) {
-          data.structures.trees.forEach(treeData => {
+          console.log(`[FRONTEND] Creating ${data.structures.trees.length} trees...`);
+          console.log('[FRONTEND] First tree data:', data.structures.trees[0]);
+          
+          data.structures.trees.forEach((treeData, index) => {
             const tree = createTree(treeData);
             scene.add(tree);
             structuresRef.current.push(tree);
@@ -444,11 +460,16 @@ const VoiceWorldBuilder = () => {
   const updateLighting = (lightingConfig) => {
     const scene = sceneRef.current;
     if (!scene) return;
+    
+    console.log('[FRONTEND LIGHTING] Updating scene lighting...');
+    
     const ambientLight = scene.children.find(c => c.isAmbientLight);
     if (ambientLight) {
       ambientLight.color.setStyle(lightingConfig.ambient.color);
       ambientLight.intensity = lightingConfig.ambient.intensity;
+      console.log(`[FRONTEND LIGHTING] Ambient: ${lightingConfig.ambient.color} @ ${lightingConfig.ambient.intensity}`);
     }
+    
     const directionalLight = scene.children.find(c => c.isDirectionalLight);
     if (directionalLight) {
       directionalLight.color.setStyle(lightingConfig.directional.color);
@@ -458,11 +479,16 @@ const VoiceWorldBuilder = () => {
         lightingConfig.directional.position.y,
         lightingConfig.directional.position.z
       );
+      console.log(`[FRONTEND LIGHTING] Directional: ${lightingConfig.directional.color} @ ${lightingConfig.directional.intensity}`);
     }
+    
     scene.fog.color.setStyle(lightingConfig.fog.color);
     scene.fog.near = lightingConfig.fog.near;
     scene.fog.far = lightingConfig.fog.far;
+    console.log(`[FRONTEND LIGHTING] Fog: ${lightingConfig.fog.color} (${lightingConfig.fog.near}-${lightingConfig.fog.far})`);
+    
     scene.background = new THREE.Color(lightingConfig.background);
+    console.log(`[FRONTEND LIGHTING] Background: ${lightingConfig.background}`);
   };
 
   const startVoiceCapture = () => {
@@ -528,7 +554,7 @@ const VoiceWorldBuilder = () => {
           }}>Voice World Builder</h1>
           
           <p style={{ color: '#aaa', marginBottom: '30px', maxWidth: '600px' }}>
-            Try: "Arctic mountains with trees at sunset and 5 enemies"
+            Try: "Arctic mountains with trees" or "City with trees at sunset"
           </p>
 
           <button onClick={startVoiceCapture} disabled={isListening} style={{

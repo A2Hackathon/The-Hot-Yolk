@@ -1,19 +1,21 @@
 """
-Lighting configuration presets for different times of day
+Lighting configuration presets for different times of day and biomes
 Returns Three.js-compatible lighting parameters
 """
 
-def get_lighting_preset(time: str) -> dict:
+def get_lighting_preset(time: str, biome: str = "city") -> dict:
     """
-    Return lighting configuration for Three.js based on time of day
+    Return lighting configuration for Three.js based on time of day and biome
     
     Args:
         time: "noon", "sunset", or "night"
+        biome: "arctic", "city", etc.
     
     Returns:
         dict with ambient, directional, and fog settings
     """
     
+    # Base presets
     presets = {
         "noon": {
             "ambient": {
@@ -70,29 +72,55 @@ def get_lighting_preset(time: str) -> dict:
         }
     }
     
-    # Return preset or default to noon if invalid time
-    return presets.get(time, presets["noon"])
+    # Get base preset
+    config = presets.get(time, presets["noon"]).copy()
+    
+    # Apply biome-specific modifications for arctic/icy/winter environments
+    is_winter = biome.lower() in ["arctic", "winter", "icy"]
+    
+    if is_winter:
+        # Add blue fog tint for icy environments
+        if time == "noon":
+            config["fog"]["color"] = "#CCE5FF"  # Icy blue fog
+            config["background"] = "#CCE5FF"
+            config["ambient"]["color"] = "#E6F2FF"  # Slightly blue-tinted ambient
+        elif time == "sunset":
+            config["fog"]["color"] = "#B3D9FF"  # Cool sunset fog
+            config["background"] = "#B3D9FF"
+        elif time == "night":
+            config["fog"]["color"] = "#001133"  # Keep dark blue at night
+            config["background"] = "#001133"
+    
+    return config
 
 
-def get_sky_color(time: str) -> str:
+def get_sky_color(time: str, biome: str = "city") -> str:
     """
-    Get background/sky color for a given time
+    Get background/sky color for a given time and biome
     
     Args:
         time: "noon", "sunset", or "night"
+        biome: "arctic", "city", etc.
     
     Returns:
         Hex color string
     """
-    colors = {
-        "noon": "#87CEEB",    # Sky blue
-        "sunset": "#d9a066",  # Muted golden orange
-        "night": "#001133"    # Dark blue
-    }
+    if biome == "arctic":
+        colors = {
+            "noon": "#CCE5FF",    # Icy blue
+            "sunset": "#B3D9FF",  # Cool sunset
+            "night": "#001133"    # Dark blue
+        }
+    else:
+        colors = {
+            "noon": "#87CEEB",    # Sky blue
+            "sunset": "#d9a066",  # Muted golden orange
+            "night": "#001133"    # Dark blue
+        }
     return colors.get(time, colors["noon"])
 
 
-def interpolate_lighting(from_time: str, to_time: str, progress: float) -> dict:
+def interpolate_lighting(from_time: str, to_time: str, progress: float, biome: str = "city") -> dict:
     """
     Smoothly transition between two lighting presets
     Useful for live time-of-day changes
@@ -101,12 +129,13 @@ def interpolate_lighting(from_time: str, to_time: str, progress: float) -> dict:
         from_time: Starting time preset
         to_time: Target time preset
         progress: 0.0 to 1.0 (0 = from_time, 1 = to_time)
+        biome: Current biome for biome-specific lighting
     
     Returns:
         Interpolated lighting config
     """
-    from_preset = get_lighting_preset(from_time)
-    to_preset = get_lighting_preset(to_time)
+    from_preset = get_lighting_preset(from_time, biome)
+    to_preset = get_lighting_preset(to_time, biome)
     
     def lerp(a: float, b: float, t: float) -> float:
         """Linear interpolation"""
@@ -152,12 +181,10 @@ if __name__ == "__main__":
     
     print("=== Lighting Presets ===\n")
     
-    for time in ["noon", "sunset", "night"]:
-        preset = get_lighting_preset(time)
-        print(f"{time.upper()}:")
-        print(json.dumps(preset, indent=2))
-        print()
-    
-    print("\n=== Interpolation Test (Noon → Sunset at 50%) ===")
-    interpolated = interpolate_lighting("noon", "sunset", 0.5)
-    print(json.dumps(interpolated, indent=2))
+    for biome in ["city", "arctic"]:
+        print(f"\n--- {biome.upper()} ---")
+        for time in ["noon", "sunset", "night"]:
+            preset = get_lighting_preset(time, biome)
+            print(f"{time.upper()}:")
+            print(json.dumps(preset, indent=2))
+            print()
