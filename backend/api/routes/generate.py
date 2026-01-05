@@ -155,56 +155,148 @@ def generate_rocks(
     return rocks
 
 def generate_mountain_peaks(
-    heightmap_raw: List[List[float]],
-    biome: str,
-    terrain_size: float = 256.0
-) -> List[Dict]:
-    """Generate mountain peak markers on highest points"""
-    peaks = []
-    segments = len(heightmap_raw) - 1
-    
-    biome_lower = biome.lower()
-    if biome_lower not in ["arctic", "winter", "icy", "snow", "frozen"]:
+    heightmap_raw,
+    biome,
+    terrain_size=256.0,
+    max_peaks=3
+):
+    if biome.lower() not in ["arctic", "winter", "icy", "snow", "frozen"]:
         return []
-    
-    threshold = 1.0
-    peak_positions = []
-    
-    for z in range(10, segments - 10):
-        for x in range(10, segments - 10):
+
+    segments = len(heightmap_raw) - 1
+
+    # === MUST match frontend cone geometry ===
+    MOUNTAIN_RADIUS = 30.0
+    MIN_DISTANCE = MOUNTAIN_RADIUS * 2.6  # visual safety buffer
+
+    HEIGHT_THRESHOLD = 0.75
+    peaks = []
+    placed_positions = []
+
+    # --- Find candidate peak cells ---
+    candidates = []
+    for z in range(2, segments - 2):
+        for x in range(2, segments - 2):
             h = heightmap_raw[z][x]
-            if h < threshold:
+            if h < HEIGHT_THRESHOLD:
                 continue
-            
+
             is_peak = True
-            for dz in range(-5, 6):
-                for dx in range(-5, 6):
+            for dz in (-1, 0, 1):
+                for dx in (-1, 0, 1):
                     if dx == 0 and dz == 0:
                         continue
-                    neighbor_h = heightmap_raw[z + dz][x + dx]
-                    if neighbor_h >= h:
+                    if heightmap_raw[z + dz][x + dx] > h + 0.02:
                         is_peak = False
                         break
                 if not is_peak:
                     break
-            
+
             if is_peak:
-                peak_positions.append((x, z, h))
-    
-    for x_idx, z_idx, height in peak_positions[:8]:
+                candidates.append((x, z, h))
+
+    if not candidates:
+        print("[PEAK DEBUG] No peak candidates found")
+        return []
+
+    # --- Place peaks by spatial separation only ---
+    for x_idx, z_idx, h in candidates:
         world_x = (x_idx / segments) * terrain_size - terrain_size / 2
         world_z = (z_idx / segments) * terrain_size - terrain_size / 2
-        world_y = height * 10
-        
+
+        too_close = False
+        for px, pz in placed_positions:
+            dx = world_x - px
+            dz = world_z - pz
+            if dx * dx + dz * dz < MIN_DISTANCE * MIN_DISTANCE:
+                too_close = True
+                break
+
+        if too_close:
+            continue
+
         peaks.append({
             "type": "peak",
-            "position": {"x": float(world_x), "y": float(world_y), "z": float(world_z)},
-            "height": float(height),
-            "scale": 1.5
+            "position": {
+                "x": float(world_x),
+                "y": float(h * 10),
+                "z": float(world_z)
+            },
+            "scale": 1.0
         })
-    
-    print(f"[Structures] Placed {len(peaks)} mountain peaks")
+
+        placed_positions.append((world_x, world_z))
+
+        if len(peaks) >= max_peaks:
+            break
+
+    print(f"[Structures] Placed {len(peaks)} mountain peaks (radius-based)")
     return peaks
+
+
+def place_trees_on_terrain(
+    heightmap_raw, 
+    placement_mask, 
+    biome: str, 
+    tree_count: int = 40, 
+    terrain_size: float = 256.0
+) -> list:
+    """
+    Generate trees using walkable points, independent of placed_tree_positions.
+    Ensures trees appear even on flat arctic terrain.
+    """
+    segments = len(heightmap_raw) - 1
+    trees = []
+
+    biome_lower = biome.lower()
+    is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen"]
+
+    tree_types = {
+        "arctic": ["pine", "spruce"],
+        "city": ["oak", "maple"],
+        "default": ["oak", "pine", "birch"]
+    }
+    types_for_biome = tree_types.get(biome_lower, tree_types["default"])
+
+    # --- Gather all walkable points within placement_mask ---
+    valid_points = []
+    for z in range(1, segments-1):
+        for x in range(1, segments-1):
+            if placement_mask[z][x] == 1:
+                h = heightmap_raw[z][x]
+                # Arctic allows flat terrain
+                min_h = 0.0 if is_winter else 0.2
+                max_h = 1.5 if is_winter else 1.0
+                if min_h <= h <= max_h:
+                    valid_points.append((x, z))
+
+    if not valid_points:
+        print("[TREE DEBUG] No valid points found for trees!")
+        return []
+
+    random.shuffle(valid_points)
+    trees_to_place = min(tree_count, len(valid_points))
+
+    for i in range(trees_to_place):
+        x_idx, z_idx = valid_points[i]
+        world_x = (x_idx / segments) * terrain_size - terrain_size / 2
+        world_z = (z_idx / segments) * terrain_size - terrain_size / 2
+        world_y = heightmap_raw[z_idx][x_idx] * 10
+
+        tree_type = random.choice(types_for_biome)
+        scale = random.uniform(0.9, 1.5) * (3.0 if is_winter else 1.5)
+        rotation = random.uniform(0, math.pi * 2)
+
+        trees.append({
+            "type": tree_type,
+            "leafless": is_winter,
+            "position": {"x": float(world_x), "y": float(world_y), "z": float(world_z)},
+            "scale": float(scale),
+            "rotation": float(rotation)
+        })
+
+    print(f"[TREE DEBUG] Placed {len(trees)} trees (biome={biome}, leafless={is_winter})")
+    return trees
 
 @router.post("/generate-world")
 async def generate_world(prompt: Dict) -> Dict:
@@ -234,14 +326,21 @@ async def generate_world(prompt: Dict) -> Dict:
         # --- Generate 3D structures ---
         base_tree_count = 40 if biome.lower() in ["arctic", "winter", "icy"] else 25 if biome.lower() == "city" else 50
         tree_count = structure_counts.get("tree", base_tree_count)
-        
+
         base_rock_count = 30 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
         rock_count = structure_counts.get("rock", base_rock_count)
-        
+        terrain_size = 256
+
         structures = {
-            "trees": generate_trees(heightmap_raw, placement_mask, biome, tree_count, 256.0),
-            "rocks": generate_rocks(heightmap_raw, biome, rock_count, 256.0),
-            "peaks": generate_mountain_peaks(heightmap_raw, biome, 256.0)
+            "trees": place_trees_on_terrain(
+                heightmap_raw=heightmap_raw,
+                placement_mask=placement_mask,
+                biome=biome,
+                tree_count=tree_count,
+                terrain_size=terrain_size
+            ),
+            "rocks": generate_rocks(heightmap_raw, biome, rock_count, terrain_size),
+            "peaks": generate_mountain_peaks(heightmap_raw, biome, terrain_size)
         }
 
         # --- Determine player spawn on a walkable point ---
@@ -250,7 +349,6 @@ async def generate_world(prompt: Dict) -> Dict:
             raise HTTPException(status_code=500, detail="No valid player spawn points")
 
         spawn_idx_x, spawn_idx_z = random.choice(walkable_points)
-        terrain_size = 256
         segments = len(heightmap_raw) - 1
 
         spawn_x = (spawn_idx_x / segments) * terrain_size - terrain_size / 2

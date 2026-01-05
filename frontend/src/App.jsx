@@ -41,31 +41,46 @@ const VoiceWorldBuilder = () => {
     dashCooldown: 0,
   });
 
-  const cameraOffset = useRef({ distance: 20, height: 12, angle: 0 });
+  const cameraOffset = useRef({
+    distance: 20,  // distance from player
+    height: 12,    // base height above player
+    angle: 0,      // horizontal rotation (yaw)
+    pitch: 0       // vertical rotation (pitch)
+  });
+
   const pressedKeys = useRef(new Set());
 
   useEffect(() => {
     if (!containerRef.current) return;
 
+    // --- Scene Lighting & Shadows Setup ---
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x87CEEB, 50, 400);
     sceneRef.current = scene;
+    scene.background = new THREE.Color(0x87CEEB); // light sky-blue for arctic
 
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 20, 40);
-    cameraRef.current = camera;
+    // Instead of ShadowMaterial
+    const planeMaterial = new THREE.MeshStandardMaterial({
+      color: 0xA5BDF5,    // your icy purple
+      roughness: 0.8,
+      metalness: 0.1,
+    });
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    containerRef.current.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
+    // Keep the plane large
+    const shadowPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(1000, 1000),
+      planeMaterial
+    );
+    shadowPlane.rotation.x = -Math.PI / 2;
+    shadowPlane.position.y = 0;
+    shadowPlane.receiveShadow = true;
+    scene.add(shadowPlane);
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    // --- Ambient Light (faint purple fill) ---
+    const ambientLight = new THREE.AmbientLight(0xA5BDF5, 0.25);
     scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    // --- Directional Light (sun / main shadow caster) ---
+    const directionalLight = new THREE.DirectionalLight(0xaaaaff, 1.0);
     directionalLight.position.set(100, 150, 100);
     directionalLight.castShadow = true;
     directionalLight.shadow.mapSize.width = 2048;
@@ -76,6 +91,24 @@ const VoiceWorldBuilder = () => {
     directionalLight.shadow.camera.bottom = -150;
     directionalLight.shadow.camera.far = 500;
     scene.add(directionalLight);
+
+    // --- Renderer setup ---
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap; // smooth shadows
+    containerRef.current.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
+
+    const camera = new THREE.PerspectiveCamera(
+      60,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    );
+    camera.position.set(0, 10, 20);
+    cameraRef.current = camera;
+    scene.add(camera); // optional, not strictly needed
 
     const handleKeyDown = (e) => {
       pressedKeys.current.add(e.key.toLowerCase());
@@ -103,39 +136,72 @@ const VoiceWorldBuilder = () => {
     window.addEventListener('keyup', handleKeyUp);
 
     const animate = () => {
+      updateEnemyHealthBars();
       animationIdRef.current = requestAnimationFrame(animate);
       const player = playerRef.current;
       const cam = cameraRef.current;
       
       if (player && cam) {
+        // Get camera direction
+        const camDir = new THREE.Vector3();
+        cam.getWorldDirection(camDir);
+        camDir.y = 0; // ignore vertical component
+        camDir.normalize();
+
+
+        const targetYaw = Math.atan2(camDir.x, camDir.z);
+
+        // Smooth interpolation: 0.1 = speed of rotation
+        player.rotation.y += ((targetYaw - player.rotation.y + Math.PI) % (2 * Math.PI) - Math.PI) * 0.1;
+
+
         const moveSpeed = 0.3;
         const dashSpeed = 1.2;
         const gravity = -0.018;
 
         if (pressedKeys.current.has('arrowleft')) cameraOffset.current.angle += 0.04;
         if (pressedKeys.current.has('arrowright')) cameraOffset.current.angle -= 0.04;
+        // Inside handleKeyDown / handleKeyUp logic
+        if (pressedKeys.current.has('arrowup')) cameraOffset.current.pitch += 0.02;
+        if (pressedKeys.current.has('arrowdown')) cameraOffset.current.pitch -= 0.02;
+
+        // Clamp pitch so camera can't flip
+        cameraOffset.current.pitch = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, cameraOffset.current.pitch));
+
 
         let moveVector = new THREE.Vector3();
         if (pressedKeys.current.has('w')) moveVector.z += 1;
         if (pressedKeys.current.has('s')) moveVector.z -= 1;
-        if (pressedKeys.current.has('a')) moveVector.x += 1;
-        if (pressedKeys.current.has('d')) moveVector.x -= 1;
+        if (pressedKeys.current.has('a')) moveVector.x -= 1; // <-- flip
+        if (pressedKeys.current.has('d')) moveVector.x += 1; // <-- flip
 
-        if (moveVector.length() > 0) {
+        if (moveVector.length() > 0 && player) {
           moveVector.normalize();
-          const camDir = new THREE.Vector3();
-          cam.getWorldDirection(camDir);
-          camDir.y = 0;
-          camDir.normalize();
+          const speed = playerState.current.isDashing ? dashSpeed : moveSpeed;
+
+          const camForward = new THREE.Vector3();
+          cameraRef.current.getWorldDirection(camForward);
+          camForward.y = 0;
+          camForward.normalize();
+
           const camRight = new THREE.Vector3();
-          camRight.crossVectors(new THREE.Vector3(0, 1, 0), camDir).normalize();
-          const dx = camDir.x * moveVector.z + camRight.x * moveVector.x;
-          const dz = camDir.z * moveVector.z + camRight.z * moveVector.x;
-          let speed = moveSpeed;
-          if (playerState.current.isDashing) speed = dashSpeed;
-          player.position.x += dx * speed;
-          player.position.z += dz * speed;
+          camRight.crossVectors(new THREE.Vector3(0, 1, 0), camForward).normalize();
+
+          const moveDir = new THREE.Vector3();
+          moveDir.addScaledVector(camForward, moveVector.z);
+          moveDir.addScaledVector(camRight, moveVector.x);
+          moveDir.normalize();
+
+          // Move player
+          player.position.addScaledVector(moveDir, speed);
+
+          // Roll egg
+          const egg = player.children[0];
+          const rollAxis = new THREE.Vector3(-moveDir.z, 0, moveDir.x); 
+          egg.rotateOnWorldAxis(rollAxis, speed * 0.15);
         }
+
+
 
         if (playerState.current.isDashing) {
           playerState.current.dashTime -= 0.016;
@@ -161,12 +227,28 @@ const VoiceWorldBuilder = () => {
 
         player.position.y = newY;
 
-        const { distance, height, angle } = cameraOffset.current;
-        const targetX = player.position.x - Math.sin(angle) * distance;
-        const targetZ = player.position.z - Math.cos(angle) * distance;
-        const targetY = player.position.y + height;
-        cam.position.lerp(new THREE.Vector3(targetX, targetY, targetZ), 0.1);
-        cam.lookAt(player.position);
+        const { distance, height, angle, pitch } = cameraOffset.current;
+
+        // Calculate horizontal circle around player
+        const offsetX = -Math.sin(angle) * distance;
+        const offsetZ = -Math.cos(angle) * distance;
+
+        // Vertical offset influenced by pitch
+        const offsetY = height + Math.sin(pitch) * distance;
+
+        // Target camera position
+        const targetPos = new THREE.Vector3(
+          player.position.x + offsetX,
+          player.position.y + offsetY,
+          player.position.z + offsetZ
+        );
+
+        // Smoothly move camera
+        cam.position.lerp(targetPos, 0.1);
+
+        // Look at player with a slight vertical adjustment based on pitch
+        const lookAtY = player.position.y + Math.sin(pitch) * 2; // tweak multiplier for natural feel
+        cam.lookAt(player.position.x, lookAtY, player.position.z);
 
         enemiesRef.current.forEach((enemy) => {
           if (!enemy.userData || enemy.userData.health <= 0) return;
@@ -189,6 +271,15 @@ const VoiceWorldBuilder = () => {
             }
           }
         });
+
+        enemiesRef.current = enemiesRef.current.filter(enemy => {
+        if (!enemy.userData || enemy.userData.health <= 0) {
+          if (sceneRef.current) sceneRef.current.remove(enemy);
+          return false;
+        }
+        return true;
+        });
+        setEnemyCount(enemiesRef.current.length);
       }
       rendererRef.current.render(sceneRef.current, cameraRef.current);
     };
@@ -229,7 +320,7 @@ const VoiceWorldBuilder = () => {
     }
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
-    const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.1 });
+    const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.05 });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.receiveShadow = true;
     mesh.castShadow = true;
@@ -238,51 +329,119 @@ const VoiceWorldBuilder = () => {
 
   const createTree = (treeData) => {
     console.log('[FRONTEND TREE DEBUG] Creating tree:', treeData);
-    
+
     const group = new THREE.Group();
-    
-    // Trunk
-    const trunkGeometry = new THREE.CylinderGeometry(0.3, 0.4, 3, 8);
-    const trunkColor = treeData.type === 'pine' || treeData.type === 'spruce' ? 0x654321 : 0x8B4513;
-    const trunkMaterial = new THREE.MeshStandardMaterial({ color: trunkColor });
-    const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
-    trunk.position.y = 1.5;
-    trunk.castShadow = true;
-    group.add(trunk);
-    
-    // CRITICAL: Check leafless property
-    const shouldHaveLeaves = treeData.leafless !== true;
-    console.log(`[FRONTEND TREE DEBUG] leafless=${treeData.leafless}, shouldHaveLeaves=${shouldHaveLeaves}`);
-    
-    // Foliage (only if should have leaves)
-    if (shouldHaveLeaves) {
-      let foliage;
-      if (treeData.type === 'pine' || treeData.type === 'spruce') {
-        // Cone shape for pine/spruce
-        const coneGeometry = new THREE.ConeGeometry(1.5, 4, 8);
-        const coneMaterial = new THREE.MeshStandardMaterial({ color: 0x0d5c0d });
-        foliage = new THREE.Mesh(coneGeometry, coneMaterial);
-        foliage.position.y = 5;
-      } else {
-        // Sphere for oak/maple/birch
-        const sphereGeometry = new THREE.SphereGeometry(2, 8, 8);
-        const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22 });
-        foliage = new THREE.Mesh(sphereGeometry, sphereMaterial);
-        foliage.position.y = 4;
+
+  // --- Trunk (Minecraft-style blocky) ---
+  const trunkHeight = 3 * treeData.scale;
+  const trunkRadius = 0.4 * treeData.scale;
+
+  const blockHeight = 0.5 * treeData.scale;
+  const blockCount = Math.floor(trunkHeight / blockHeight);
+
+  const trunkMaterial = new THREE.MeshStandardMaterial({
+    color: 0x654321,
+    roughness: 1.0,
+    metalness: 0.0,
+    flatShading: true
+  });
+
+  for (let i = 0; i < blockCount; i++) {
+    const jitter = (Math.random() - 0.5) * 0.08 * treeData.scale;
+
+    const block = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        trunkRadius * 2 + jitter,
+        blockHeight,
+        trunkRadius * 2 + jitter
+      ),
+      trunkMaterial
+    );
+
+    block.position.y = i * blockHeight + blockHeight / 2;
+    block.castShadow = true;
+    group.add(block);
+  }
+
+
+    // --- Foliage ---
+    if (treeData.leafless) {
+      // Arctic biome: pyramid-style leaves
+
+      if (treeData.leafless) {
+        // Arctic biome: pyramid-style leaves
+        const leafCount = 4;
+        const leafWidth = 3 * treeData.scale;
+        const leafHeight = 1.5 * treeData.scale;
+
+        for (let i = 0; i < leafCount; i++) {
+          const w = leafWidth - i * 0.6 * treeData.scale; // taper each layer
+          const h = leafHeight;
+
+          // Geometry
+          const geometry = new THREE.BoxGeometry(w, h, w);
+
+          // Vertex colors: bottom half green, top half white
+          const colorAttr = [];
+          const green = new THREE.Color(0x4BBB6D);
+          const white = new THREE.Color(0xffffff);
+
+          for (let v = 0; v < geometry.attributes.position.count; v++) {
+            const y = geometry.attributes.position.getY(v);
+            const t = (y + h/2) / h; // normalize y from 0 (bottom) to 1 (top)
+            if (t < 0.5) {
+              colorAttr.push(green.r, green.g, green.b);
+            } else {
+              colorAttr.push(white.r, white.g, white.b);
+            }
+          }
+          geometry.setAttribute('color', new THREE.Float32BufferAttribute(colorAttr, 3));
+
+          const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+          const leaf = new THREE.Mesh(geometry, material);
+          leaf.position.y = trunkHeight + i * leafHeight + leafHeight / 2;
+          leaf.castShadow = true;
+          group.add(leaf);
+        }
       }
-      foliage.castShadow = true;
-      group.add(foliage);
-      console.log('[FRONTEND TREE DEBUG] Added foliage');
     } else {
-      console.log('[FRONTEND TREE DEBUG] NO foliage - leafless tree!');
+      // --- Foliage for non-leafless trees (fully green Christmas tree style) ---
+      const leafCount = 5; // number of stacked layers
+      const leafWidth = 4 * treeData.scale;
+      const leafHeight = 1.2 * treeData.scale;
+
+      for (let i = 0; i < leafCount; i++) {
+        const w = leafWidth - i * 0.7 * treeData.scale; // taper each layer
+        const h = leafHeight;
+
+        const geometry = new THREE.BoxGeometry(w, h, w);
+
+        // Fully green for all vertices
+        const colorAttr = [];
+        const green = new THREE.Color(0x0d5c0d);
+        for (let v = 0; v < geometry.attributes.position.count; v++) {
+          colorAttr.push(green.r, green.g, green.b);
+        }
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colorAttr, 3));
+
+        const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+        const leaf = new THREE.Mesh(geometry, material);
+        leaf.position.y = trunkHeight + i * leafHeight + leafHeight / 2;
+        leaf.castShadow = true;
+        group.add(leaf);
+      }
+
+
     }
-    
+
+    // --- Position, scale, rotation ---
     group.position.set(treeData.position.x, treeData.position.y, treeData.position.z);
     group.scale.setScalar(treeData.scale);
-    group.rotation.y = treeData.rotation;
-    
+    group.rotation.y = treeData.rotation || 0;
+
     return group;
   };
+
 
   const createRock = (rockData) => {
     const geometry = new THREE.DodecahedronGeometry(1, 0);
@@ -305,62 +464,179 @@ const VoiceWorldBuilder = () => {
   };
 
   const createMountainPeak = (peakData) => {
-    const geometry = new THREE.ConeGeometry(3, 8, 6);
+    const geometry = new THREE.ConeGeometry(100, 100, 4);
     const material = new THREE.MeshStandardMaterial({ 
       color: 0xF0F0F0,
       emissive: 0x888888,
       emissiveIntensity: 0.2
     });
     const peak = new THREE.Mesh(geometry, material);
-    peak.position.set(peakData.position.x, peakData.position.y + 4, peakData.position.z);
+    peak.position.set(peakData.position.x, peakData.position.y + 50, peakData.position.z);
     peak.scale.setScalar(peakData.scale);
+    peak.rotation.y = Math.random() * Math.PI * 2; // break symmetry
     peak.castShadow = true;
     return peak;
   };
+    
+  const getHeightAt = (x, z) => {
+    if (!heightmapRef.current) return 0; // default flat ground
+    const hm = heightmapRef.current;
+    const size = hm.length;
+    
+    // Map world coordinates to heightmap indices
+    const terrainSize = 256; // should match your PlaneGeometry size
+    const halfSize = terrainSize / 2;
+
+    const col = Math.floor(((x + halfSize) / terrainSize) * (size - 1));
+    const row = Math.floor(((z + halfSize) / terrainSize) * (size - 1));
+
+    // Clamp indices
+    const r = Math.max(0, Math.min(size - 1, row));
+    const c = Math.max(0, Math.min(size - 1, col));
+
+    return hm[r][c] * 10; // multiply by terrain height scale (same as createTerrain)
+  };
+
 
   const createPlayer = (spawn) => {
-    const geometry = new THREE.CylinderGeometry(1, 1, 4, 16);
-    const material = new THREE.MeshStandardMaterial({ 
-      color: 0x4444ff,
-      emissive: 0x2222aa,
-      emissiveIntensity: 0.3
+    const group = new THREE.Group();
+    const yOffset = getHeightAt(spawn.x, spawn.z);
+
+    // --- Egg body (horizontal ellipsoid) ---
+    const geometry = new THREE.SphereGeometry(1, 32, 32);
+    geometry.scale(1, 1, 1.4); // elongated along Z-axis for horizontal egg
+    const material = new THREE.MeshStandardMaterial({ color: 0xffffdd, roughness: 0.5, metalness: 0.1 });
+    const egg = new THREE.Mesh(geometry, material);
+    egg.castShadow = true;
+    egg.receiveShadow = true;
+
+    // Rotate so egg lies horizontally along Z
+    egg.rotation.x = Math.PI / 2;
+
+    group.add(egg);
+
+    // --- Position in world ---
+    group.position.set(spawn.x, yOffset + 1, spawn.z); // half height offset
+
+    return group;
+  };
+
+
+  const createEnemies = (position, id) => {
+    const group = new THREE.Group();
+
+    // --- Body ---
+    const bodyGeom = new THREE.BoxGeometry(2, 2, 2);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const body = new THREE.Mesh(bodyGeom, bodyMat);
+    body.position.y = 1; // half height
+    body.castShadow = true;
+    group.add(body);
+
+    // --- Head ---
+    const headGeom = new THREE.BoxGeometry(1.2, 1.2, 1.2); // slightly smaller
+    const headMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const head = new THREE.Mesh(headGeom, headMat);
+    head.position.set(0, 2.5, 0.2); // slightly forward
+    group.add(head);
+
+    // --- Beak ---
+    const beakGeom = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+    const beakMat = new THREE.MeshStandardMaterial({ color: 0xffa500 }); // orange
+    const beak = new THREE.Mesh(beakGeom, beakMat);
+    beak.position.set(0, 2.5, 0.9); // in front of head
+    group.add(beak);
+
+    // --- Comb ---
+    const combGeom = new THREE.BoxGeometry(0.4, 0.4, 0.2);
+    const combMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+    const comb = new THREE.Mesh(combGeom, combMat);
+    comb.position.set(0, 3.1, 0.0); // top of head
+    group.add(comb);
+
+    // --- Feet ---
+    const footGeom = new THREE.BoxGeometry(0.3, 0.7, 0.3); // taller
+    const footMat = new THREE.MeshStandardMaterial({ color: 0xffa500 });
+    const leftFoot = new THREE.Mesh(footGeom, footMat);
+    leftFoot.position.set(-0.5, 0.35, 0.3); // slightly forward
+    const rightFoot = new THREE.Mesh(footGeom, footMat);
+    rightFoot.position.set(0.5, 0.35, 0.3);
+    group.add(leftFoot, rightFoot);
+
+    // --- Health bar ---
+    const healthBarBgGeom = new THREE.BoxGeometry(2.5, 0.2, 0.3);
+    const healthBarBgMat = new THREE.MeshBasicMaterial({ color: 0x444444 });
+    const healthBarBg = new THREE.Mesh(healthBarBgGeom, healthBarBgMat);
+    healthBarBg.position.set(0, 3.5, 0);
+    group.add(healthBarBg);
+
+    const healthBarGeom = new THREE.BoxGeometry(2.5, 0.2, 0.3);
+    const healthBarMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+    const healthBar = new THREE.Mesh(healthBarGeom, healthBarMat);
+    healthBar.position.set(0, 0, 0.01); // in front of bg
+    healthBarBg.add(healthBar);
+
+    group.userData = { health: 3, maxHealth: 3, id, healthBar };
+
+    // --- Position in world ---
+    group.position.set(position.x, getHeightAt(position.x, position.z), position.z);
+
+    return group;
+  };
+
+
+
+  const updateEnemyHealthBars = () => {
+    const cam = cameraRef.current;
+    if (!cam) return;
+
+    enemiesRef.current.forEach((enemy) => {
+      if (!enemy.userData || !enemy.userData.healthBar) return;
+
+      const { health, maxHealth, healthBar } = enemy.userData;
+      const scale = Math.max(0, health / maxHealth);
+      healthBar.scale.x = scale;
+      healthBar.position.x = -(3 * (1 - scale)) / 2;
+
+      // Color based on health
+      if (scale > 0.5) healthBar.material.color.set(0x00ff00);
+      else if (scale > 0.25) healthBar.material.color.set(0xffff00);
+      else healthBar.material.color.set(0xff0000);
+
+      // Make health bar face camera
+      const worldPos = new THREE.Vector3();
+      healthBar.getWorldPosition(worldPos);
+      healthBar.lookAt(cam.position.x, worldPos.y, cam.position.z);
     });
-    const player = new THREE.Mesh(geometry, material);
-    const y = getHeightAt(spawn.x, spawn.z) + 2;
-    player.position.set(spawn.x, y, spawn.z);
-    player.castShadow = true;
-    return player;
   };
 
-  const getHeightAt = (x, z, size = 256) => {
-    if (!heightmapRef.current) return 0;
-    const map = heightmapRef.current;
-    const segments = map.length - 1;
-    const halfSize = size / 2;
-    const nx = (x + halfSize) / size;
-    const nz = (z + halfSize) / size;
-    const ix = Math.max(0, Math.min(Math.floor(nx * segments), segments));
-    const iz = Math.max(0, Math.min(Math.floor(nz * segments), segments));
-    return map[iz][ix] * 10;
-  };
+  // --- Add simple rectangular clouds ---
+  const createCloud = (x, y, z, scale = 1) => {
+    const cloudGroup = new THREE.Group();
+    const boxCount = 3 + Math.floor(Math.random() * 3); // 3-5 boxes per cloud
+    for (let i = 0; i < boxCount; i++) {
+      const width = 5 * scale + Math.random() * 5 * scale;
+      const height = 2 * scale + Math.random() * 2 * scale;
+      const depth = 3 * scale + Math.random() * 3 * scale;
 
-  const createEnemies = (list) => {
-    return list.map((e) => {
-      const geometry = new THREE.BoxGeometry(2, 4, 2);
-      const material = new THREE.MeshStandardMaterial({ 
-        color: 0xff2222,
-        emissive: 0x990000,
-        emissiveIntensity: 0.4
+      const geometry = new THREE.BoxGeometry(width, height, depth);
+      const material = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.8,
+        metalness: 0.1,
       });
-      const enemy = new THREE.Mesh(geometry, material);
-      const worldX = e.position.x;
-      const worldZ = e.position.z;
-      const worldY = getHeightAt(worldX, worldZ) + 2;
-      enemy.position.set(worldX, worldY, worldZ);
-      enemy.castShadow = true;
-      enemy.userData = { health: 3, maxHealth: 3, id: e.id };
-      return enemy;
-    });
+
+      const box = new THREE.Mesh(geometry, material);
+      box.position.set(
+        (Math.random() - 0.5) * 10 * scale,
+        (Math.random() - 0.5) * 4 * scale,          
+        (Math.random() - 0.5) * 5 * scale
+      );
+      box.castShadow = true;
+      cloudGroup.add(box);
+    }
+    cloudGroup.position.set(x, y, z);
+    return cloudGroup;
   };
 
   const generateWorld = async (promptText) => {
@@ -415,7 +691,18 @@ const VoiceWorldBuilder = () => {
           });
           console.log(`✓ Added ${data.structures.trees.length} trees`);
         }
-        
+
+        // Create multiple clouds
+        const cloudCount = 30;
+        for (let i = 0; i < cloudCount; i++) {
+          const x = (Math.random() - 0.5) * 500;
+          const y = 40 + Math.random() * 90;
+          const z = (Math.random() - 0.5) * 500;
+          const scale = 3 + Math.random() * 0.5;
+          const cloud = createCloud(x, y, z, scale);
+          scene.add(cloud);
+        }
+
         if (data.structures.rocks) {
           data.structures.rocks.forEach(rockData => {
             const rock = createRock(rockData);
@@ -440,15 +727,23 @@ const VoiceWorldBuilder = () => {
       playerRef.current = playerMesh;
       scene.add(playerMesh);
 
-      if (data.combat && data.combat.enemies && data.combat.enemies.length > 0) {
-        enemiesRef.current = createEnemies(data.combat.enemies);
-        enemiesRef.current.forEach((e) => scene.add(e));
-        setEnemyCount(enemiesRef.current.length);
-      } else {
-        enemiesRef.current = [];
-        setEnemyCount(0);
-      }
+      if (data.combat && data.combat.enemies) {
+        enemiesRef.current = data.combat.enemies.map((enemyData, idx) => {
+          // Ensure position exists
+          if (!enemyData.position) enemyData.position = { x: 0, z: 0 };
+          if (typeof enemyData.position.x !== 'number') enemyData.position.x = 0;
+          if (typeof enemyData.position.z !== 'number') enemyData.position.z = 0;
 
+          const terrainHalf = 128;
+          enemyData.position.x = Math.max(-terrainHalf, Math.min(terrainHalf, enemyData.position.x));
+          enemyData.position.z = Math.max(-terrainHalf, Math.min(terrainHalf, enemyData.position.z));
+
+          const enemy = createEnemies(enemyData.position, idx);
+          scene.add(enemy);
+          return enemy;
+        });
+        setEnemyCount(enemiesRef.current.length);
+      }
       setGameState(GameState.PLAYING);
     } catch (err) {
       console.error("World generation error:", err);
@@ -481,12 +776,7 @@ const VoiceWorldBuilder = () => {
       );
       console.log(`[FRONTEND LIGHTING] Directional: ${lightingConfig.directional.color} @ ${lightingConfig.directional.intensity}`);
     }
-    
-    scene.fog.color.setStyle(lightingConfig.fog.color);
-    scene.fog.near = lightingConfig.fog.near;
-    scene.fog.far = lightingConfig.fog.far;
-    console.log(`[FRONTEND LIGHTING] Fog: ${lightingConfig.fog.color} (${lightingConfig.fog.near}-${lightingConfig.fog.far})`);
-    
+        
     scene.background = new THREE.Color(lightingConfig.background);
     console.log(`[FRONTEND LIGHTING] Background: ${lightingConfig.background}`);
   };

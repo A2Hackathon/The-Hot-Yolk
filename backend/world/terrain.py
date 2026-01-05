@@ -7,16 +7,24 @@ import uuid
 
 # Biome settings 
 BIOME_SETTINGS = {
-    "arctic": {"height_multiplier": 2.0, "ground_color": "snow"},
+    "arctic": {"height_multiplier": 1.0, "ground_color": "snow"},
     "city": {"height_multiplier": 1.0, "ground_color": "street"},
     "default": {"height_multiplier": 1.0, "ground_color": "grass"}
 }
 
 GROUND_COLORS = {
-    "snow": (200, 220, 255),
+    "snow": (245, 245, 245),
     "street": (128, 128, 128),
     "grass": (34, 177, 76)
 }
+
+# Arctic altitude-based snow colours
+ARCTIC_SNOW = {
+    "low": (255, 255, 255) ,   # blue-grey ice
+    "mid":  (255, 255, 255),   # clean snow
+    "high": (255, 255, 255)   # pure white peaks
+}
+
 
 # Structure multipliers
 STRUCTURE_KEYWORDS = {
@@ -42,10 +50,22 @@ def get_biome_settings(biome_name, structure_count_dict=None):
 
 def get_colour(ground_rgb):
     r, g, b = ground_rgb
-    r = max(0, min(255, r + random.randint(-5, 5)))
-    g = max(0, min(255, g + random.randint(-5, 5)))
-    b = max(0, min(255, b + random.randint(-5, 5)))
+    r = max(0, min(255, r + random.randint(-2, 3)))
+    g = max(0, min(255, g + random.randint(-2, 3)))
+    b = max(0, min(255, b + random.randint(-2, 3)))
     return (r, g, b)
+
+def get_arctic_snow_colour(height, max_height):
+    ratio = height / max_height
+
+    if ratio > 0.75:
+        base = ARCTIC_SNOW["high"]
+    elif ratio > 0.45:
+        base = ARCTIC_SNOW["mid"]
+    else:
+        base = ARCTIC_SNOW["low"]
+
+    return get_colour(base)
 
 def generate_placement_mask(heightmap, biome_name):
     h, w = heightmap.shape
@@ -80,28 +100,49 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
     river_mask = np.zeros((height, width), dtype=bool)
     mountain_mask = np.zeros((height, width), dtype=bool)
 
+    # Track placed tree positions
+    placed_tree_positions = []
+
     # Apply structures
     for structure, count in structure_count_dict.items():
         multiplier = STRUCTURE_KEYWORDS.get(structure, 1.0)
-        radius = 5
+        radius = 5  # general radius for terrain deformation
         for _ in range(count):
-            cx, cy = random.randint(0, width-1), random.randint(0, height-1)
-            for y2 in range(max(0, cy-radius), min(height, cy+radius+1)):
-                for x2 in range(max(0, cx-radius), min(width, cx+radius+1)):
-                    dist = np.sqrt((y2-cy)**2 + (x2-cx)**2)
-                    factor = max(0, 1 - dist / radius)
+            # Attempt placement multiple times if colliding
+            for attempt in range(20):
+                cx, cy = random.randint(0, width-1), random.randint(0, height-1)
 
-                    # River depression ensures river is low
-                    if structure == "river":
-                        heightmap[y2, x2] *= 1 - factor * 0.6
-                        river_mask[y2, x2] = True
-                    else:
-                        heightmap[y2, x2] *= 1 + factor * (multiplier - 1)
-                        heightmap[y2, x2] = min(heightmap[y2, x2], height_multiplier * multiplier)
-                        if structure == "mountain":
-                            mountain_mask[y2, x2] = True
+                # Check terrain collision for mountains/rivers
+                if structure == "river":
+                    for y2 in range(max(0, cy-radius), min(height, cy+radius+1)):
+                        for x2 in range(max(0, cx-radius), min(width, cx+radius+1)):
+                            dist = np.sqrt((y2-cy)**2 + (x2-cx)**2)
+                            factor = max(0, 1 - dist / radius)
+                            heightmap[y2, x2] *= 1 - factor * 0.6
+                            river_mask[y2, x2] = True
+                    break
 
-    # Placement mask
+                # For mountains/hills
+                else:
+                    # Check tree collision for trees
+                    tree_radius = 3  # approx trunk radius in cells
+                    too_close = any(np.sqrt((cx - px)**2 + (cy - py)**2) < tree_radius for px, py in placed_tree_positions)
+                    if too_close:
+                        continue  # retry placement
+
+                    # If passed collision check, place it
+                    placed_tree_positions.append((cx, cy))
+
+                    for y2 in range(max(0, cy-radius), min(height, cy+radius+1)):
+                        for x2 in range(max(0, cx-radius), min(width, cx+radius+1)):
+                            dist = np.sqrt((y2-cy)**2 + (x2-cx)**2)
+                            factor = max(0, 1 - dist / radius)
+                            heightmap[y2, x2] *= 1 + factor * (multiplier - 1)
+                            heightmap[y2, x2] = min(heightmap[y2, x2], height_multiplier * multiplier)
+                            if structure == "mountain":
+                                mountain_mask[y2, x2] = True
+                    break  # exit retry loop once placed
+
     placement_mask = generate_placement_mask(heightmap, biome_name)
 
     # Colour map
@@ -110,20 +151,25 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
         for x in range(width):
             if river_mask[y, x]:
                 colour_map_array[y, x] = (0, 120, 255)
+            elif biome_name == "arctic":
+                colour_map_array[y, x] = get_arctic_snow_colour(
+                    heightmap[y, x],
+                    height_multiplier * 1.5
+                )
             elif mountain_mask[y, x]:
                 colour_map_array[y, x] = (120, 120, 120)
             else:
                 colour_map_array[y, x] = get_colour(ground_rgb)
 
-    # Debug
     walkable_count = np.sum(placement_mask)
     print(f"[Terrain] Walkable area: {walkable_count / placement_mask.size * 100:.1f}%")
+    print(f"[Terrain] Trees placed: {len(placed_tree_positions)}")
 
-    return heightmap, colour_map_array, placement_mask
+    return heightmap, colour_map_array, placement_mask, placed_tree_positions
 
 # ---------------- Save and Export ----------------
 def generate_heightmap(biome_name, structures=None):
-    heightmap, colour_map_array, placement_mask = generate_heightmap_data(biome_name, structures)
+    heightmap, colour_map_array, placement_mask, placed_tree_positions = generate_heightmap_data(biome_name, structures)
 
     os.makedirs("assets/heightmaps", exist_ok=True)
 
@@ -143,7 +189,8 @@ def generate_heightmap(biome_name, structures=None):
         "heightmap_url": f"/assets/heightmaps/{heightmap_filename}",
         "placement_mask": placement_mask.tolist(),
         "heightmap_raw": heightmap.tolist(),
-        "colour_map_array": colour_map_array.tolist()
+        "colour_map_array": colour_map_array.tolist(),
+        "placed_tree_positions": placed_tree_positions 
     }
 
 def save_heightmap_png(prompt_parser_response, filename="assets/heightmaps/terrain.png"):

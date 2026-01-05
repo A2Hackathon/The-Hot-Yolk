@@ -20,15 +20,15 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
         "noon": {
             "ambient": {
                 "color": "#ffffff",
-                "intensity": 0.6
+                "intensity": 0.8
             },
             "directional": {
                 "color": "#ffffff",
-                "intensity": 1.0,
+                "intensity": 2.0,
                 "position": {"x": 50, "y": 100, "z": 50}
             },
             "fog": {
-                "color": "#87CEEB",  # Sky blue
+                "color": "#DDEEFF",  # Sky blue
                 "near": 50,
                 "far": 200
             },
@@ -81,15 +81,15 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
     if is_winter:
         # Add blue fog tint for icy environments
         if time == "noon":
-            config["fog"]["color"] = "#CCE5FF"  # Icy blue fog
-            config["background"] = "#CCE5FF"
-            config["ambient"]["color"] = "#E6F2FF"  # Slightly blue-tinted ambient
+            config["fog"]["color"] = "#CCF0FF"  
+            config["background"] = "#C6F5FF"
+            config["ambient"]["color"] = "#ffffff"  # Slightly blue-tinted ambient
         elif time == "sunset":
-            config["fog"]["color"] = "#B3D9FF"  # Cool sunset fog
-            config["background"] = "#B3D9FF"
+            config["fog"]["color"] = "#ffa366"  # Cool sunset fog
+            config["background"] = "#ffa366"
         elif time == "night":
-            config["fog"]["color"] = "#001133"  # Keep dark blue at night
-            config["background"] = "#001133"
+            config["fog"]["color"] = "#7881FF"  # Keep dark blue at night
+            config["background"] = "#2543DE"
     
     return config
 
