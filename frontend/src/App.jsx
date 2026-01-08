@@ -21,6 +21,8 @@ const VoiceWorldBuilder = () => {
 
   const heightmapRef = useRef(null);
   const colorMapRef = useRef(null);
+  const terrainPlacementMaskRef = useRef(null);
+  const [currentWorld, setCurrentWorld] = useState(null);
   const terrainMeshRef = useRef(null);
   const playerRef = useRef(null);
   const enemiesRef = useRef([]);
@@ -29,6 +31,7 @@ const VoiceWorldBuilder = () => {
   const [gameState, setGameState] = useState(GameState.IDLE);
   const [isListening, setIsListening] = useState(false);
   const [prompt, setPrompt] = useState('');
+  const [modifyPrompt, setModifyPrompt] = useState('');
   const [submittedPrompt, setSubmittedPrompt] = useState('');
   const [enemyCount, setEnemyCount] = useState(0);
 
@@ -49,6 +52,77 @@ const VoiceWorldBuilder = () => {
   });
 
   const pressedKeys = useRef(new Set());
+
+  // --- Hybrid placement function ---
+  function placeObjectHybrid({
+    placementMask,
+    placedSmallObjects,
+    scene,
+    terrainHeightFn,
+    object3D,
+    objectSize = { width: 2, depth: 2 },
+    maxAttempts = 20
+  }) {
+    const maskHeight = placementMask.length;
+    const maskWidth = placementMask[0].length;
+
+    const isWalkable = (x, z) => {
+      const xi = Math.floor(x);
+      const zi = Math.floor(z);
+      return (
+        xi >= 0 &&
+        xi < maskWidth &&
+        zi >= 0 &&
+        zi < maskHeight &&
+        placementMask[zi][xi] === 1
+      );
+    };
+
+    const isOverlapping = (x, z, width, depth, existingObjects) => {
+      const halfW = width / 2;
+      const halfD = depth / 2;
+      const minX = x - halfW, maxX = x + halfW;
+      const minZ = z - halfD, maxZ = z + halfD;
+
+      return existingObjects.some(obj => {
+        const oMinX = obj.x - obj.width / 2;
+        const oMaxX = obj.x + obj.width / 2;
+        const oMinZ = obj.z - obj.depth / 2;
+        const oMaxZ = obj.z + obj.depth / 2;
+
+        const overlapX = maxX > oMinX && minX < oMaxX;
+        const overlapZ = maxZ > oMinZ && minZ < oMaxZ;
+        return overlapX && overlapZ;
+      });
+    };
+
+    const placedLargeObjects = [];
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const x = Math.random() * maskWidth;
+      const z = Math.random() * maskHeight;
+
+      if (!isWalkable(x, z)) continue;
+
+      const tooCloseToSmall = placedSmallObjects.some(p =>
+        Math.hypot(p.x - x, p.z - z) < 2
+      );
+      if (tooCloseToSmall) continue;
+
+      if (isOverlapping(x, z, objectSize.width, objectSize.depth, placedLargeObjects))
+        continue;
+
+      const y = terrainHeightFn(x, z);
+      object3D.position.set(x, y, z);
+      scene.add(object3D);
+
+      placedLargeObjects.push({ x, z, width: objectSize.width, depth: objectSize.depth });
+      return true;
+    }
+
+    console.warn("Failed to place object after max attempts");
+    return false;
+  }
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -111,6 +185,10 @@ const VoiceWorldBuilder = () => {
     scene.add(camera); // optional, not strictly needed
 
     const handleKeyDown = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        return;
+      }
+
       pressedKeys.current.add(e.key.toLowerCase());
       if (e.key === ' ' && playerRef.current) {
         e.preventDefault();
@@ -130,7 +208,12 @@ const VoiceWorldBuilder = () => {
         }
       }
     };
-    const handleKeyUp = (e) => pressedKeys.current.delete(e.key.toLowerCase());
+    const handleKeyUp = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        return;
+      }
+      pressedKeys.current.delete(e.key.toLowerCase());
+    }
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
@@ -172,8 +255,8 @@ const VoiceWorldBuilder = () => {
         let moveVector = new THREE.Vector3();
         if (pressedKeys.current.has('w')) moveVector.z += 1;
         if (pressedKeys.current.has('s')) moveVector.z -= 1;
-        if (pressedKeys.current.has('a')) moveVector.x -= 1; // <-- flip
-        if (pressedKeys.current.has('d')) moveVector.x += 1; // <-- flip
+        if (pressedKeys.current.has('a')) moveVector.x += 1; 
+        if (pressedKeys.current.has('d')) moveVector.x -= 1; 
 
         if (moveVector.length() > 0 && player) {
           moveVector.normalize();
@@ -606,7 +689,7 @@ const VoiceWorldBuilder = () => {
       // Make health bar face camera
       const worldPos = new THREE.Vector3();
       healthBar.getWorldPosition(worldPos);
-      healthBar.lookAt(cam.position.x, worldPos.y, cam.position.z);
+      healthBar.lookAt(cam.position.x, healthBar.position.y, cam.position.z);
     });
   };
 
@@ -647,10 +730,20 @@ const VoiceWorldBuilder = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: promptText }),
       });
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
+        if (!res.ok) {
+        const errorText = await res.text();
+        console.error('API Error Response:', errorText);
+        throw new Error(`API error: ${res.status} - ${errorText}`);
+      }
       const data = await res.json();
       console.log("=== FRONTEND: Full API response ===");
       console.log(JSON.stringify(data, null, 2));
+
+          // ✅ Validate data structure
+      if (!data.world) {
+        throw new Error('Invalid response: missing world data');
+      }
+      setCurrentWorld(data);
 
       const scene = sceneRef.current;
       if (!scene) return;
@@ -673,6 +766,9 @@ const VoiceWorldBuilder = () => {
       if (data.world && data.world.heightmap_raw && data.world.colour_map_array) {
         heightmapRef.current = data.world.heightmap_raw;
         colorMapRef.current = data.world.colour_map_array;
+        terrainPlacementMaskRef.current = heightmapRef.current.map(row =>
+          row.map(height => (height >= 0 ? 1 : 0)) // example: everything above 0 is walkable
+        );
         const terrainMesh = createTerrain(heightmapRef.current, colorMapRef.current, 256);
         terrainMeshRef.current = terrainMesh;
         scene.add(terrainMesh);
@@ -752,6 +848,110 @@ const VoiceWorldBuilder = () => {
     }
   };
 
+  const modifyWorld = async (commandText) => {
+    console.log("=== MODIFY WORLD CALLED ===");
+    console.log("Command:", commandText);
+    console.log("Current world exists:", !!currentWorld);
+    setGameState(GameState.GENERATING);
+    try {
+      const payload = {
+        command: commandText,
+        current_world: currentWorld,
+        from_time: null,       
+        to_time: null,         
+        progress: 1.0,          
+      };
+
+      const res = await fetch(`${API_BASE}/modify-world`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      console.log("API response status:", res.status);
+
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      const data = await res.json();
+      console.log("=== FRONTEND: Modify response ===", data);
+
+      const scene = sceneRef.current;
+      if (!scene) return;
+
+      const oldWorld = currentWorld;
+      console.log("Old world structures:", oldWorld?.structures);
+      console.log("New world structures:", data?.structures);
+
+      if (data.structures?.trees) {
+        const existingTreeCount = oldWorld?.structures?.trees?.length || 0;
+        const newTrees = data.structures.trees.slice(existingTreeCount);
+        
+        console.log(`[MODIFY] Adding ${newTrees.length} new trees...`);
+        
+        newTrees.forEach(treeData => {
+          const tree = createTree(treeData);
+
+          placeObjectHybrid({
+            placementMask: terrainPlacementMaskRef.current,
+            placedSmallObjects: structuresRef.current.map(obj => ({ x: obj.position.x, z: obj.position.z })),
+            scene,
+            terrainHeightFn: (x, z) => getHeightAt(x, z),
+            object3D: tree,
+            objectSize: { width: 1, depth: 1 },
+            maxAttempts: 20
+          });
+
+          structuresRef.current.push(tree);
+        });
+      }
+
+      if (data.structures?.rocks) {
+        const existingRockCount = oldWorld?.structures?.rocks?.length || 0;
+        const newRocks = data.structures.rocks.slice(existingRockCount);
+        
+        console.log(`[MODIFY] Adding ${newRocks.length} new rocks...`);
+        
+        newRocks.forEach(rockData => {
+          const rock = createRock(rockData);
+
+          placeObjectHybrid({
+            placementMask: terrainPlacementMaskRef.current,
+            placedSmallObjects: structuresRef.current.map(obj => ({ x: obj.position.x, z: obj.position.z })),
+            scene,
+            terrainHeightFn: (x, z) => getHeightAt(x, z),
+            object3D: rock,
+            objectSize: { width: 3, depth: 3 },
+            maxAttempts: 20
+          });
+
+          structuresRef.current.push(rock);
+        });
+      }
+
+      // Update lighting
+      if (data.world?.lighting_config) {
+        console.log('[MODIFY] Updating lighting...');
+        updateLighting(data.world.lighting_config);
+      } else {
+        console.log('[MODIFY] No lighting changes');
+      }
+
+      // Update physics
+      if (data.physics) {
+        console.log('[MODIFY] Updating physics...');
+        playerState.current = { ...playerState.current, ...data.physics };
+      }
+
+      // NOW update React state AFTER all calculations
+      setCurrentWorld(data);
+      
+      setGameState(GameState.PLAYING);
+      console.log("✓ Returned to PLAYING state");
+    } catch (err) {
+      console.error("Modify-world error:", err);
+      setGameState(GameState.PLAYING);
+    }
+  };
+
   const updateLighting = (lightingConfig) => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -781,42 +981,62 @@ const VoiceWorldBuilder = () => {
     console.log(`[FRONTEND LIGHTING] Background: ${lightingConfig.background}`);
   };
 
-  const startVoiceCapture = () => {
+  const startVoiceCapture = (forceModify = false) => {
     if (!('webkitSpeechRecognition' in window)) {
       return alert('Speech recognition not supported. Use Chrome or Edge.');
     }
+
     const recognition = new webkitSpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = 'en-US';
+
     recognition.onstart = () => setIsListening(true);
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
       console.log("Voice:", transcript);
       setIsListening(false);
       setSubmittedPrompt(transcript);
-      generateWorld(transcript);
+
+      // Decide generation vs modification
+      if (forceModify || gameState === GameState.PLAYING) {
+        modifyWorld(transcript); // incremental updates
+      } else {
+        generateWorld(transcript); // initial world generation
+      }
     };
-    recognition.onerror = () => setIsListening(false);
-    recognition.onend = () => setIsListening(false);
+
     recognition.start();
   };
 
   const handleTextSubmit = () => {
     if (!prompt.trim()) return;
     setSubmittedPrompt(prompt);
-    generateWorld(prompt);
+    generateWorld(prompt); // calls /generate-world
     setPrompt('');
+  };
+
+  const handleModifySubmit = () => {
+    if (!modifyPrompt.trim()) return;
+    console.log("Modifying with text:", modifyPrompt);
+    modifyWorld(modifyPrompt);
+    setModifyPrompt('');
   };
 
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative', background: '#000' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute' }} />
 
-      {gameState === GameState.PLAYING && (
+    {gameState === GameState.PLAYING && (
+      <>
+        {/* --- Enemy Stats & Controls --- */}
         <div style={{
           position: 'absolute', top: 20, left: 20, zIndex: 10,
-          backgroundColor: 'rgba(0,0,0,0.7)', padding: '15px', borderRadius: '8px',
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          padding: '15px', borderRadius: '8px',
           color: '#fff', fontFamily: 'monospace', fontSize: '14px'
         }}>
           <div>Enemies: {enemyCount}</div>
@@ -827,7 +1047,84 @@ const VoiceWorldBuilder = () => {
             <div>Arrows - Rotate Cam</div>
           </div>
         </div>
-      )}
+
+        {/* ✅ NEW: Text Input for Modifications */}
+        <div style={{
+          position: 'fixed', bottom: 30, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 20, display: 'flex', gap: '10px', alignItems: 'center'
+        }}>
+          <input
+            type="text"
+            value={modifyPrompt}
+            onChange={e => setModifyPrompt(e.target.value)}
+            onKeyPress={e => e.key === 'Enter' && handleModifySubmit()}
+            placeholder="Type command (e.g., 'add 5 trees')..."
+            style={{
+              padding: '12px 20px',
+              fontSize: '14px',
+              width: '300px',
+              background: 'rgba(0,0,0,0.8)',
+              color: '#fff',
+              border: '2px solid rgba(255,255,255,0.3)',
+              borderRadius: '25px',
+              outline: 'none'
+            }}
+          />
+          <button
+            onClick={handleModifySubmit}
+            style={{
+              padding: '12px 24px',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              background: '#4CAF50',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '25px',
+              cursor: 'pointer'
+            }}
+          >
+            Modify
+          </button>
+        </div>
+
+        {/* --- Floating Mic Button --- */}
+        <div style={{
+          position: 'fixed', bottom: 30, right: 30, zIndex: 20
+        }}>
+          <button
+            onClick={() => startVoiceCapture(true)}
+            style={{
+              width: '60px',
+              height: '60px',
+              borderRadius: '50%',
+              fontSize: '24px',
+              background: isListening ? '#FF5555' : 'rgba(255, 85, 85, 0.6)',
+              color: '#fff',
+              border: 'none',
+              cursor: isListening ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(255,0,0,0.4)',
+              transition: 'all 0.2s',
+              animation: isListening ? 'pulse 1s infinite' : 'none',
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '0.9'}
+          >
+            {isListening ? '🎙️' : '🎤'}
+          </button>
+          <style>{`
+            @keyframes pulse {
+              0% { transform: scale(1); box-shadow: 0 0 12px rgba(255,0,0,0.4); }
+              50% { transform: scale(1.1); box-shadow: 0 0 24px rgba(255,0,0,0.6); }
+              100% { transform: scale(1); box-shadow: 0 0 12px rgba(255,0,0,0.4); }
+            }
+          `}</style>
+        </div>
+      </>
+    )}
+      
 
       {gameState === GameState.IDLE && (
         <div style={{

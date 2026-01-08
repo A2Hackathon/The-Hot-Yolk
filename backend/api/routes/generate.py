@@ -160,6 +160,9 @@ def generate_mountain_peaks(
     terrain_size=256.0,
     max_peaks=3
 ):
+    if max_peaks == 0:
+        return []
+    
     if biome.lower() not in ["arctic", "winter", "icy", "snow", "frozen"]:
         return []
 
@@ -329,6 +332,8 @@ async def generate_world(prompt: Dict) -> Dict:
 
         base_rock_count = 30 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
         rock_count = structure_counts.get("rock", base_rock_count)
+        mountain_count = structure_counts.get("mountain", 3 if biome.lower() in ["arctic", "winter", "icy"] else 0)
+
         terrain_size = 256
 
         structures = {
@@ -340,7 +345,7 @@ async def generate_world(prompt: Dict) -> Dict:
                 terrain_size=terrain_size
             ),
             "rocks": generate_rocks(heightmap_raw, biome, rock_count, terrain_size),
-            "peaks": generate_mountain_peaks(heightmap_raw, biome, terrain_size)
+            "peaks": generate_mountain_peaks(heightmap_raw, biome, terrain_size, max_peaks=mountain_count) if mountain_count > 0 else [] 
         }
 
         # --- Determine player spawn on a walkable point ---

@@ -1,41 +1,69 @@
+# update.py
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Optional
 from pydantic import BaseModel
-from voice.voice import handle_live_command
+from voice.voice import handle_live_command, merge_world
 
 router = APIRouter()
 
 class ModifyRequest(BaseModel):
     command: str
-    current_physics: Optional[Dict] = None
-    from_time: Optional[str] = None
-    to_time: Optional[str] = None
-    progress: float = 1.0
+    current_world: Optional[Dict] = None
+    from_time: Optional[str] = None   
+    to_time: Optional[str] = None         
+    progress: Optional[float] = 1.0       
 
 @router.patch("/modify-world")
+@router.patch("/modify-world")
 async def modify_world(request: ModifyRequest) -> Dict:
-    """
-    Apply live modifications from a voice command.
+    if not request.command:
+        raise HTTPException(status_code=400, detail="No command provided")
 
-    Example commands:
-        "Add 2 more enemies"
-        "Switch to dash"
-        "Make it night"
-    """
     try:
-        if not request.command:
-            raise HTTPException(status_code=400, detail="No command provided")
+        print(f"[API] Received command: {request.command}")
+        print(f"[API] request.current_world type: {type(request.current_world)}")
+        print(f"[API] request.current_world value: {request.current_world}")
+        
+        # Ensure current_world is initialized
+        if not request.current_world:
+            current_world = {
+                "world": {},
+                "structures": {},
+                "combat": {"enemies": [], "enemy_count": 0},
+                "physics": {},
+                "spawn_point": {}
+            }
+            print("[API] Initialized empty current_world")
+        else:
+            current_world = request.current_world
+            print(f"[API] Using provided current_world")
 
-        response = handle_live_command(
+        print(f"[API] Calling handle_live_command with current_world type: {type(current_world)}")
+        
+        # Pass current world and lighting interpolation params to AI
+        ai_diff = handle_live_command(
             command=request.command,
-            current_physics=request.current_physics,
+            current_world=current_world,
             from_time=request.from_time,
             to_time=request.to_time,
             progress=request.progress
         )
 
-        return response
+        print(f"[API] AI returned diff")
+        print(f"[API] Calling merge_world...")
+        
+        # Merge AI diff into the current world
+        updated_world = merge_world(current_world, ai_diff)
+
+        print(f"[API] Returning updated world")
+        
+        # Return the updated world
+        return updated_world
 
     except Exception as e:
-        print(f"[API] Error modifying world: {e}")
+        print(f"[API] ERROR: {e}")
+        print(f"[API] ERROR TYPE: {type(e)}")
+        import traceback
+        print("[API] Full traceback:")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
