@@ -110,10 +110,12 @@ Rules:
 
 BUILDING GENERATION:
 - Buildings should only be added to city biomes
-- Each building needs: height (8-20), width (4-6), depth (4-6), color (hex like 0x666666)
+- Each building needs: height (15-35), width (7-10), depth (7-10), color (hex like 0x666666)
 - Buildings need position {x, y, z} and rotation (0, 1.57, 3.14, or 4.71 for 90-degree rotations)
-- Space buildings at least 15 units apart
+- Space buildings at least 25 units apart
 - Place on relatively flat ground (y should match terrain height)
+- Buildings are LARGE structures (skyscrapers, towers)
+- Example building: {"type": "building", "height": 25, "width": 8, "depth": 8, "color": 0x666666, "position": {"x": 45, "y": 2.5, "z": -30}, "rotation": 1.57}
 
 TREE GENERATION:
 - Trees need: type ("oak", "pine", "spruce", "maple", "birch"), leafless (true for arctic, false otherwise)

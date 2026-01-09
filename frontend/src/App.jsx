@@ -556,9 +556,9 @@ group.userData.static = true;
   const createBuilding = (buildingData) => {
     const group = new THREE.Group();
     
-    const height = (buildingData.height || 10) ;
-    const width = (buildingData.width || 4);
-    const depth = (buildingData.depth || 4);
+    const height = buildingData.height || 10;
+    const width = buildingData.width || 4;
+    const depth = buildingData.depth || 4;
     
     // Main building body
     const bodyGeom = new THREE.BoxGeometry(width, height, depth);
@@ -567,12 +567,8 @@ group.userData.static = true;
       roughness: 0.7,
       metalness: 0.3
     });
-    // Move geometry so base sits at y = 0
-bodyGeom.translate(0, height / 2, 0);
-
-const body = new THREE.Mesh(bodyGeom, bodyMat);
-body.position.y = 0;
-
+    const body = new THREE.Mesh(bodyGeom, bodyMat);
+    body.position.y = height / 2;
     body.castShadow = true;
     body.receiveShadow = true;
     group.add(body);
@@ -621,11 +617,10 @@ body.position.y = 0;
     
     group.position.set(
       buildingData.position.x, 
-      0,
+      buildingData.position.y, 
       buildingData.position.z
     );
     group.rotation.y = buildingData.rotation || 0;
-   
     
     return group;
   };

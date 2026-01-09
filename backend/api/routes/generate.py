@@ -170,12 +170,13 @@ def generate_buildings(
     
     segments = len(heightmap_raw) - 1
     
-    # Building configuration
+    # Building configuration - MUCH BIGGER
     building_types = [
-        {"height": 15, "width": 5, "depth": 5, "color": 0x666666},  # Tall
-        {"height": 10, "width": 6, "depth": 4, "color": 0x888888},  # Medium
-        {"height": 8, "width": 4, "depth": 6, "color": 0x777777},   # Wide
-        {"height": 20, "width": 4, "depth": 4, "color": 0x555555},  # Skyscraper
+        {"height": 25, "width": 8, "depth": 8, "color": 0x666666},   # Tall
+        {"height": 18, "width": 10, "depth": 7, "color": 0x888888},  # Medium
+        {"height": 15, "width": 7, "depth": 10, "color": 0x777777},  # Wide
+        {"height": 35, "width": 8, "depth": 8, "color": 0x555555},   # Skyscraper
+        {"height": 28, "width": 9, "depth": 9, "color": 0x444444},   # Tower
     ]
     
     # Find valid flat areas for buildings
@@ -207,7 +208,7 @@ def generate_buildings(
     # Place buildings with spacing
     random.shuffle(valid_points)
     placed_positions = []
-    min_distance = 15  # Minimum distance between buildings
+    min_distance = 25  # Increased spacing for bigger buildings
     
     for i in range(len(valid_points)):
         if len(buildings) >= count:
