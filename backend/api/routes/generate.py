@@ -154,6 +154,101 @@ def generate_rocks(
     print(f"[Structures] Placed {len(rocks)} rocks")
     return rocks
 
+def generate_buildings(
+    heightmap_raw: List[List[float]],
+    placement_mask: List[List[int]],
+    biome: str,
+    count: int = 10,
+    terrain_size: float = 256.0
+) -> List[Dict]:
+    """Generate buildings for city biomes"""
+    buildings = []
+    
+    # Only generate buildings for city biome
+    if biome.lower() != "city":
+        return []
+    
+    segments = len(heightmap_raw) - 1
+    
+    # Building configuration
+    building_types = [
+        {"height": 15, "width": 5, "depth": 5, "color": 0x666666},  # Tall
+        {"height": 10, "width": 6, "depth": 4, "color": 0x888888},  # Medium
+        {"height": 8, "width": 4, "depth": 6, "color": 0x777777},   # Wide
+        {"height": 20, "width": 4, "depth": 4, "color": 0x555555},  # Skyscraper
+    ]
+    
+    # Find valid flat areas for buildings
+    valid_points = []
+    for z in range(10, segments - 10):
+        for x in range(10, segments - 10):
+            if placement_mask[z][x] == 1:
+                h = heightmap_raw[z][x]
+                # Buildings need relatively flat ground
+                if 0.15 <= h <= 0.5:
+                    # Check if area is flat enough (check neighbors)
+                    is_flat = True
+                    for dz in range(-2, 3):
+                        for dx in range(-2, 3):
+                            neighbor_h = heightmap_raw[z + dz][x + dx]
+                            if abs(neighbor_h - h) > 0.05:  # Slope tolerance
+                                is_flat = False
+                                break
+                        if not is_flat:
+                            break
+                    
+                    if is_flat:
+                        valid_points.append((x, z))
+    
+    if not valid_points:
+        print("[BUILDINGS] No valid flat points found for buildings")
+        return []
+    
+    # Place buildings with spacing
+    random.shuffle(valid_points)
+    placed_positions = []
+    min_distance = 15  # Minimum distance between buildings
+    
+    for i in range(len(valid_points)):
+        if len(buildings) >= count:
+            break
+        
+        x_idx, z_idx = valid_points[i]
+        world_x = (x_idx / segments) * terrain_size - terrain_size / 2
+        world_z = (z_idx / segments) * terrain_size - terrain_size / 2
+        
+        # Check distance from other buildings
+        too_close = False
+        for px, pz in placed_positions:
+            dist = math.sqrt((world_x - px)**2 + (world_z - pz)**2)
+            if dist < min_distance:
+                too_close = True
+                break
+        
+        if too_close:
+            continue
+        
+        world_y = heightmap_raw[z_idx][x_idx] * 10
+        
+        # Choose random building type
+        building_type = random.choice(building_types)
+        rotation = random.choice([0, math.pi/2, math.pi, 3*math.pi/2])  # 90-degree rotations
+        
+        buildings.append({
+            "type": "building",
+            "height": building_type["height"],
+            "width": building_type["width"],
+            "depth": building_type["depth"],
+            "color": building_type["color"],
+            "position": {"x": float(world_x), "y": float(world_y), "z": float(world_z)},
+            "rotation": float(rotation)
+        })
+        
+        placed_positions.append((world_x, world_z))
+    
+    print(f"[Structures] Placed {len(buildings)} buildings")
+    return buildings
+
 def generate_mountain_peaks(
     heightmap_raw,
     biome,
@@ -333,6 +428,9 @@ async def generate_world(prompt: Dict) -> Dict:
         base_rock_count = 30 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
         rock_count = structure_counts.get("rock", base_rock_count)
         mountain_count = structure_counts.get("mountain", 3 if biome.lower() in ["arctic", "winter", "icy"] else 0)
+        
+        # Building count for city biome
+        building_count = structure_counts.get("building", 15 if biome.lower() == "city" else 0)
 
         terrain_size = 256
 
@@ -345,7 +443,8 @@ async def generate_world(prompt: Dict) -> Dict:
                 terrain_size=terrain_size
             ),
             "rocks": generate_rocks(heightmap_raw, biome, rock_count, terrain_size),
-            "peaks": generate_mountain_peaks(heightmap_raw, biome, terrain_size, max_peaks=mountain_count) if mountain_count > 0 else [] 
+            "peaks": generate_mountain_peaks(heightmap_raw, biome, terrain_size, max_peaks=mountain_count) if mountain_count > 0 else [],
+            "buildings": generate_buildings(heightmap_raw, placement_mask, biome, building_count, terrain_size)
         }
 
         # --- Determine player spawn on a walkable point ---

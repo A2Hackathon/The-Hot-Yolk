@@ -521,7 +521,14 @@ const VoiceWorldBuilder = () => {
     group.position.set(treeData.position.x, treeData.position.y, treeData.position.z);
     group.scale.setScalar(treeData.scale);
     group.rotation.y = treeData.rotation || 0;
+group.traverse(child => {
+  if (child.isMesh) {
+    child.matrixAutoUpdate = false;
+    child.updateMatrix();
+  }
+});
 
+group.userData.static = true;
     return group;
   };
 
@@ -544,6 +551,83 @@ const VoiceWorldBuilder = () => {
     );
     rock.castShadow = true;
     return rock;
+  };
+
+  const createBuilding = (buildingData) => {
+    const group = new THREE.Group();
+    
+    const height = (buildingData.height || 10) ;
+    const width = (buildingData.width || 4);
+    const depth = (buildingData.depth || 4);
+    
+    // Main building body
+    const bodyGeom = new THREE.BoxGeometry(width, height, depth);
+    const bodyMat = new THREE.MeshStandardMaterial({ 
+      color: buildingData.color || 0x888888,
+      roughness: 0.7,
+      metalness: 0.3
+    });
+    // Move geometry so base sits at y = 0
+bodyGeom.translate(0, height / 2, 0);
+
+const body = new THREE.Mesh(bodyGeom, bodyMat);
+body.position.y = 0;
+
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+    
+    // Windows (simple grid pattern)
+    const windowSize = 0.5;
+    const windowSpacing = 1.5;
+    const windowColor = 0x4444ff;
+    
+    for (let y = 2; y < height - 1; y += windowSpacing) {
+      for (let x = -width/2 + 1; x < width/2; x += windowSpacing) {
+        // Front windows
+        const windowGeom = new THREE.BoxGeometry(windowSize, windowSize, 0.1);
+        const windowMat = new THREE.MeshStandardMaterial({ 
+          color: windowColor,
+          emissive: windowColor,
+          emissiveIntensity: 0.3
+        });
+        const window1 = new THREE.Mesh(windowGeom, windowMat);
+        window1.position.set(x, y, depth/2 + 0.05);
+        group.add(window1);
+        
+        // Back windows
+        const window2 = new THREE.Mesh(windowGeom, windowMat.clone());
+        window2.position.set(x, y, -depth/2 - 0.05);
+        group.add(window2);
+      }
+      
+      for (let z = -depth/2 + 1; z < depth/2; z += windowSpacing) {
+        // Side windows
+        const windowGeom = new THREE.BoxGeometry(0.1, windowSize, windowSize);
+        const windowMat = new THREE.MeshStandardMaterial({ 
+          color: windowColor,
+          emissive: windowColor,
+          emissiveIntensity: 0.3
+        });
+        const window3 = new THREE.Mesh(windowGeom, windowMat);
+        window3.position.set(width/2 + 0.05, y, z);
+        group.add(window3);
+        
+        const window4 = new THREE.Mesh(windowGeom, windowMat.clone());
+        window4.position.set(-width/2 - 0.05, y, z);
+        group.add(window4);
+      }
+    }
+    
+    group.position.set(
+      buildingData.position.x, 
+      0,
+      buildingData.position.z
+    );
+    group.rotation.y = buildingData.rotation || 0;
+   
+    
+    return group;
   };
 
   const createMountainPeak = (peakData) => {
@@ -816,6 +900,40 @@ const VoiceWorldBuilder = () => {
           });
           console.log(`✓ Added ${data.structures.peaks.length} mountain peaks`);
         }
+        if (data.structures.buildings) {
+  data.structures.buildings.forEach(buildingData => {
+    const building = createBuilding(buildingData);
+
+    const placed = placeObjectHybrid({
+  placementMask: terrainPlacementMaskRef.current,
+  placedSmallObjects: structuresRef.current.map(obj => ({
+    x: obj.position.x,
+    z: obj.position.z
+  })),
+  scene,
+  terrainHeightFn: getHeightAt,
+  object3D: building,
+  objectSize: {
+    width: (buildingData.width || 4),
+    depth: (buildingData.depth || 4)
+  },
+  maxAttempts: 40
+});
+
+// ✅ SNAP TO TERRAIN SURFACE
+if (placed) {
+  const terrainY = getHeightAt(
+    building.position.x,
+    building.position.z
+  );
+  building.position.y = terrainY;
+}
+
+structuresRef.current.push(building);
+
+  });
+}
+
       }
 
       const spawn = data.spawn_point || { x: 0, z: 0 };

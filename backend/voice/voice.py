@@ -6,7 +6,7 @@ import queue
 import json
 import os
 from world.lighting import get_lighting_preset, interpolate_lighting  
-from openai import OpenAI  # Claude Opus4.1 uses the OpenAI-compatible API
+from openai import OpenAI
 
 """
 voice.py
@@ -57,9 +57,9 @@ def summarize_world(world: Dict) -> Dict:
 def handle_live_command(
     command: str,
     current_world: Optional[Dict] = None,
-    from_time: Optional[str] = None,      # ✅ Add these params
-    to_time: Optional[str] = None,         # ✅
-    progress: Optional[float] = 1.0        # ✅
+    from_time: Optional[str] = None,
+    to_time: Optional[str] = None,
+    progress: Optional[float] = 1.0
 ) -> Dict:
     """
     Fully AI-driven command handler using Claude 4.1.
@@ -93,7 +93,7 @@ You are a game world editor AI.
 Rules:
 - Output ONLY valid JSON matching this structure:
 {
-  "add": {"trees": [], "buildings": [], "peaks": []},
+  "add": {"trees": [], "buildings": [], "peaks": [], "rocks": []},
   "physics": null,
   "lighting": null,
   "combat": null,
@@ -107,6 +107,21 @@ Rules:
 - If the player requests a time change (e.g., "make it sunset", "change to night"), 
   set "time_change" to the target time: "noon", "sunset", or "night".
 - If nothing changes, set message: "No modifications applied".
+
+BUILDING GENERATION:
+- Buildings should only be added to city biomes
+- Each building needs: height (8-20), width (4-6), depth (4-6), color (hex like 0x666666)
+- Buildings need position {x, y, z} and rotation (0, 1.57, 3.14, or 4.71 for 90-degree rotations)
+- Space buildings at least 15 units apart
+- Place on relatively flat ground (y should match terrain height)
+
+TREE GENERATION:
+- Trees need: type ("oak", "pine", "spruce", "maple", "birch"), leafless (true for arctic, false otherwise)
+- Trees need: position {x, y, z}, scale (0.9-4.5), rotation (0-6.28)
+
+ROCK GENERATION:
+- Rocks need: type ("boulder", "rock", "ice_rock", "decorative_rock")
+- Rocks need: position {x, y, z}, scale (0.6-1.8), rotation (0-6.28)
 """
 
     user_prompt = f"""
@@ -128,13 +143,13 @@ Player command:
             temperature=0.2
         )
         raw = response.choices[0].message.content.strip()
-        # ✅ Strip markdown code fences
+        # Strip markdown code fences
         if raw.startswith("```json"):
-            raw = raw[7:]  # Remove ```json
+            raw = raw[7:]
         if raw.startswith("```"):
-            raw = raw[3:]  # Remove ```
+            raw = raw[3:]
         if raw.endswith("```"):
-            raw = raw[:-3]  # Remove trailing ```
+            raw = raw[:-3]
         raw = raw.strip()
         
         print(f"[CLAUDE DEBUG] Cleaned JSON: {raw}")
@@ -165,7 +180,7 @@ Player command:
     except json.JSONDecodeError:
         print("[CLAUDE INVALID JSON]", raw)
         return {
-            "add": {"trees": [], "buildings": [], "peaks": []},
+            "add": {"trees": [], "buildings": [], "peaks": [], "rocks": []},
             "physics": None,
             "lighting": None,
             "combat": None,
@@ -174,7 +189,7 @@ Player command:
     except Exception as e:
         print("[CLAUDE ERROR]", e)
         return {
-            "add": {"trees": [], "buildings": [], "peaks": []},
+            "add": {"trees": [], "buildings": [], "peaks": [], "rocks": []},
             "physics": None,
             "lighting": None,
             "combat": None,
@@ -195,26 +210,26 @@ def merge_world(current_world: Dict, diff: Dict) -> Dict:
     if diff.get("lighting"):
         current_world["world"]["lighting_config"] = diff["lighting"]
 
-    # Merge general world properties - CHECK IF "world" EXISTS FIRST
-    diff_world = diff.get("world", {})  # Get "world" or empty dict
+    # Merge general world properties
+    diff_world = diff.get("world", {})
     for key in ["biome", "time", "sky_colour", "lighting_config"]:
         if key in diff_world:
             current_world["world"][key] = diff_world[key]
 
-    # Merge terrain - CHECK IF "world" EXISTS FIRST
+    # Merge terrain
     for key in ["heightmap_raw", "heightmap_url", "texture_url", "colour_map_array"]:
         if key in diff_world:
             current_world["world"][key] = diff_world[key]
 
     # Merge structures from "add" field (for modifications)
-    diff_add = diff.get("add", {})  # Get "add" or empty dict
+    diff_add = diff.get("add", {})
     for struct_type, items in diff_add.items():
-        if items:  # Only if there are items to add
+        if items:
             current_world["structures"].setdefault(struct_type, [])
             current_world["structures"][struct_type].extend(items)
 
     # Also merge from "structures" field (for initial generation)
-    diff_structures = diff.get("structures", {})  # Get "structures" or empty dict
+    diff_structures = diff.get("structures", {})
     for struct_type, items in diff_structures.items():
         if items:
             current_world["structures"].setdefault(struct_type, [])
@@ -222,7 +237,7 @@ def merge_world(current_world: Dict, diff: Dict) -> Dict:
 
     # Merge enemies/combat
     diff_combat = diff.get("combat")
-    if diff_combat:  # Only process if combat is not None
+    if diff_combat:
         if diff_combat.get("enemies"):
             current_world["combat"].setdefault("enemies", [])
             current_world["combat"]["enemies"].extend(diff_combat["enemies"])
