@@ -45,101 +45,27 @@ const VoiceWorldBuilder = () => {
   });
 
   const cameraOffset = useRef({
-    distance: 20,  // distance from player
-    height: 12,    // base height above player
-    angle: 0,      // horizontal rotation (yaw)
-    pitch: 0       // vertical rotation (pitch)
+    distance: 20,
+    height: 12,
+    angle: 0,
+    pitch: 0
   });
 
   const pressedKeys = useRef(new Set());
 
-  // --- Hybrid placement function ---
-  function placeObjectHybrid({
-    placementMask,
-    placedSmallObjects,
-    scene,
-    terrainHeightFn,
-    object3D,
-    objectSize = { width: 2, depth: 2 },
-    maxAttempts = 20
-  }) {
-    const maskHeight = placementMask.length;
-    const maskWidth = placementMask[0].length;
-
-    const isWalkable = (x, z) => {
-      const xi = Math.floor(x);
-      const zi = Math.floor(z);
-      return (
-        xi >= 0 &&
-        xi < maskWidth &&
-        zi >= 0 &&
-        zi < maskHeight &&
-        placementMask[zi][xi] === 1
-      );
-    };
-
-    const isOverlapping = (x, z, width, depth, existingObjects) => {
-      const halfW = width / 2;
-      const halfD = depth / 2;
-      const minX = x - halfW, maxX = x + halfW;
-      const minZ = z - halfD, maxZ = z + halfD;
-
-      return existingObjects.some(obj => {
-        const oMinX = obj.x - obj.width / 2;
-        const oMaxX = obj.x + obj.width / 2;
-        const oMinZ = obj.z - obj.depth / 2;
-        const oMaxZ = obj.z + obj.depth / 2;
-
-        const overlapX = maxX > oMinX && minX < oMaxX;
-        const overlapZ = maxZ > oMinZ && minZ < oMaxZ;
-        return overlapX && overlapZ;
-      });
-    };
-
-    const placedLargeObjects = [];
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const x = Math.random() * maskWidth;
-      const z = Math.random() * maskHeight;
-
-      if (!isWalkable(x, z)) continue;
-
-      const tooCloseToSmall = placedSmallObjects.some(p =>
-        Math.hypot(p.x - x, p.z - z) < 2
-      );
-      if (tooCloseToSmall) continue;
-
-      if (isOverlapping(x, z, objectSize.width, objectSize.depth, placedLargeObjects))
-        continue;
-
-      const y = terrainHeightFn(x, z);
-      object3D.position.set(x, y, z);
-      scene.add(object3D);
-
-      placedLargeObjects.push({ x, z, width: objectSize.width, depth: objectSize.depth });
-      return true;
-    }
-
-    console.warn("Failed to place object after max attempts");
-    return false;
-  }
-
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // --- Scene Lighting & Shadows Setup ---
     const scene = new THREE.Scene();
     sceneRef.current = scene;
-    scene.background = new THREE.Color(0x87CEEB); // light sky-blue for arctic
+    scene.background = new THREE.Color(0x87CEEB);
 
-    // Instead of ShadowMaterial
     const planeMaterial = new THREE.MeshStandardMaterial({
-      color: 0xA5BDF5,    // your icy purple
+      color: 0xA5BDF5,
       roughness: 0.8,
       metalness: 0.1,
     });
 
-    // Keep the plane large
     const shadowPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(1000, 1000),
       planeMaterial
@@ -149,11 +75,9 @@ const VoiceWorldBuilder = () => {
     shadowPlane.receiveShadow = true;
     scene.add(shadowPlane);
 
-    // --- Ambient Light (faint purple fill) ---
     const ambientLight = new THREE.AmbientLight(0xA5BDF5, 0.25);
     scene.add(ambientLight);
 
-    // --- Directional Light (sun / main shadow caster) ---
     const directionalLight = new THREE.DirectionalLight(0xaaaaff, 1.0);
     directionalLight.position.set(100, 150, 100);
     directionalLight.castShadow = true;
@@ -166,11 +90,10 @@ const VoiceWorldBuilder = () => {
     directionalLight.shadow.camera.far = 500;
     scene.add(directionalLight);
 
-    // --- Renderer setup ---
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap; // smooth shadows
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -182,7 +105,7 @@ const VoiceWorldBuilder = () => {
     );
     camera.position.set(0, 10, 20);
     cameraRef.current = camera;
-    scene.add(camera); // optional, not strictly needed
+    scene.add(camera);
 
     const handleKeyDown = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
@@ -208,12 +131,13 @@ const VoiceWorldBuilder = () => {
         }
       }
     };
+
     const handleKeyUp = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
         return;
       }
       pressedKeys.current.delete(e.key.toLowerCase());
-    }
+    };
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
@@ -225,18 +149,13 @@ const VoiceWorldBuilder = () => {
       const cam = cameraRef.current;
       
       if (player && cam) {
-        // Get camera direction
         const camDir = new THREE.Vector3();
         cam.getWorldDirection(camDir);
-        camDir.y = 0; // ignore vertical component
+        camDir.y = 0;
         camDir.normalize();
 
-
         const targetYaw = Math.atan2(camDir.x, camDir.z);
-
-        // Smooth interpolation: 0.1 = speed of rotation
         player.rotation.y += ((targetYaw - player.rotation.y + Math.PI) % (2 * Math.PI) - Math.PI) * 0.1;
-
 
         const moveSpeed = 0.3;
         const dashSpeed = 1.2;
@@ -244,13 +163,10 @@ const VoiceWorldBuilder = () => {
 
         if (pressedKeys.current.has('arrowleft')) cameraOffset.current.angle += 0.04;
         if (pressedKeys.current.has('arrowright')) cameraOffset.current.angle -= 0.04;
-        // Inside handleKeyDown / handleKeyUp logic
         if (pressedKeys.current.has('arrowup')) cameraOffset.current.pitch += 0.02;
         if (pressedKeys.current.has('arrowdown')) cameraOffset.current.pitch -= 0.02;
 
-        // Clamp pitch so camera can't flip
         cameraOffset.current.pitch = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, cameraOffset.current.pitch));
-
 
         let moveVector = new THREE.Vector3();
         if (pressedKeys.current.has('w')) moveVector.z += 1;
@@ -275,16 +191,12 @@ const VoiceWorldBuilder = () => {
           moveDir.addScaledVector(camRight, moveVector.x);
           moveDir.normalize();
 
-          // Move player
           player.position.addScaledVector(moveDir, speed);
 
-          // Roll egg
           const egg = player.children[0];
           const rollAxis = new THREE.Vector3(-moveDir.z, 0, moveDir.x); 
           egg.rotateOnWorldAxis(rollAxis, speed * 0.15);
         }
-
-
 
         if (playerState.current.isDashing) {
           playerState.current.dashTime -= 0.016;
@@ -310,27 +222,24 @@ const VoiceWorldBuilder = () => {
 
         player.position.y = newY;
 
-        const { distance, height, angle, pitch } = cameraOffset.current;
+        const distance = cameraOffset.current.distance;
+        const height = cameraOffset.current.height;
+        const angle = cameraOffset.current.angle;
+        const pitch = cameraOffset.current.pitch;
 
-        // Calculate horizontal circle around player
         const offsetX = -Math.sin(angle) * distance;
         const offsetZ = -Math.cos(angle) * distance;
-
-        // Vertical offset influenced by pitch
         const offsetY = height + Math.sin(pitch) * distance;
 
-        // Target camera position
         const targetPos = new THREE.Vector3(
           player.position.x + offsetX,
           player.position.y + offsetY,
           player.position.z + offsetZ
         );
 
-        // Smoothly move camera
         cam.position.lerp(targetPos, 0.1);
 
-        // Look at player with a slight vertical adjustment based on pitch
-        const lookAtY = player.position.y + Math.sin(pitch) * 2; // tweak multiplier for natural feel
+        const lookAtY = player.position.y + Math.sin(pitch) * 2;
         cam.lookAt(player.position.x, lookAtY, player.position.z);
 
         enemiesRef.current.forEach((enemy) => {
@@ -356,11 +265,11 @@ const VoiceWorldBuilder = () => {
         });
 
         enemiesRef.current = enemiesRef.current.filter(enemy => {
-        if (!enemy.userData || enemy.userData.health <= 0) {
-          if (sceneRef.current) sceneRef.current.remove(enemy);
-          return false;
-        }
-        return true;
+          if (!enemy.userData || enemy.userData.health <= 0) {
+            if (sceneRef.current) sceneRef.current.remove(enemy);
+            return false;
+          }
+          return true;
         });
         setEnemyCount(enemiesRef.current.length);
       }
@@ -398,7 +307,9 @@ const VoiceWorldBuilder = () => {
       const row = Math.floor(idx / (segments + 1));
       const col = idx % (segments + 1);
       positions[i + 1] = heightmap[row][col] * 10;
-      const [r, g, b] = colorMapArray[row][col];
+      const r = colorMapArray[row][col][0];
+      const g = colorMapArray[row][col][1];
+      const b = colorMapArray[row][col][2];
       colors.push(r / 255, g / 255, b / 255);
     }
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
@@ -411,95 +322,84 @@ const VoiceWorldBuilder = () => {
   };
 
   const createTree = (treeData) => {
-    console.log('[FRONTEND TREE DEBUG] Creating tree:', treeData);
-
     const group = new THREE.Group();
 
-  // --- Trunk (Minecraft-style blocky) ---
-  const trunkHeight = 3 * treeData.scale;
-  const trunkRadius = 0.4 * treeData.scale;
+    const trunkHeight = 3 * treeData.scale;
+    const trunkRadius = 0.4 * treeData.scale;
+    const blockHeight = 0.5 * treeData.scale;
+    const blockCount = Math.floor(trunkHeight / blockHeight);
 
-  const blockHeight = 0.5 * treeData.scale;
-  const blockCount = Math.floor(trunkHeight / blockHeight);
+    const trunkMaterial = new THREE.MeshStandardMaterial({
+      color: 0x654321,
+      roughness: 1.0,
+      metalness: 0.0,
+      flatShading: true
+    });
 
-  const trunkMaterial = new THREE.MeshStandardMaterial({
-    color: 0x654321,
-    roughness: 1.0,
-    metalness: 0.0,
-    flatShading: true
-  });
+    for (let i = 0; i < blockCount; i++) {
+      const jitter = (Math.random() - 0.5) * 0.08 * treeData.scale;
+      const block = new THREE.Mesh(
+        new THREE.BoxGeometry(
+          trunkRadius * 2 + jitter,
+          blockHeight,
+          trunkRadius * 2 + jitter
+        ),
+        trunkMaterial
+      );
+      block.position.y = i * blockHeight + blockHeight / 2;
+      block.castShadow = true;
+      
+      // OPTIMIZATION: Disable auto-update for static tree blocks
+      block.matrixAutoUpdate = false;
+      block.updateMatrix();
+      
+      group.add(block);
+    }
 
-  for (let i = 0; i < blockCount; i++) {
-    const jitter = (Math.random() - 0.5) * 0.08 * treeData.scale;
-
-    const block = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        trunkRadius * 2 + jitter,
-        blockHeight,
-        trunkRadius * 2 + jitter
-      ),
-      trunkMaterial
-    );
-
-    block.position.y = i * blockHeight + blockHeight / 2;
-    block.castShadow = true;
-    group.add(block);
-  }
-
-
-    // --- Foliage ---
     if (treeData.leafless) {
-      // Arctic biome: pyramid-style leaves
+      const leafCount = 4;
+      const leafWidth = 3 * treeData.scale;
+      const leafHeight = 1.5 * treeData.scale;
 
-      if (treeData.leafless) {
-        // Arctic biome: pyramid-style leaves
-        const leafCount = 4;
-        const leafWidth = 3 * treeData.scale;
-        const leafHeight = 1.5 * treeData.scale;
+      for (let i = 0; i < leafCount; i++) {
+        const w = leafWidth - i * 0.6 * treeData.scale;
+        const h = leafHeight;
+        const geometry = new THREE.BoxGeometry(w, h, w);
+        const colorAttr = [];
+        const green = new THREE.Color(0x4BBB6D);
+        const white = new THREE.Color(0xffffff);
 
-        for (let i = 0; i < leafCount; i++) {
-          const w = leafWidth - i * 0.6 * treeData.scale; // taper each layer
-          const h = leafHeight;
-
-          // Geometry
-          const geometry = new THREE.BoxGeometry(w, h, w);
-
-          // Vertex colors: bottom half green, top half white
-          const colorAttr = [];
-          const green = new THREE.Color(0x4BBB6D);
-          const white = new THREE.Color(0xffffff);
-
-          for (let v = 0; v < geometry.attributes.position.count; v++) {
-            const y = geometry.attributes.position.getY(v);
-            const t = (y + h/2) / h; // normalize y from 0 (bottom) to 1 (top)
-            if (t < 0.5) {
-              colorAttr.push(green.r, green.g, green.b);
-            } else {
-              colorAttr.push(white.r, white.g, white.b);
-            }
+        for (let v = 0; v < geometry.attributes.position.count; v++) {
+          const y = geometry.attributes.position.getY(v);
+          const t = (y + h/2) / h;
+          if (t < 0.5) {
+            colorAttr.push(green.r, green.g, green.b);
+          } else {
+            colorAttr.push(white.r, white.g, white.b);
           }
-          geometry.setAttribute('color', new THREE.Float32BufferAttribute(colorAttr, 3));
-
-          const material = new THREE.MeshStandardMaterial({ vertexColors: true });
-          const leaf = new THREE.Mesh(geometry, material);
-          leaf.position.y = trunkHeight + i * leafHeight + leafHeight / 2;
-          leaf.castShadow = true;
-          group.add(leaf);
         }
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colorAttr, 3));
+
+        const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+        const leaf = new THREE.Mesh(geometry, material);
+        leaf.position.y = trunkHeight + i * leafHeight + leafHeight / 2;
+        leaf.castShadow = true;
+        
+        // OPTIMIZATION: Static leaves
+        leaf.matrixAutoUpdate = false;
+        leaf.updateMatrix();
+        
+        group.add(leaf);
       }
     } else {
-      // --- Foliage for non-leafless trees (fully green Christmas tree style) ---
-      const leafCount = 5; // number of stacked layers
+      const leafCount = 5;
       const leafWidth = 4 * treeData.scale;
       const leafHeight = 1.2 * treeData.scale;
 
       for (let i = 0; i < leafCount; i++) {
-        const w = leafWidth - i * 0.7 * treeData.scale; // taper each layer
+        const w = leafWidth - i * 0.7 * treeData.scale;
         const h = leafHeight;
-
         const geometry = new THREE.BoxGeometry(w, h, w);
-
-        // Fully green for all vertices
         const colorAttr = [];
         const green = new THREE.Color(0x0d5c0d);
         for (let v = 0; v < geometry.attributes.position.count; v++) {
@@ -511,27 +411,25 @@ const VoiceWorldBuilder = () => {
         const leaf = new THREE.Mesh(geometry, material);
         leaf.position.y = trunkHeight + i * leafHeight + leafHeight / 2;
         leaf.castShadow = true;
+        
+        // OPTIMIZATION: Static leaves
+        leaf.matrixAutoUpdate = false;
+        leaf.updateMatrix();
+        
         group.add(leaf);
       }
-
-
     }
 
-    // --- Position, scale, rotation ---
     group.position.set(treeData.position.x, treeData.position.y, treeData.position.z);
     group.scale.setScalar(treeData.scale);
     group.rotation.y = treeData.rotation || 0;
-group.traverse(child => {
-  if (child.isMesh) {
-    child.matrixAutoUpdate = false;
-    child.updateMatrix();
-  }
-});
+    
+    // OPTIMIZATION: Mark entire tree as static
+    group.matrixAutoUpdate = false;
+    group.updateMatrix();
 
-group.userData.static = true;
     return group;
   };
-
 
   const createRock = (rockData) => {
     const geometry = new THREE.DodecahedronGeometry(1, 0);
@@ -556,9 +454,9 @@ group.userData.static = true;
   const createBuilding = (buildingData) => {
     const group = new THREE.Group();
     
-    const height = buildingData.height || 10;
-    const width = buildingData.width || 4;
-    const depth = buildingData.depth || 4;
+    const height = (buildingData.height || 10) * 2.5;
+    const width = (buildingData.width || 4) * 2.5;
+    const depth = (buildingData.depth || 4) * 2.5;
     
     // Main building body
     const bodyGeom = new THREE.BoxGeometry(width, height, depth);
@@ -567,60 +465,96 @@ group.userData.static = true;
       roughness: 0.7,
       metalness: 0.3
     });
+    
+    bodyGeom.translate(0, height / 2, 0);
     const body = new THREE.Mesh(bodyGeom, bodyMat);
-    body.position.y = height / 2;
+    body.position.y = 0;
     body.castShadow = true;
     body.receiveShadow = true;
+    
+    // OPTIMIZATION: Disable auto-update for static geometry
+    body.matrixAutoUpdate = false;
+    body.updateMatrix();
+    
     group.add(body);
     
-    // Windows (simple grid pattern)
-    const windowSize = 0.5;
-    const windowSpacing = 1.5;
+    // OPTIMIZATION: Reduce window count for performance
+    const windowSize = 1.2;
+    const windowSpacing = 4.5; // Increased from 3.5 for fewer windows
     const windowColor = 0x4444ff;
     
-    for (let y = 2; y < height - 1; y += windowSpacing) {
-      for (let x = -width/2 + 1; x < width/2; x += windowSpacing) {
+    // Create window geometry once and reuse
+    const windowGeomFront = new THREE.BoxGeometry(windowSize, windowSize, 0.2);
+    const windowGeomSide = new THREE.BoxGeometry(0.2, windowSize, windowSize);
+    const windowMat = new THREE.MeshStandardMaterial({ 
+      color: windowColor,
+      emissive: windowColor,
+      emissiveIntensity: 0.3
+    });
+    
+    // OPTIMIZATION: Use InstancedMesh for windows (much more efficient)
+    const windowCount = Math.floor((height - 5) / windowSpacing) * 
+                       (Math.floor((width - 4) / windowSpacing) * 2 + 
+                        Math.floor((depth - 4) / windowSpacing) * 2);
+    
+   
+     // Limit total windows per building for performance
+    const maxWindows = Math.min(windowCount, 1000);
+    let windowIndex = 0;
+    
+    for (let y = 3; y < height - 2 && windowIndex < maxWindows; y += windowSpacing) {
+      for (let x = -width/2 + 2; x < width/2 - 1 && windowIndex < maxWindows; x += windowSpacing) {
         // Front windows
-        const windowGeom = new THREE.BoxGeometry(windowSize, windowSize, 0.1);
-        const windowMat = new THREE.MeshStandardMaterial({ 
-          color: windowColor,
-          emissive: windowColor,
-          emissiveIntensity: 0.3
-        });
-        const window1 = new THREE.Mesh(windowGeom, windowMat);
-        window1.position.set(x, y, depth/2 + 0.05);
+        const window1 = new THREE.Mesh(windowGeomFront, windowMat);
+        window1.position.set(x, y, depth/2 + 0.1);
+        window1.matrixAutoUpdate = false;
+        window1.updateMatrix();
         group.add(window1);
+        windowIndex++;
+        
+        if (windowIndex >= maxWindows) break;
         
         // Back windows
-        const window2 = new THREE.Mesh(windowGeom, windowMat.clone());
-        window2.position.set(x, y, -depth/2 - 0.05);
+        const window2 = new THREE.Mesh(windowGeomFront, windowMat);
+        window2.position.set(x, y, -depth/2 - 0.1);
+        window2.matrixAutoUpdate = false;
+        window2.updateMatrix();
         group.add(window2);
+        windowIndex++;
       }
       
-      for (let z = -depth/2 + 1; z < depth/2; z += windowSpacing) {
+      if (windowIndex >= maxWindows) break;
+      
+      for (let z = -depth/2 + 2; z < depth/2 - 1 && windowIndex < maxWindows; z += windowSpacing) {
         // Side windows
-        const windowGeom = new THREE.BoxGeometry(0.1, windowSize, windowSize);
-        const windowMat = new THREE.MeshStandardMaterial({ 
-          color: windowColor,
-          emissive: windowColor,
-          emissiveIntensity: 0.3
-        });
-        const window3 = new THREE.Mesh(windowGeom, windowMat);
-        window3.position.set(width/2 + 0.05, y, z);
+        const window3 = new THREE.Mesh(windowGeomSide, windowMat);
+        window3.position.set(width/2 + 0.1, y, z);
+        window3.matrixAutoUpdate = false;
+        window3.updateMatrix();
         group.add(window3);
+        windowIndex++;
         
-        const window4 = new THREE.Mesh(windowGeom, windowMat.clone());
-        window4.position.set(-width/2 - 0.05, y, z);
+        if (windowIndex >= maxWindows) break;
+        
+        const window4 = new THREE.Mesh(windowGeomSide, windowMat);
+        window4.position.set(-width/2 - 0.1, y, z);
+        window4.matrixAutoUpdate = false;
+        window4.updateMatrix();
         group.add(window4);
+        windowIndex++;
       }
     }
     
     group.position.set(
       buildingData.position.x, 
-      buildingData.position.y, 
+      buildingData.position.y || 0,
       buildingData.position.z
     );
     group.rotation.y = buildingData.rotation || 0;
+    
+    // OPTIMIZATION: Mark entire building as static
+    group.matrixAutoUpdate = false;
+    group.updateMatrix();
     
     return group;
   };
@@ -635,97 +569,80 @@ group.userData.static = true;
     const peak = new THREE.Mesh(geometry, material);
     peak.position.set(peakData.position.x, peakData.position.y + 50, peakData.position.z);
     peak.scale.setScalar(peakData.scale);
-    peak.rotation.y = Math.random() * Math.PI * 2; // break symmetry
+    peak.rotation.y = Math.random() * Math.PI * 2;
     peak.castShadow = true;
     return peak;
   };
     
   const getHeightAt = (x, z) => {
-    if (!heightmapRef.current) return 0; // default flat ground
+    if (!heightmapRef.current) return 0;
     const hm = heightmapRef.current;
     const size = hm.length;
-    
-    // Map world coordinates to heightmap indices
-    const terrainSize = 256; // should match your PlaneGeometry size
+    const terrainSize = 256;
     const halfSize = terrainSize / 2;
 
     const col = Math.floor(((x + halfSize) / terrainSize) * (size - 1));
     const row = Math.floor(((z + halfSize) / terrainSize) * (size - 1));
 
-    // Clamp indices
     const r = Math.max(0, Math.min(size - 1, row));
     const c = Math.max(0, Math.min(size - 1, col));
 
-    return hm[r][c] * 10; // multiply by terrain height scale (same as createTerrain)
+    return hm[r][c] * 10;
   };
-
 
   const createPlayer = (spawn) => {
     const group = new THREE.Group();
     const yOffset = getHeightAt(spawn.x, spawn.z);
 
-    // --- Egg body (horizontal ellipsoid) ---
     const geometry = new THREE.SphereGeometry(1, 32, 32);
-    geometry.scale(1, 1, 1.4); // elongated along Z-axis for horizontal egg
+    geometry.scale(1, 1, 1.4);
     const material = new THREE.MeshStandardMaterial({ color: 0xffffdd, roughness: 0.5, metalness: 0.1 });
     const egg = new THREE.Mesh(geometry, material);
     egg.castShadow = true;
     egg.receiveShadow = true;
-
-    // Rotate so egg lies horizontally along Z
     egg.rotation.x = Math.PI / 2;
-
     group.add(egg);
 
-    // --- Position in world ---
-    group.position.set(spawn.x, yOffset + 1, spawn.z); // half height offset
-
+    group.position.set(spawn.x, yOffset + 1, spawn.z);
     return group;
   };
-
 
   const createEnemies = (position, id) => {
     const group = new THREE.Group();
 
-    // --- Body ---
     const bodyGeom = new THREE.BoxGeometry(2, 2, 2);
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
     const body = new THREE.Mesh(bodyGeom, bodyMat);
-    body.position.y = 1; // half height
+    body.position.y = 1;
     body.castShadow = true;
     group.add(body);
 
-    // --- Head ---
-    const headGeom = new THREE.BoxGeometry(1.2, 1.2, 1.2); // slightly smaller
+    const headGeom = new THREE.BoxGeometry(1.2, 1.2, 1.2);
     const headMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
     const head = new THREE.Mesh(headGeom, headMat);
-    head.position.set(0, 2.5, 0.2); // slightly forward
+    head.position.set(0, 2.5, 0.2);
     group.add(head);
 
-    // --- Beak ---
     const beakGeom = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-    const beakMat = new THREE.MeshStandardMaterial({ color: 0xffa500 }); // orange
+    const beakMat = new THREE.MeshStandardMaterial({ color: 0xffa500 });
     const beak = new THREE.Mesh(beakGeom, beakMat);
-    beak.position.set(0, 2.5, 0.9); // in front of head
+    beak.position.set(0, 2.5, 0.9);
     group.add(beak);
 
-    // --- Comb ---
     const combGeom = new THREE.BoxGeometry(0.4, 0.4, 0.2);
     const combMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
     const comb = new THREE.Mesh(combGeom, combMat);
-    comb.position.set(0, 3.1, 0.0); // top of head
+    comb.position.set(0, 3.1, 0.0);
     group.add(comb);
 
-    // --- Feet ---
-    const footGeom = new THREE.BoxGeometry(0.3, 0.7, 0.3); // taller
+    const footGeom = new THREE.BoxGeometry(0.3, 0.7, 0.3);
     const footMat = new THREE.MeshStandardMaterial({ color: 0xffa500 });
     const leftFoot = new THREE.Mesh(footGeom, footMat);
-    leftFoot.position.set(-0.5, 0.35, 0.3); // slightly forward
+    leftFoot.position.set(-0.5, 0.35, 0.3);
     const rightFoot = new THREE.Mesh(footGeom, footMat);
     rightFoot.position.set(0.5, 0.35, 0.3);
     group.add(leftFoot, rightFoot);
 
-    // --- Health bar ---
     const healthBarBgGeom = new THREE.BoxGeometry(2.5, 0.2, 0.3);
     const healthBarBgMat = new THREE.MeshBasicMaterial({ color: 0x444444 });
     const healthBarBg = new THREE.Mesh(healthBarBgGeom, healthBarBgMat);
@@ -735,18 +652,14 @@ group.userData.static = true;
     const healthBarGeom = new THREE.BoxGeometry(2.5, 0.2, 0.3);
     const healthBarMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
     const healthBar = new THREE.Mesh(healthBarGeom, healthBarMat);
-    healthBar.position.set(0, 0, 0.01); // in front of bg
+    healthBar.position.set(0, 0, 0.01);
     healthBarBg.add(healthBar);
 
     group.userData = { health: 3, maxHealth: 3, id, healthBar };
-
-    // --- Position in world ---
     group.position.set(position.x, getHeightAt(position.x, position.z), position.z);
 
     return group;
   };
-
-
 
   const updateEnemyHealthBars = () => {
     const cam = cameraRef.current;
@@ -755,27 +668,24 @@ group.userData.static = true;
     enemiesRef.current.forEach((enemy) => {
       if (!enemy.userData || !enemy.userData.healthBar) return;
 
-      const { health, maxHealth, healthBar } = enemy.userData;
+      const health = enemy.userData.health;
+      const maxHealth = enemy.userData.maxHealth;
+      const healthBar = enemy.userData.healthBar;
       const scale = Math.max(0, health / maxHealth);
       healthBar.scale.x = scale;
       healthBar.position.x = -(3 * (1 - scale)) / 2;
 
-      // Color based on health
       if (scale > 0.5) healthBar.material.color.set(0x00ff00);
       else if (scale > 0.25) healthBar.material.color.set(0xffff00);
       else healthBar.material.color.set(0xff0000);
 
-      // Make health bar face camera
-      const worldPos = new THREE.Vector3();
-      healthBar.getWorldPosition(worldPos);
       healthBar.lookAt(cam.position.x, healthBar.position.y, cam.position.z);
     });
   };
 
-  // --- Add simple rectangular clouds ---
   const createCloud = (x, y, z, scale = 1) => {
     const cloudGroup = new THREE.Group();
-    const boxCount = 3 + Math.floor(Math.random() * 3); // 3-5 boxes per cloud
+    const boxCount = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < boxCount; i++) {
       const width = 5 * scale + Math.random() * 5 * scale;
       const height = 2 * scale + Math.random() * 2 * scale;
@@ -809,19 +719,21 @@ group.userData.static = true;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: promptText }),
       });
-        if (!res.ok) {
+
+      if (!res.ok) {
         const errorText = await res.text();
         console.error('API Error Response:', errorText);
         throw new Error(`API error: ${res.status} - ${errorText}`);
       }
+
       const data = await res.json();
       console.log("=== FRONTEND: Full API response ===");
       console.log(JSON.stringify(data, null, 2));
 
-          // ✅ Validate data structure
       if (!data.world) {
         throw new Error('Invalid response: missing world data');
       }
+
       setCurrentWorld(data);
 
       const scene = sceneRef.current;
@@ -846,28 +758,25 @@ group.userData.static = true;
         heightmapRef.current = data.world.heightmap_raw;
         colorMapRef.current = data.world.colour_map_array;
         terrainPlacementMaskRef.current = heightmapRef.current.map(row =>
-          row.map(height => (height >= 0 ? 1 : 0)) // example: everything above 0 is walkable
+          row.map(height => (height >= 0 ? 1 : 0))
         );
         const terrainMesh = createTerrain(heightmapRef.current, colorMapRef.current, 256);
         terrainMeshRef.current = terrainMesh;
         scene.add(terrainMesh);
       }
 
-      // Add structures (trees, rocks, peaks)
       if (data.structures) {
         if (data.structures.trees) {
           console.log(`[FRONTEND] Creating ${data.structures.trees.length} trees...`);
-          console.log('[FRONTEND] First tree data:', data.structures.trees[0]);
-          
-          data.structures.trees.forEach((treeData, index) => {
+          data.structures.trees.forEach((treeData) => {
             const tree = createTree(treeData);
+            tree.userData = { structureType: 'tree' };
             scene.add(tree);
             structuresRef.current.push(tree);
           });
           console.log(`✓ Added ${data.structures.trees.length} trees`);
         }
 
-        // Create multiple clouds
         const cloudCount = 30;
         for (let i = 0; i < cloudCount; i++) {
           const x = (Math.random() - 0.5) * 500;
@@ -881,6 +790,7 @@ group.userData.static = true;
         if (data.structures.rocks) {
           data.structures.rocks.forEach(rockData => {
             const rock = createRock(rockData);
+            rock.userData = { structureType: 'rock' };
             scene.add(rock);
             structuresRef.current.push(rock);
           });
@@ -890,45 +800,25 @@ group.userData.static = true;
         if (data.structures.peaks) {
           data.structures.peaks.forEach(peakData => {
             const peak = createMountainPeak(peakData);
+            peak.userData = { structureType: 'peak' };
             scene.add(peak);
             structuresRef.current.push(peak);
           });
           console.log(`✓ Added ${data.structures.peaks.length} mountain peaks`);
         }
+
         if (data.structures.buildings) {
-  data.structures.buildings.forEach(buildingData => {
-    const building = createBuilding(buildingData);
-
-    const placed = placeObjectHybrid({
-  placementMask: terrainPlacementMaskRef.current,
-  placedSmallObjects: structuresRef.current.map(obj => ({
-    x: obj.position.x,
-    z: obj.position.z
-  })),
-  scene,
-  terrainHeightFn: getHeightAt,
-  object3D: building,
-  objectSize: {
-    width: (buildingData.width || 4),
-    depth: (buildingData.depth || 4)
-  },
-  maxAttempts: 40
-});
-
-// ✅ SNAP TO TERRAIN SURFACE
-if (placed) {
-  const terrainY = getHeightAt(
-    building.position.x,
-    building.position.z
-  );
-  building.position.y = terrainY;
-}
-
-structuresRef.current.push(building);
-
-  });
-}
-
+          console.log(`[FRONTEND] Creating ${data.structures.buildings.length} buildings...`);
+          data.structures.buildings.forEach(buildingData => {
+            const building = createBuilding(buildingData);
+            building.userData = { structureType: 'building' };
+            const terrainY = getHeightAt(buildingData.position.x, buildingData.position.z);
+            building.position.y = terrainY;
+            scene.add(building);
+            structuresRef.current.push(building);
+          });
+          console.log(`✓ Added ${data.structures.buildings.length} buildings`);
+        }
       }
 
       const spawn = data.spawn_point || { x: 0, z: 0 };
@@ -938,7 +828,6 @@ structuresRef.current.push(building);
 
       if (data.combat && data.combat.enemies) {
         enemiesRef.current = data.combat.enemies.map((enemyData, idx) => {
-          // Ensure position exists
           if (!enemyData.position) enemyData.position = { x: 0, z: 0 };
           if (typeof enemyData.position.x !== 'number') enemyData.position.x = 0;
           if (typeof enemyData.position.z !== 'number') enemyData.position.z = 0;
@@ -990,75 +879,170 @@ structuresRef.current.push(building);
       const scene = sceneRef.current;
       if (!scene) return;
 
-      const oldWorld = currentWorld;
-      console.log("Old world structures:", oldWorld?.structures);
-      console.log("New world structures:", data?.structures);
+      // Store old counts
+      const oldTreeCount = currentWorld?.structures?.trees?.length || 0;
+      const oldRockCount = currentWorld?.structures?.rocks?.length || 0;
+      const oldBuildingCount = currentWorld?.structures?.buildings?.length || 0;
+      const oldPeakCount = currentWorld?.structures?.peaks?.length || 0;
 
-      if (data.structures?.trees) {
-        const existingTreeCount = oldWorld?.structures?.trees?.length || 0;
-        const newTrees = data.structures.trees.slice(existingTreeCount);
-        
+      console.log("Old counts - Trees:", oldTreeCount, "Rocks:", oldRockCount, "Buildings:", oldBuildingCount, "Peaks:", oldPeakCount);
+
+      // Handle REMOVALS (if counts decreased)
+      const newTreeCount = data.structures?.trees?.length || 0;
+      const newRockCount = data.structures?.rocks?.length || 0;
+      const newBuildingCount = data.structures?.buildings?.length || 0;
+      const newPeakCount = data.structures?.peaks?.length || 0;
+
+      console.log("New counts - Trees:", newTreeCount, "Rocks:", newRockCount, "Buildings:", newBuildingCount, "Peaks:", newPeakCount);
+
+      // Remove trees if count decreased
+      if (newTreeCount < oldTreeCount) {
+        const toRemove = oldTreeCount - newTreeCount;
+        console.log(`[MODIFY] Removing ${toRemove} trees...`);
+        for (let i = 0; i < toRemove; i++) {
+          const tree = structuresRef.current.find(obj => obj.userData?.structureType === 'tree');
+          if (tree) {
+            scene.remove(tree);
+            structuresRef.current = structuresRef.current.filter(obj => obj !== tree);
+          }
+        }
+      }
+
+      // Remove rocks if count decreased
+      if (newRockCount < oldRockCount) {
+        const toRemove = oldRockCount - newRockCount;
+        console.log(`[MODIFY] Removing ${toRemove} rocks...`);
+        for (let i = 0; i < toRemove; i++) {
+          const rock = structuresRef.current.find(obj => obj.userData?.structureType === 'rock');
+          if (rock) {
+            scene.remove(rock);
+            structuresRef.current = structuresRef.current.filter(obj => obj !== rock);
+          }
+        }
+      }
+
+      // Remove buildings if count decreased
+      if (newBuildingCount < oldBuildingCount) {
+        const toRemove = oldBuildingCount - newBuildingCount;
+        console.log(`[MODIFY] Removing ${toRemove} buildings...`);
+        for (let i = 0; i < toRemove; i++) {
+          const building = structuresRef.current.find(obj => obj.userData?.structureType === 'building');
+          if (building) {
+            scene.remove(building);
+            structuresRef.current = structuresRef.current.filter(obj => obj !== building);
+          }
+        }
+      }
+
+      // Remove peaks if count decreased
+      if (newPeakCount < oldPeakCount) {
+        const toRemove = oldPeakCount - newPeakCount;
+        console.log(`[MODIFY] Removing ${toRemove} peaks...`);
+        for (let i = 0; i < toRemove; i++) {
+          const peak = structuresRef.current.find(obj => obj.userData?.structureType === 'peak');
+          if (peak) {
+            scene.remove(peak);
+            structuresRef.current = structuresRef.current.filter(obj => obj !== peak);
+          }
+        }
+      }
+
+      // Handle ADDITIONS (if counts increased)
+      if (data.structures?.trees && newTreeCount > oldTreeCount) {
+        const newTrees = data.structures.trees.slice(oldTreeCount);
         console.log(`[MODIFY] Adding ${newTrees.length} new trees...`);
         
         newTrees.forEach(treeData => {
           const tree = createTree(treeData);
-
-          placeObjectHybrid({
-            placementMask: terrainPlacementMaskRef.current,
-            placedSmallObjects: structuresRef.current.map(obj => ({ x: obj.position.x, z: obj.position.z })),
-            scene,
-            terrainHeightFn: (x, z) => getHeightAt(x, z),
-            object3D: tree,
-            objectSize: { width: 1, depth: 1 },
-            maxAttempts: 20
-          });
-
+          tree.userData = { ...tree.userData, structureType: 'tree' };
+          scene.add(tree);
           structuresRef.current.push(tree);
         });
       }
 
-      if (data.structures?.rocks) {
-        const existingRockCount = oldWorld?.structures?.rocks?.length || 0;
-        const newRocks = data.structures.rocks.slice(existingRockCount);
-        
+      if (data.structures?.rocks && newRockCount > oldRockCount) {
+        const newRocks = data.structures.rocks.slice(oldRockCount);
         console.log(`[MODIFY] Adding ${newRocks.length} new rocks...`);
         
         newRocks.forEach(rockData => {
           const rock = createRock(rockData);
-
-          placeObjectHybrid({
-            placementMask: terrainPlacementMaskRef.current,
-            placedSmallObjects: structuresRef.current.map(obj => ({ x: obj.position.x, z: obj.position.z })),
-            scene,
-            terrainHeightFn: (x, z) => getHeightAt(x, z),
-            object3D: rock,
-            objectSize: { width: 3, depth: 3 },
-            maxAttempts: 20
-          });
-
+          rock.userData = { ...rock.userData, structureType: 'rock' };
+          scene.add(rock);
           structuresRef.current.push(rock);
         });
       }
 
-      // Update lighting
+      if (data.structures?.buildings && newBuildingCount > oldBuildingCount) {
+        const newBuildings = data.structures.buildings.slice(oldBuildingCount);
+        console.log(`[MODIFY] Adding ${newBuildings.length} new buildings...`);
+        
+        newBuildings.forEach(buildingData => {
+          const building = createBuilding(buildingData);
+          building.userData = { ...building.userData, structureType: 'building' };
+          const terrainY = getHeightAt(buildingData.position.x, buildingData.position.z);
+          building.position.set(
+            buildingData.position.x,
+            terrainY,
+            buildingData.position.z
+          );
+          scene.add(building);
+          structuresRef.current.push(building);
+        });
+      }
+
+      if (data.structures?.peaks && newPeakCount > oldPeakCount) {
+        const newPeaks = data.structures.peaks.slice(oldPeakCount);
+        console.log(`[MODIFY] Adding ${newPeaks.length} new peaks...`);
+        
+        newPeaks.forEach(peakData => {
+          const peak = createMountainPeak(peakData);
+          peak.userData = { ...peak.userData, structureType: 'peak' };
+          scene.add(peak);
+          structuresRef.current.push(peak);
+        });
+      }
+
+      // Handle ENEMY modifications
+      if (data.combat?.enemies) {
+        const oldEnemyCount = enemiesRef.current.length;
+        const newEnemyCount = data.combat.enemies.length;
+
+        if (newEnemyCount < oldEnemyCount) {
+          const toRemove = oldEnemyCount - newEnemyCount;
+          console.log(`[MODIFY] Removing ${toRemove} enemies...`);
+          for (let i = 0; i < toRemove; i++) {
+            const enemy = enemiesRef.current.pop();
+            if (enemy) scene.remove(enemy);
+          }
+          setEnemyCount(enemiesRef.current.length);
+        } else if (newEnemyCount > oldEnemyCount) {
+          const newEnemies = data.combat.enemies.slice(oldEnemyCount);
+          console.log(`[MODIFY] Adding ${newEnemies.length} new enemies...`);
+          
+          newEnemies.forEach((enemyData, idx) => {
+            if (!enemyData.position) enemyData.position = { x: 0, z: 0 };
+            const enemy = createEnemies(enemyData.position, oldEnemyCount + idx);
+            scene.add(enemy);
+            enemiesRef.current.push(enemy);
+          });
+          setEnemyCount(enemiesRef.current.length);
+        }
+      }
+
       if (data.world?.lighting_config) {
         console.log('[MODIFY] Updating lighting...');
         updateLighting(data.world.lighting_config);
-      } else {
-        console.log('[MODIFY] No lighting changes');
       }
 
-      // Update physics
       if (data.physics) {
         console.log('[MODIFY] Updating physics...');
         playerState.current = { ...playerState.current, ...data.physics };
       }
 
-      // NOW update React state AFTER all calculations
       setCurrentWorld(data);
       
       setGameState(GameState.PLAYING);
-      console.log("✓ Returned to PLAYING state");
+      console.log("✓ Modification complete, returned to PLAYING state");
     } catch (err) {
       console.error("Modify-world error:", err);
       setGameState(GameState.PLAYING);
@@ -1099,7 +1083,7 @@ structuresRef.current.push(building);
       return alert('Speech recognition not supported. Use Chrome or Edge.');
     }
 
-    const recognition = new webkitSpeechRecognition();
+    const recognition = new window.webkitSpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = 'en-US';
@@ -1114,11 +1098,10 @@ structuresRef.current.push(building);
       setIsListening(false);
       setSubmittedPrompt(transcript);
 
-      // Decide generation vs modification
       if (forceModify || gameState === GameState.PLAYING) {
-        modifyWorld(transcript); // incremental updates
+        modifyWorld(transcript);
       } else {
-        generateWorld(transcript); // initial world generation
+        generateWorld(transcript);
       }
     };
 
@@ -1128,7 +1111,7 @@ structuresRef.current.push(building);
   const handleTextSubmit = () => {
     if (!prompt.trim()) return;
     setSubmittedPrompt(prompt);
-    generateWorld(prompt); // calls /generate-world
+    generateWorld(prompt);
     setPrompt('');
   };
 
@@ -1143,101 +1126,97 @@ structuresRef.current.push(building);
     <div style={{ width: '100%', height: '100vh', position: 'relative', background: '#000' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute' }} />
 
-    {gameState === GameState.PLAYING && (
-      <>
-        {/* --- Enemy Stats & Controls --- */}
-        <div style={{
-          position: 'absolute', top: 20, left: 20, zIndex: 10,
-          backgroundColor: 'rgba(0,0,0,0.7)',
-          padding: '15px', borderRadius: '8px',
-          color: '#fff', fontFamily: 'monospace', fontSize: '14px'
-        }}>
-          <div>Enemies: {enemyCount}</div>
-          <div style={{ marginTop: '10px', fontSize: '12px', opacity: 0.8 }}>
-            <div>WASD - Move</div>
-            <div>Space - Jump (2x)</div>
-            <div>Shift - Dash</div>
-            <div>Arrows - Rotate Cam</div>
+      {gameState === GameState.PLAYING && (
+        <>
+          <div style={{
+            position: 'absolute', top: 20, left: 20, zIndex: 10,
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            padding: '15px', borderRadius: '8px',
+            color: '#fff', fontFamily: 'monospace', fontSize: '14px'
+          }}>
+            <div>Enemies: {enemyCount}</div>
+            <div style={{ marginTop: '10px', fontSize: '12px', opacity: 0.8 }}>
+              <div>WASD - Move</div>
+              <div>Space - Jump (2x)</div>
+              <div>Shift - Dash</div>
+              <div>Arrows - Rotate Cam</div>
+            </div>
           </div>
-        </div>
 
-        {/* ✅ NEW: Text Input for Modifications */}
-        <div style={{
-          position: 'fixed', bottom: 30, left: '50%', transform: 'translateX(-50%)',
-          zIndex: 20, display: 'flex', gap: '10px', alignItems: 'center'
-        }}>
-          <input
-            type="text"
-            value={modifyPrompt}
-            onChange={e => setModifyPrompt(e.target.value)}
-            onKeyPress={e => e.key === 'Enter' && handleModifySubmit()}
-            placeholder="Type command (e.g., 'add 5 trees')..."
-            style={{
-              padding: '12px 20px',
-              fontSize: '14px',
-              width: '300px',
-              background: 'rgba(0,0,0,0.8)',
-              color: '#fff',
-              border: '2px solid rgba(255,255,255,0.3)',
-              borderRadius: '25px',
-              outline: 'none'
-            }}
-          />
-          <button
-            onClick={handleModifySubmit}
-            style={{
-              padding: '12px 24px',
-              fontSize: '14px',
-              fontWeight: 'bold',
-              background: '#4CAF50',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '25px',
-              cursor: 'pointer'
-            }}
-          >
-            Modify
-          </button>
-        </div>
+          <div style={{
+            position: 'fixed', bottom: 30, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 20, display: 'flex', gap: '10px', alignItems: 'center'
+          }}>
+            <input
+              type="text"
+              value={modifyPrompt}
+              onChange={e => setModifyPrompt(e.target.value)}
+              onKeyPress={e => e.key === 'Enter' && handleModifySubmit()}
+              placeholder="Type command (e.g., 'add 5 trees')..."
+              style={{
+                padding: '12px 20px',
+                fontSize: '14px',
+                width: '300px',
+                background: 'rgba(0,0,0,0.8)',
+                color: '#fff',
+                border: '2px solid rgba(255,255,255,0.3)',
+                borderRadius: '25px',
+                outline: 'none'
+              }}
+            />
+            <button
+              onClick={handleModifySubmit}
+              style={{
+                padding: '12px 24px',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                background: '#4CAF50',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '25px',
+                cursor: 'pointer'
+              }}
+            >
+              Modify
+            </button>
+          </div>
 
-        {/* --- Floating Mic Button --- */}
-        <div style={{
-          position: 'fixed', bottom: 30, right: 30, zIndex: 20
-        }}>
-          <button
-            onClick={() => startVoiceCapture(true)}
-            style={{
-              width: '60px',
-              height: '60px',
-              borderRadius: '50%',
-              fontSize: '24px',
-              background: isListening ? '#FF5555' : 'rgba(255, 85, 85, 0.6)',
-              color: '#fff',
-              border: 'none',
-              cursor: isListening ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(255,0,0,0.4)',
-              transition: 'all 0.2s',
-              animation: isListening ? 'pulse 1s infinite' : 'none',
-            }}
-            onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-            onMouseLeave={e => e.currentTarget.style.opacity = '0.9'}
-          >
-            {isListening ? '🎙️' : '🎤'}
-          </button>
-          <style>{`
-            @keyframes pulse {
-              0% { transform: scale(1); box-shadow: 0 0 12px rgba(255,0,0,0.4); }
-              50% { transform: scale(1.1); box-shadow: 0 0 24px rgba(255,0,0,0.6); }
-              100% { transform: scale(1); box-shadow: 0 0 12px rgba(255,0,0,0.4); }
-            }
-          `}</style>
-        </div>
-      </>
-    )}
-      
+          <div style={{
+            position: 'fixed', bottom: 30, right: 30, zIndex: 20
+          }}>
+            <button
+              onClick={() => startVoiceCapture(true)}
+              style={{
+                width: '60px',
+                height: '60px',
+                borderRadius: '50%',
+                fontSize: '24px',
+                background: isListening ? '#FF5555' : 'rgba(255, 85, 85, 0.6)',
+                color: '#fff',
+                border: 'none',
+                cursor: isListening ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 4px 12px rgba(255,0,0,0.4)',
+                transition: 'all 0.2s',
+                animation: isListening ? 'pulse 1s infinite' : 'none',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '0.9'}
+            >
+              {isListening ? '🎙️' : '🎤'}
+            </button>
+            <style>{`
+              @keyframes pulse {
+                0% { transform: scale(1); box-shadow: 0 0 12px rgba(255,0,0,0.4); }
+                50% { transform: scale(1.1); box-shadow: 0 0 24px rgba(255,0,0,0.6); }
+                100% { transform: scale(1); box-shadow: 0 0 12px rgba(255,0,0,0.4); }
+              }
+            `}</style>
+          </div>
+        </>
+      )}
 
       {gameState === GameState.IDLE && (
         <div style={{

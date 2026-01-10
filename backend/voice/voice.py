@@ -94,19 +94,40 @@ Rules:
 - Output ONLY valid JSON matching this structure:
 {
   "add": {"trees": [], "buildings": [], "peaks": [], "rocks": []},
+  "remove": {"trees": 0, "buildings": 0, "peaks": 0, "rocks": 0, "enemies": 0},
+  "set": {"trees": null, "buildings": null, "peaks": null, "rocks": null, "enemies": null},
   "physics": null,
   "lighting": null,
   "combat": null,
   "message": null,
   "time_change": null
 }
-- Always update fields if applicable, leave null if unchanged.
-- Use approximate counts if exact numbers are unknown.
-- Positions for objects are within -120 to 120.
-- Only use info from provided summary; do NOT assume unknown objects exist.
+
+MODIFICATION TYPES:
+1. ADD: Use "add" to add new structures
+   - "add 5 trees" → {"add": {"trees": [5 tree objects]}}
+   
+2. REMOVE: Use "remove" to delete structures
+   - "remove 3 buildings" → {"remove": {"buildings": 3}}
+   - "remove all trees" → {"remove": {"trees": 999}}
+   - "delete 2 rocks" → {"remove": {"rocks": 2}}
+   
+3. SET: Use "set" to change total count
+   - "set trees to 10" → {"set": {"trees": 10}}
+   - "I want exactly 5 buildings" → {"set": {"buildings": 5}}
+
+4. CLEAR: Use remove with high number
+   - "remove all buildings" → {"remove": {"buildings": 999}}
+   - "clear enemies" → {"remove": {"enemies": 999}}
+
+IMPORTANT:
+- For removals, return count only (number), NOT objects
+- For additions, return actual object arrays with positions
+- For set operations, return target count
+- Positions for new objects must be within -120 to 120
+- Only use info from provided summary; do NOT assume unknown objects exist
 - If the player requests a time change (e.g., "make it sunset", "change to night"), 
   set "time_change" to the target time: "noon", "sunset", or "night".
-- If nothing changes, set message: "No modifications applied".
 
 BUILDING GENERATION:
 - Buildings should only be added to city biomes
@@ -124,6 +145,14 @@ TREE GENERATION:
 ROCK GENERATION:
 - Rocks need: type ("boulder", "rock", "ice_rock", "decorative_rock")
 - Rocks need: position {x, y, z}, scale (0.6-1.8), rotation (0-6.28)
+
+PEAK GENERATION:
+- Peaks need: type ("peak")
+- Peaks need: position {x, y, z}, scale (usually 1.0)
+
+ENEMY MODIFICATIONS:
+- Enemies can be added or removed
+- Each enemy needs: position {x, z}, type ("sentinel"), behavior, health
 """
 
     user_prompt = f"""
@@ -201,6 +230,7 @@ Player command:
 def merge_world(current_world: Dict, diff: Dict) -> Dict:
     """
     Merge a 'diff' dictionary from the AI into the current world safely.
+    Handles additions, removals, and set operations.
     """
     current_world.setdefault("world", {})
     current_world.setdefault("structures", {})
@@ -223,12 +253,49 @@ def merge_world(current_world: Dict, diff: Dict) -> Dict:
         if key in diff_world:
             current_world["world"][key] = diff_world[key]
 
-    # Merge structures from "add" field (for modifications)
+    # Handle REMOVALS (reduce counts)
+    remove_ops = diff.get("remove", {})
+    for struct_type, count in remove_ops.items():
+        if count > 0:
+            if struct_type == "enemies":
+                current_enemies = current_world["combat"].get("enemies", [])
+                new_count = max(0, len(current_enemies) - count)
+                current_world["combat"]["enemies"] = current_enemies[:new_count]
+                current_world["combat"]["enemy_count"] = new_count
+                print(f"[MERGE] Removed {count} enemies, now {new_count} total")
+            else:
+                current_list = current_world["structures"].get(struct_type, [])
+                new_count = max(0, len(current_list) - count)
+                current_world["structures"][struct_type] = current_list[:new_count]
+                print(f"[MERGE] Removed {count} {struct_type}, now {new_count} total")
+
+    # Handle SET operations (set exact counts)
+    set_ops = diff.get("set", {})
+    for struct_type, target_count in set_ops.items():
+        if target_count is not None:
+            if struct_type == "enemies":
+                current_enemies = current_world["combat"].get("enemies", [])
+                current_count = len(current_enemies)
+                if target_count < current_count:
+                    current_world["combat"]["enemies"] = current_enemies[:target_count]
+                    current_world["combat"]["enemy_count"] = target_count
+                    print(f"[MERGE] Set enemies to {target_count} (removed {current_count - target_count})")
+                # Note: If target > current, handle in add section
+            else:
+                current_list = current_world["structures"].get(struct_type, [])
+                current_count = len(current_list)
+                if target_count < current_count:
+                    current_world["structures"][struct_type] = current_list[:target_count]
+                    print(f"[MERGE] Set {struct_type} to {target_count} (removed {current_count - target_count})")
+                # Note: If target > current, handle in add section
+
+    # Handle ADDITIONS (from "add" field)
     diff_add = diff.get("add", {})
     for struct_type, items in diff_add.items():
         if items:
             current_world["structures"].setdefault(struct_type, [])
             current_world["structures"][struct_type].extend(items)
+            print(f"[MERGE] Added {len(items)} {struct_type}")
 
     # Also merge from "structures" field (for initial generation)
     diff_structures = diff.get("structures", {})
@@ -237,7 +304,7 @@ def merge_world(current_world: Dict, diff: Dict) -> Dict:
             current_world["structures"].setdefault(struct_type, [])
             current_world["structures"][struct_type].extend(items)
 
-    # Merge enemies/combat
+    # Merge enemies/combat (additions)
     diff_combat = diff.get("combat")
     if diff_combat:
         if diff_combat.get("enemies"):
