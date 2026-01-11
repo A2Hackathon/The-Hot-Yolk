@@ -497,9 +497,9 @@ const VoiceWorldBuilder = () => {
                        (Math.floor((width - 4) / windowSpacing) * 2 + 
                         Math.floor((depth - 4) / windowSpacing) * 2);
     
-   
-     // Limit total windows per building for performance
+    // Limit total windows per building for performance - INCREASED TO 1000
     const maxWindows = Math.min(windowCount, 1000);
+    
     let windowIndex = 0;
     
     for (let y = 3; y < height - 2 && windowIndex < maxWindows; y += windowSpacing) {
@@ -884,18 +884,20 @@ const VoiceWorldBuilder = () => {
       const oldRockCount = currentWorld?.structures?.rocks?.length || 0;
       const oldBuildingCount = currentWorld?.structures?.buildings?.length || 0;
       const oldPeakCount = currentWorld?.structures?.peaks?.length || 0;
+      const oldEnemyCount = currentWorld?.combat?.enemies?.length || 0;
 
-      console.log("Old counts - Trees:", oldTreeCount, "Rocks:", oldRockCount, "Buildings:", oldBuildingCount, "Peaks:", oldPeakCount);
+      console.log("Old counts - Trees:", oldTreeCount, "Rocks:", oldRockCount, "Buildings:", oldBuildingCount, "Peaks:", oldPeakCount, "Enemies:", oldEnemyCount);
 
-      // Handle REMOVALS (if counts decreased)
+      // Get new counts
       const newTreeCount = data.structures?.trees?.length || 0;
       const newRockCount = data.structures?.rocks?.length || 0;
       const newBuildingCount = data.structures?.buildings?.length || 0;
       const newPeakCount = data.structures?.peaks?.length || 0;
+      const newEnemyCount = data.combat?.enemies?.length || 0;
 
-      console.log("New counts - Trees:", newTreeCount, "Rocks:", newRockCount, "Buildings:", newBuildingCount, "Peaks:", newPeakCount);
+      console.log("New counts - Trees:", newTreeCount, "Rocks:", newRockCount, "Buildings:", newBuildingCount, "Peaks:", newPeakCount, "Enemies:", newEnemyCount);
 
-      // Remove trees if count decreased
+      // Handle REMOVALS (if counts decreased)
       if (newTreeCount < oldTreeCount) {
         const toRemove = oldTreeCount - newTreeCount;
         console.log(`[MODIFY] Removing ${toRemove} trees...`);
@@ -908,7 +910,6 @@ const VoiceWorldBuilder = () => {
         }
       }
 
-      // Remove rocks if count decreased
       if (newRockCount < oldRockCount) {
         const toRemove = oldRockCount - newRockCount;
         console.log(`[MODIFY] Removing ${toRemove} rocks...`);
@@ -921,7 +922,6 @@ const VoiceWorldBuilder = () => {
         }
       }
 
-      // Remove buildings if count decreased
       if (newBuildingCount < oldBuildingCount) {
         const toRemove = oldBuildingCount - newBuildingCount;
         console.log(`[MODIFY] Removing ${toRemove} buildings...`);
@@ -934,7 +934,6 @@ const VoiceWorldBuilder = () => {
         }
       }
 
-      // Remove peaks if count decreased
       if (newPeakCount < oldPeakCount) {
         const toRemove = oldPeakCount - newPeakCount;
         console.log(`[MODIFY] Removing ${toRemove} peaks...`);
@@ -945,6 +944,16 @@ const VoiceWorldBuilder = () => {
             structuresRef.current = structuresRef.current.filter(obj => obj !== peak);
           }
         }
+      }
+
+      if (newEnemyCount < oldEnemyCount) {
+        const toRemove = oldEnemyCount - newEnemyCount;
+        console.log(`[MODIFY] Removing ${toRemove} enemies...`);
+        for (let i = 0; i < toRemove; i++) {
+          const enemy = enemiesRef.current.pop();
+          if (enemy) scene.remove(enemy);
+        }
+        setEnemyCount(enemiesRef.current.length);
       }
 
       // Handle ADDITIONS (if counts increased)
@@ -1002,31 +1011,17 @@ const VoiceWorldBuilder = () => {
         });
       }
 
-      // Handle ENEMY modifications
-      if (data.combat?.enemies) {
-        const oldEnemyCount = enemiesRef.current.length;
-        const newEnemyCount = data.combat.enemies.length;
-
-        if (newEnemyCount < oldEnemyCount) {
-          const toRemove = oldEnemyCount - newEnemyCount;
-          console.log(`[MODIFY] Removing ${toRemove} enemies...`);
-          for (let i = 0; i < toRemove; i++) {
-            const enemy = enemiesRef.current.pop();
-            if (enemy) scene.remove(enemy);
-          }
-          setEnemyCount(enemiesRef.current.length);
-        } else if (newEnemyCount > oldEnemyCount) {
-          const newEnemies = data.combat.enemies.slice(oldEnemyCount);
-          console.log(`[MODIFY] Adding ${newEnemies.length} new enemies...`);
-          
-          newEnemies.forEach((enemyData, idx) => {
-            if (!enemyData.position) enemyData.position = { x: 0, z: 0 };
-            const enemy = createEnemies(enemyData.position, oldEnemyCount + idx);
-            scene.add(enemy);
-            enemiesRef.current.push(enemy);
-          });
-          setEnemyCount(enemiesRef.current.length);
-        }
+      if (data.combat?.enemies && newEnemyCount > oldEnemyCount) {
+        const newEnemies = data.combat.enemies.slice(oldEnemyCount);
+        console.log(`[MODIFY] Adding ${newEnemies.length} new enemies...`);
+        
+        newEnemies.forEach((enemyData, idx) => {
+          if (!enemyData.position) enemyData.position = { x: 0, z: 0 };
+          const enemy = createEnemies(enemyData.position, oldEnemyCount + idx);
+          scene.add(enemy);
+          enemiesRef.current.push(enemy);
+        });
+        setEnemyCount(enemiesRef.current.length);
       }
 
       if (data.world?.lighting_config) {

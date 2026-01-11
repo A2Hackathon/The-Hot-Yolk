@@ -5,6 +5,8 @@ import numpy as np
 import queue
 import json
 import os
+import random
+import math
 from world.lighting import get_lighting_preset, interpolate_lighting  
 from openai import OpenAI
 
@@ -53,6 +55,112 @@ def summarize_world(world: Dict) -> Dict:
     }
 
 
+def generate_new_buildings(count: int, biome: str, existing_buildings: list, terrain_size: float = 256.0) -> list:
+    """Generate new building objects with proper positions"""
+    if biome.lower() != "city":
+        return []
+    
+    buildings = []
+    building_types = [
+        {"height": 25, "width": 8, "depth": 8, "color": 0x666666},
+        {"height": 18, "width": 10, "depth": 7, "color": 0x888888},
+        {"height": 15, "width": 7, "depth": 10, "color": 0x777777},
+        {"height": 35, "width": 8, "depth": 8, "color": 0x555555},
+        {"height": 28, "width": 9, "depth": 9, "color": 0x444444},
+    ]
+    
+    # Extract existing positions
+    existing_positions = [(b["position"]["x"], b["position"]["z"]) for b in existing_buildings]
+    min_distance = 25
+    
+    attempts = 0
+    max_attempts = count * 50
+    
+    while len(buildings) < count and attempts < max_attempts:
+        attempts += 1
+        
+        # Random position
+        world_x = random.uniform(-terrain_size/2 + 20, terrain_size/2 - 20)
+        world_z = random.uniform(-terrain_size/2 + 20, terrain_size/2 - 20)
+        
+        # Check distance from existing buildings
+        too_close = False
+        for px, pz in existing_positions:
+            dist = math.sqrt((world_x - px)**2 + (world_z - pz)**2)
+            if dist < min_distance:
+                too_close = True
+                break
+        
+        if too_close:
+            continue
+        
+        # Choose random building type
+        building_type = random.choice(building_types)
+        rotation = random.choice([0, math.pi/2, math.pi, 3*math.pi/2])
+        
+        building = {
+            "type": "building",
+            "height": building_type["height"],
+            "width": building_type["width"],
+            "depth": building_type["depth"],
+            "color": building_type["color"],
+            "position": {"x": float(world_x), "y": 0, "z": float(world_z)},
+            "rotation": float(rotation)
+        }
+        
+        buildings.append(building)
+        existing_positions.append((world_x, world_z))
+    
+    print(f"[VOICE] Generated {len(buildings)} new buildings")
+    return buildings
+
+
+def generate_new_enemies(count: int, existing_enemies: list, terrain_size: float = 256.0) -> list:
+    """Generate new enemy objects with proper positions"""
+    enemies = []
+    existing_positions = [(e["position"]["x"], e["position"]["z"]) for e in existing_enemies if "position" in e]
+    min_distance = 10
+    
+    attempts = 0
+    max_attempts = count * 50
+    
+    while len(enemies) < count and attempts < max_attempts:
+        attempts += 1
+        
+        # Random position
+        world_x = random.uniform(-terrain_size/2 + 10, terrain_size/2 - 10)
+        world_z = random.uniform(-terrain_size/2 + 10, terrain_size/2 - 10)
+        
+        # Check distance from existing enemies
+        too_close = False
+        for px, pz in existing_positions:
+            dist = math.sqrt((world_x - px)**2 + (world_z - pz)**2)
+            if dist < min_distance:
+                too_close = True
+                break
+        
+        if too_close:
+            continue
+        
+        enemy = {
+            "id": len(existing_enemies) + len(enemies) + 1,
+            "position": {"x": float(world_x), "y": 0, "z": float(world_z)},
+            "type": "sentinel",
+            "behavior": "patrol",
+            "health": 30,
+            "max_health": 30,
+            "damage": 10,
+            "speed": 2.5,
+            "detection_radius": 15.0,
+            "attack_radius": 1.5
+        }
+        
+        enemies.append(enemy)
+        existing_positions.append((world_x, world_z))
+    
+    print(f"[VOICE] Generated {len(enemies)} new enemies")
+    return enemies
+
 
 def handle_live_command(
     command: str,
@@ -84,7 +192,6 @@ def handle_live_command(
         }
 
     world_summary = summarize_world(current_world)
-    
     current_biome = current_world.get("world", {}).get("biome", "city")
 
     system_prompt = """
@@ -93,7 +200,7 @@ You are a game world editor AI.
 Rules:
 - Output ONLY valid JSON matching this structure:
 {
-  "add": {"trees": [], "buildings": [], "peaks": [], "rocks": []},
+  "add": {"trees": [], "buildings": [], "peaks": [], "rocks": [], "enemies": []},
   "remove": {"trees": 0, "buildings": 0, "peaks": 0, "rocks": 0, "enemies": 0},
   "set": {"trees": null, "buildings": null, "peaks": null, "rocks": null, "enemies": null},
   "physics": null,
@@ -104,55 +211,42 @@ Rules:
 }
 
 MODIFICATION TYPES:
-1. ADD: Use "add" to add new structures
+1. ADD: Use "add" field with count only (number) for buildings and enemies
    - "add 5 trees" → {"add": {"trees": [5 tree objects]}}
+   - "add 3 buildings" → {"add": {"buildings": 3}}  // Just the count!
+   - "add 4 enemies" → {"add": {"enemies": 4}}      // Just the count!
    
 2. REMOVE: Use "remove" to delete structures
    - "remove 3 buildings" → {"remove": {"buildings": 3}}
    - "remove all trees" → {"remove": {"trees": 999}}
-   - "delete 2 rocks" → {"remove": {"rocks": 2}}
+   - "delete 2 enemies" → {"remove": {"enemies": 2}}
    
 3. SET: Use "set" to change total count
    - "set trees to 10" → {"set": {"trees": 10}}
    - "I want exactly 5 buildings" → {"set": {"buildings": 5}}
 
+IMPORTANT FOR BUILDINGS AND ENEMIES:
+- For "add buildings" or "add enemies", return ONLY THE COUNT as a number
+- Backend will generate positions and full objects
+- Example: {"add": {"buildings": 5}} NOT {"add": {"buildings": [...]}}
+
+IMPORTANT FOR OTHER STRUCTURES (trees, rocks, peaks):
+- For trees/rocks/peaks, you must generate full objects with positions
+- Example: {"add": {"trees": [{"type": "oak", "position": {...}, ...}]}}
+
 4. CLEAR: Use remove with high number
    - "remove all buildings" → {"remove": {"buildings": 999}}
    - "clear enemies" → {"remove": {"enemies": 999}}
 
-IMPORTANT:
-- For removals, return count only (number), NOT objects
-- For additions, return actual object arrays with positions
-- For set operations, return target count
-- Positions for new objects must be within -120 to 120
-- Only use info from provided summary; do NOT assume unknown objects exist
-- If the player requests a time change (e.g., "make it sunset", "change to night"), 
-  set "time_change" to the target time: "noon", "sunset", or "night".
+TREE/ROCK/PEAK GENERATION:
+- Trees need: type, leafless, position {x, y, z}, scale, rotation
+- Rocks need: type, position {x, y, z}, scale, rotation
+- Peaks need: type, position {x, y, z}, scale
 
-BUILDING GENERATION:
-- Buildings should only be added to city biomes
-- Each building needs: height (15-35), width (7-10), depth (7-10), color (hex like 0x666666)
-- Buildings need position {x, y, z} and rotation (0, 1.57, 3.14, or 4.71 for 90-degree rotations)
-- Space buildings at least 25 units apart
-- Place on relatively flat ground (y should match terrain height)
-- Buildings are LARGE structures (skyscrapers, towers)
-- Example building: {"type": "building", "height": 25, "width": 8, "depth": 8, "color": 0x666666, "position": {"x": 45, "y": 2.5, "z": -30}, "rotation": 1.57}
-
-TREE GENERATION:
-- Trees need: type ("oak", "pine", "spruce", "maple", "birch"), leafless (true for arctic, false otherwise)
-- Trees need: position {x, y, z}, scale (0.9-4.5), rotation (0-6.28)
-
-ROCK GENERATION:
-- Rocks need: type ("boulder", "rock", "ice_rock", "decorative_rock")
-- Rocks need: position {x, y, z}, scale (0.6-1.8), rotation (0-6.28)
-
-PEAK GENERATION:
-- Peaks need: type ("peak")
-- Peaks need: position {x, y, z}, scale (usually 1.0)
-
-ENEMY MODIFICATIONS:
-- Enemies can be added or removed
-- Each enemy needs: position {x, z}, type ("sentinel"), behavior, health
+BUILDING/ENEMY GENERATION:
+- Just return count as number, backend handles generation
+- Example: "add 5 buildings" → {"add": {"buildings": 5}}
+- Example: "add 3 enemies" → {"add": {"enemies": 3}}
 """
 
     user_prompt = f"""
@@ -187,17 +281,32 @@ Player command:
         
         diff = json.loads(raw)
         
+        # Handle building additions - generate actual building objects
+        if diff.get("add", {}).get("buildings"):
+            count = diff["add"]["buildings"]
+            if isinstance(count, int):
+                existing_buildings = current_world.get("structures", {}).get("buildings", [])
+                new_buildings = generate_new_buildings(count, current_biome, existing_buildings)
+                diff["add"]["buildings"] = new_buildings
+                print(f"[VOICE] Converted building count {count} to {len(new_buildings)} objects")
+        
+        # Handle enemy additions - generate actual enemy objects
+        if diff.get("add", {}).get("enemies"):
+            count = diff["add"]["enemies"]
+            if isinstance(count, int):
+                existing_enemies = current_world.get("combat", {}).get("enemies", [])
+                new_enemies = generate_new_enemies(count, existing_enemies)
+                diff["add"]["enemies"] = new_enemies
+                print(f"[VOICE] Converted enemy count {count} to {len(new_enemies)} objects")
+        
         if diff.get("time_change"):
-            # If from_time and to_time are provided, use smooth interpolation
             if from_time and to_time and progress < 1.0:
                 lighting_config = interpolate_lighting(from_time, to_time, progress, current_biome)
             else:
-                # Instant lighting change
                 lighting_config = get_lighting_preset(diff["time_change"], current_biome)
             
             diff["lighting"] = lighting_config
             
-            # Update world time
             if "world" not in diff:
                 diff["world"] = {}
             diff["world"]["time"] = diff["time_change"]
@@ -211,7 +320,7 @@ Player command:
     except json.JSONDecodeError:
         print("[CLAUDE INVALID JSON]", raw)
         return {
-            "add": {"trees": [], "buildings": [], "peaks": [], "rocks": []},
+            "add": {"trees": [], "buildings": [], "peaks": [], "rocks": [], "enemies": []},
             "physics": None,
             "lighting": None,
             "combat": None,
@@ -220,7 +329,7 @@ Player command:
     except Exception as e:
         print("[CLAUDE ERROR]", e)
         return {
-            "add": {"trees": [], "buildings": [], "peaks": [], "rocks": []},
+            "add": {"trees": [], "buildings": [], "peaks": [], "rocks": [], "enemies": []},
             "physics": None,
             "lighting": None,
             "combat": None,
@@ -280,22 +389,26 @@ def merge_world(current_world: Dict, diff: Dict) -> Dict:
                     current_world["combat"]["enemies"] = current_enemies[:target_count]
                     current_world["combat"]["enemy_count"] = target_count
                     print(f"[MERGE] Set enemies to {target_count} (removed {current_count - target_count})")
-                # Note: If target > current, handle in add section
             else:
                 current_list = current_world["structures"].get(struct_type, [])
                 current_count = len(current_list)
                 if target_count < current_count:
                     current_world["structures"][struct_type] = current_list[:target_count]
                     print(f"[MERGE] Set {struct_type} to {target_count} (removed {current_count - target_count})")
-                # Note: If target > current, handle in add section
 
     # Handle ADDITIONS (from "add" field)
     diff_add = diff.get("add", {})
     for struct_type, items in diff_add.items():
         if items:
-            current_world["structures"].setdefault(struct_type, [])
-            current_world["structures"][struct_type].extend(items)
-            print(f"[MERGE] Added {len(items)} {struct_type}")
+            if struct_type == "enemies":
+                current_world["combat"].setdefault("enemies", [])
+                current_world["combat"]["enemies"].extend(items)
+                current_world["combat"]["enemy_count"] = len(current_world["combat"]["enemies"])
+                print(f"[MERGE] Added {len(items)} enemies, total: {current_world['combat']['enemy_count']}")
+            else:
+                current_world["structures"].setdefault(struct_type, [])
+                current_world["structures"][struct_type].extend(items)
+                print(f"[MERGE] Added {len(items)} {struct_type}")
 
     # Also merge from "structures" field (for initial generation)
     diff_structures = diff.get("structures", {})
@@ -304,7 +417,7 @@ def merge_world(current_world: Dict, diff: Dict) -> Dict:
             current_world["structures"].setdefault(struct_type, [])
             current_world["structures"][struct_type].extend(items)
 
-    # Merge enemies/combat (additions)
+    # Merge enemies/combat (from initial generation)
     diff_combat = diff.get("combat")
     if diff_combat:
         if diff_combat.get("enemies"):

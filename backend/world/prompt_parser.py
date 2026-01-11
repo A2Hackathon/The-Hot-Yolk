@@ -38,7 +38,7 @@ IMPORTANT RULES:
 3. Enemy count:
    - Extract number before "enemies" or "enemy"
    - If not mentioned → 5
-   - Range: 3-8
+   - Range: 0-10
 
 4. Weapon/mechanic:
    - If mentions "jump", "stomp", "bounce", "double jump" → weapon: "double_jump"
@@ -94,7 +94,7 @@ Return ONLY this JSON structure (no markdown, no backticks, no explanation):
             params["weapon"] = "dash"
         
         # Clamp enemy count
-        params["enemy_count"] = max(3, min(8, params["enemy_count"]))
+        params["enemy_count"] =  min(10, params["enemy_count"])
         
         print(f"[PARSER DEBUG] Final params: {params}")
         
@@ -147,7 +147,7 @@ def fallback_parse(prompt: str) -> dict:
     result = {
         "biome": biome,
         "time": time,
-        "enemy_count": max(3, min(8, enemy_count)),
+        "enemy_count": min(10, enemy_count),
         "weapon": weapon,
         "structure": {}
     }
