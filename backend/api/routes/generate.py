@@ -115,7 +115,7 @@ def generate_rocks(
     segments = len(heightmap_raw) - 1
     
     rock_config = {
-        "arctic": {"types": ["ice_rock", "boulder"], "density": 1.2, "min_height": 0.4},
+        "arctic": {"types": ["ice_rock", "boulder"], "density": 1.2, "min_height": 0.3},
         "city": {"types": ["decorative_rock"], "density": 0.2, "min_height": 0.2},
         "default": {"types": ["boulder", "rock"], "density": 1.0, "min_height": 0.3}
     }
@@ -161,54 +161,61 @@ def generate_buildings(
     count: int = 10,
     terrain_size: float = 256.0
 ) -> List[Dict]:
-    """Generate buildings for city biomes"""
+    """Generate buildings for city or arctic biomes."""
     buildings = []
+    biome_lower = biome.lower()
     
-    # Only generate buildings for city biome
-    if biome.lower() != "city":
-        return []
+    if biome_lower not in ["city", "arctic"]:
+        return []  # Only generate buildings for city or arctic
     
     segments = len(heightmap_raw) - 1
     
-    # Building configuration - MUCH BIGGER
-    building_types = [
-        {"height": 25, "width": 8, "depth": 8, "color": 0x666666},   # Tall
-        {"height": 18, "width": 10, "depth": 7, "color": 0x888888},  # Medium
-        {"height": 15, "width": 7, "depth": 10, "color": 0x777777},  # Wide
-        {"height": 35, "width": 8, "depth": 8, "color": 0x555555},   # Skyscraper
-        {"height": 28, "width": 9, "depth": 9, "color": 0x444444},   # Tower
-    ]
+    # --- Define building types ---
+    if biome_lower == "city":
+        building_types = [
+            {"type": "skyscraper", "height": 60, "width": 10, "depth": 10, "color": 0x666666},
+            {"type": "house", "height": 30, "width": 7, "depth": 10, "color": 0x777777},
+            {"type": "skyscraper", "height": 35, "width": 8, "depth": 8, "color": 0x555555},
+            {"type": "house", "height": 18, "width": 10, "depth": 7, "color": 0x888888},
+        ]
+    elif biome_lower == "arctic":
+        building_types = [
+            {"type": "igloo", "height": 3, "width": 5, "depth": 5, "color": 0xFFFFFF},
+        ]
     
-    # Find valid flat areas for buildings
+    # --- Find valid flat areas ---
     valid_points = []
     for z in range(10, segments - 10):
         for x in range(10, segments - 10):
             if placement_mask[z][x] == 1:
                 h = heightmap_raw[z][x]
                 # Buildings need relatively flat ground
-                if 0.15 <= h <= 0.5:
-                    # Check if area is flat enough (check neighbors)
-                    is_flat = True
-                    for dz in range(-2, 3):
-                        for dx in range(-2, 3):
-                            neighbor_h = heightmap_raw[z + dz][x + dx]
-                            if abs(neighbor_h - h) > 0.05:  # Slope tolerance
-                                is_flat = False
+                if biome_lower == "city":
+                    if 0.15 <= h <= 0.5:
+                        # check neighbors for flatness
+                        is_flat = True
+                        for dz in range(-2, 3):
+                            for dx in range(-2, 3):
+                                if abs(heightmap_raw[z + dz][x + dx] - h) > 0.05:
+                                    is_flat = False
+                                    break
+                            if not is_flat:
                                 break
-                        if not is_flat:
-                            break
-                    
-                    if is_flat:
+                        if is_flat:
+                            valid_points.append((x, z))
+                elif biome_lower == "arctic":
+                    # Arctic igloos can be on slightly sloped terrain
+                    if 0.0 <= h <= 0.7:
                         valid_points.append((x, z))
     
     if not valid_points:
-        print("[BUILDINGS] No valid flat points found for buildings")
+        print(f"[BUILDINGS] No valid flat points found for {biome} buildings")
         return []
     
-    # Place buildings with spacing
+    # --- Place buildings with spacing ---
     random.shuffle(valid_points)
     placed_positions = []
-    min_distance = 25  # Increased spacing for bigger buildings
+    min_distance = 25 if biome_lower == "city" else 10  # smaller spacing for igloos
     
     for i in range(len(valid_points)):
         if len(buildings) >= count:
@@ -231,12 +238,11 @@ def generate_buildings(
         
         world_y = heightmap_raw[z_idx][x_idx] * 10
         
-        # Choose random building type
         building_type = random.choice(building_types)
-        rotation = random.choice([0, math.pi/2, math.pi, 3*math.pi/2])  # 90-degree rotations
+        rotation = random.choice([0, math.pi/2, math.pi, 3*math.pi/2])
         
         buildings.append({
-            "type": "building",
+            "type": building_type["type"],
             "height": building_type["height"],
             "width": building_type["width"],
             "depth": building_type["depth"],
@@ -247,8 +253,9 @@ def generate_buildings(
         
         placed_positions.append((world_x, world_z))
     
-    print(f"[Structures] Placed {len(buildings)} buildings")
+    print(f"[Structures] Placed {len(buildings)} {biome} buildings")
     return buildings
+
 
 def generate_mountain_peaks(
     heightmap_raw,
@@ -383,7 +390,7 @@ def place_trees_on_terrain(
         world_y = heightmap_raw[z_idx][x_idx] * 10
 
         tree_type = random.choice(types_for_biome)
-        scale = random.uniform(0.9, 1.5) * (3.0 if is_winter else 1.5)
+        scale = random.uniform(0.9, 1.5) * (2.5 if is_winter else 1.5)
         rotation = random.uniform(0, math.pi * 2)
 
         trees.append({
@@ -426,7 +433,7 @@ async def generate_world(prompt: Dict) -> Dict:
         base_tree_count = 40 if biome.lower() in ["arctic", "winter", "icy"] else 25 if biome.lower() == "city" else 50
         tree_count = structure_counts.get("tree", base_tree_count)
 
-        base_rock_count = 30 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
+        base_rock_count = 15 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
         rock_count = structure_counts.get("rock", base_rock_count)
         mountain_count = structure_counts.get("mountain", 3 if biome.lower() in ["arctic", "winter", "icy"] else 0)
         
