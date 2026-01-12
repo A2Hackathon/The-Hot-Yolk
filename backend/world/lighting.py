@@ -20,11 +20,11 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
         "noon": {
             "ambient": {
                 "color": "#ffffff",
-                "intensity": 0.8
+                "intensity": 0.7
             },
             "directional": {
                 "color": "#ffffff",
-                "intensity": 2.0,
+                "intensity": 0.6,
                 "position": {"x": 50, "y": 100, "z": 50}
             },
             "fog": {
@@ -32,16 +32,16 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
                 "near": 50,
                 "far": 200
             },
-            "background": "#87CEEB"
+            "background": "#64abff"
         },
         
         "sunset": {
             "ambient": {
-                "color": "#ffb380",  # Soft peachy orange
+                "color": "#D85365",  # Soft peachy orange
                 "intensity": 0.5
             },
             "directional": {
-                "color": "#ffa366",  # Gentle warm orange
+                "color": "#D5A29D",  # Gentle warm orange
                 "intensity": 0.9,
                 "position": {"x": 100, "y": 20, "z": 50}  # Low sun angle
             },
@@ -50,7 +50,7 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
                 "near": 30,
                 "far": 150
             },
-            "background": "#d9a066"
+            "background": "#D85365"
         },
         
         "night": {
@@ -86,7 +86,7 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
             config["ambient"]["color"] = "#ffffff"  # Slightly blue-tinted ambient
         elif time == "sunset":
             config["fog"]["color"] = "#ffa366"  # Cool sunset fog
-            config["background"] = "#ffa366"
+            config["background"] = "#D85365"
         elif time == "night":
             config["fog"]["color"] = "#7881FF"  # Keep dark blue at night
             config["background"] = "#2543DE"
@@ -113,7 +113,7 @@ def get_sky_color(time: str, biome: str = "city") -> str:
         }
     else:
         colors = {
-            "noon": "#87CEEB",    # Sky blue
+            "noon": "#e9f3ff",    # Sky blue
             "sunset": "#d9a066",  # Muted golden orange
             "night": "#001133"    # Dark blue
         }

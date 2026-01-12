@@ -27,6 +27,8 @@ const VoiceWorldBuilder = () => {
   const playerRef = useRef(null);
   const enemiesRef = useRef([]);
   const structuresRef = useRef([]);
+  const occupiedCells = new Set(); // store "gridX:gridZ" strings
+
 
   const [gameState, setGameState] = useState(GameState.IDLE);
   const [isListening, setIsListening] = useState(false);
@@ -34,6 +36,20 @@ const VoiceWorldBuilder = () => {
   const [modifyPrompt, setModifyPrompt] = useState('');
   const [submittedPrompt, setSubmittedPrompt] = useState('');
   const [enemyCount, setEnemyCount] = useState(0);
+
+  const buildingGridConfig = {
+    gridSizeX: 2,   // buildings per row
+    gridSizeZ: 2,   // buildings per column
+    cellSize: 30,     // each cell width/height including road spacing
+    roadMargin: 6   // gap between buildings for roads
+  };
+
+  const buildingGridOrigins = [
+    { x: -60, z: -60 },
+    { x: 60, z: -60 },
+    { x: -60, z: 60 },
+    { x: 60, z: 60 },
+  ];
 
   const playerState = useRef({
     velocity: new THREE.Vector3(),
@@ -46,9 +62,9 @@ const VoiceWorldBuilder = () => {
 
   const cameraOffset = useRef({
     distance: 20,
-    height: 12,
+    height: 15,
     angle: 0,
-    pitch: 0
+    pitch: 0.3
   });
 
   const pressedKeys = useRef(new Set());
@@ -58,7 +74,27 @@ const VoiceWorldBuilder = () => {
 
     const scene = new THREE.Scene();
     sceneRef.current = scene;
-    scene.background = new THREE.Color(0x87CEEB);
+
+    // Create gradient sky sphere
+    const skyGeo = new THREE.SphereGeometry(500, 32, 32);
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const context = canvas.getContext('2d');
+    const gradient = context.createLinearGradient(0, 0, 0, 256);
+    gradient.addColorStop(0, '#1e3a8a'); // Dark blue at top
+    gradient.addColorStop(0.5, '#60a5fa'); // Bright blue
+    gradient.addColorStop(1, '#e0f2fe'); // Light blue at horizon
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 256, 256);
+    const skyTexture = new THREE.CanvasTexture(canvas);
+    const skyMat = new THREE.MeshBasicMaterial({ 
+      map: skyTexture, 
+      side: THREE.BackSide 
+    });
+    const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+    skyMesh.userData.isSky = true;
+    scene.add(skyMesh);
 
     const planeMaterial = new THREE.MeshStandardMaterial({
       color: 0xA5BDF5,
@@ -330,8 +366,8 @@ const VoiceWorldBuilder = () => {
     const blockCount = Math.floor(trunkHeight / blockHeight);
 
     const trunkMaterial = new THREE.MeshStandardMaterial({
-      color: 0x654321,
-      roughness: 1.0,
+      color: 0xab7354,
+      roughness: 1.5,
       metalness: 0.0,
       flatShading: true
     });
@@ -393,31 +429,59 @@ const VoiceWorldBuilder = () => {
       }
     } else {
       const leafCount = 5;
-      const leafWidth = 4 * treeData.scale;
-      const leafHeight = 1.2 * treeData.scale;
+      const leafBaseSize = 2.2 * treeData.scale;
+      const leafHeight = 1.1 * treeData.scale;
 
       for (let i = 0; i < leafCount; i++) {
-        const w = leafWidth - i * 0.7 * treeData.scale;
-        const h = leafHeight;
-        const geometry = new THREE.BoxGeometry(w, h, w);
-        const colorAttr = [];
-        const green = new THREE.Color(0x0d5c0d);
-        for (let v = 0; v < geometry.attributes.position.count; v++) {
-          colorAttr.push(green.r, green.g, green.b);
-        }
-        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colorAttr, 3));
+        const size = leafBaseSize - i * 0.35 * treeData.scale;
 
-        const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+        // Low-poly blob instead of box
+        const geometry = new THREE.IcosahedronGeometry(size, 0);
+
+        const colorAttr = [];
+        const lightGreen = new THREE.Color(0x9adf8f);
+        const darkGreen = new THREE.Color(0x6fbf7f);
+
+        for (let v = 0; v < geometry.attributes.position.count; v++) {
+          const y = geometry.attributes.position.getY(v);
+
+          // Normalize Y for gradient
+          const t = (y + size) / (size * 2);
+
+          if (t < 0.55) {
+            colorAttr.push(lightGreen.r, lightGreen.g, lightGreen.b);
+          } else {
+            colorAttr.push(darkGreen.r, darkGreen.g, darkGreen.b);
+          }
+        }
+
+        geometry.setAttribute(
+          'color',
+          new THREE.Float32BufferAttribute(colorAttr, 3)
+        );
+
+        const material = new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          flatShading: true,
+          roughness: 0.9,
+        });
+
         const leaf = new THREE.Mesh(geometry, material);
-        leaf.position.y = trunkHeight + i * leafHeight + leafHeight / 2;
+
+        // Stack like reference image
+        leaf.position.y = trunkHeight + i * leafHeight + leafHeight * 0.5;
+        leaf.position.x = (Math.random() - 0.5) * 0.6 * treeData.scale;
+        leaf.position.z = (Math.random() - 0.5) * 0.6 * treeData.scale;
+
         leaf.castShadow = true;
-        
+
         // OPTIMIZATION: Static leaves
         leaf.matrixAutoUpdate = false;
         leaf.updateMatrix();
-        
+
         group.add(leaf);
       }
+
     }
 
     group.position.set(treeData.position.x, treeData.position.y, treeData.position.z);
@@ -451,123 +515,237 @@ const VoiceWorldBuilder = () => {
     return rock;
   };
 
-  const createBuilding = (buildingData) => {
-    const group = new THREE.Group();
-    
-    const height = (buildingData.height || 10) * 2.5;
-    const width = (buildingData.width || 4) * 2.5;
-    const depth = (buildingData.depth || 4) * 2.5;
-    
-    // Main building body
-    const bodyGeom = new THREE.BoxGeometry(width, height, depth);
-    const bodyMat = new THREE.MeshStandardMaterial({ 
-      color: buildingData.color || 0x888888,
-      roughness: 0.7,
-      metalness: 0.3
-    });
-    
-    bodyGeom.translate(0, height / 2, 0);
-    const body = new THREE.Mesh(bodyGeom, bodyMat);
-    body.position.y = 0;
-    body.castShadow = true;
-    body.receiveShadow = true;
-    
-    // OPTIMIZATION: Disable auto-update for static geometry
-    body.matrixAutoUpdate = false;
-    body.updateMatrix();
-    
-    group.add(body);
-    
-    // OPTIMIZATION: Reduce window count for performance
-    const windowSize = 1.2;
-    const windowSpacing = 4.5; // Increased from 3.5 for fewer windows
-    const windowColor = 0x4444ff;
-    
-    // Create window geometry once and reuse
-    const windowGeomFront = new THREE.BoxGeometry(windowSize, windowSize, 0.2);
-    const windowGeomSide = new THREE.BoxGeometry(0.2, windowSize, windowSize);
-    const windowMat = new THREE.MeshStandardMaterial({ 
-      color: windowColor,
-      emissive: windowColor,
-      emissiveIntensity: 0.3
-    });
-    
-    // OPTIMIZATION: Use InstancedMesh for windows (much more efficient)
-    const windowCount = Math.floor((height - 5) / windowSpacing) * 
-                       (Math.floor((width - 4) / windowSpacing) * 2 + 
-                        Math.floor((depth - 4) / windowSpacing) * 2);
-    
-    // Limit total windows per building for performance - INCREASED TO 1000
-    const maxWindows = Math.min(windowCount, 1000);
-    
-    let windowIndex = 0;
-    
-    for (let y = 3; y < height - 2 && windowIndex < maxWindows; y += windowSpacing) {
-      for (let x = -width/2 + 2; x < width/2 - 1 && windowIndex < maxWindows; x += windowSpacing) {
-        // Front windows
-        const window1 = new THREE.Mesh(windowGeomFront, windowMat);
-        window1.position.set(x, y, depth/2 + 0.1);
-        window1.matrixAutoUpdate = false;
-        window1.updateMatrix();
-        group.add(window1);
-        windowIndex++;
-        
-        if (windowIndex >= maxWindows) break;
-        
-        // Back windows
-        const window2 = new THREE.Mesh(windowGeomFront, windowMat);
-        window2.position.set(x, y, -depth/2 - 0.1);
-        window2.matrixAutoUpdate = false;
-        window2.updateMatrix();
-        group.add(window2);
-        windowIndex++;
-      }
-      
-      if (windowIndex >= maxWindows) break;
-      
-      for (let z = -depth/2 + 2; z < depth/2 - 1 && windowIndex < maxWindows; z += windowSpacing) {
-        // Side windows
-        const window3 = new THREE.Mesh(windowGeomSide, windowMat);
-        window3.position.set(width/2 + 0.1, y, z);
-        window3.matrixAutoUpdate = false;
-        window3.updateMatrix();
-        group.add(window3);
-        windowIndex++;
-        
-        if (windowIndex >= maxWindows) break;
-        
-        const window4 = new THREE.Mesh(windowGeomSide, windowMat);
-        window4.position.set(-width/2 - 0.1, y, z);
-        window4.matrixAutoUpdate = false;
-        window4.updateMatrix();
-        group.add(window4);
-        windowIndex++;
-      }
+  const getBuildingGridPosition = (index, gridConfig, gridOrigin) => {
+    const { gridSizeX, gridSizeZ, cellSize } = gridConfig;
+
+    const row = Math.floor(index / gridSizeX);
+    const col = index % gridSizeX;
+
+    const x = col * cellSize - ((gridSizeX - 1) * cellSize) / 2 + gridOrigin.x;
+    const z = row * cellSize - ((gridSizeZ - 1) * cellSize) / 2 + gridOrigin.z;
+
+    return { x, z };
+  };
+
+  const getBuildingTypeForBiome = (biomeName, index) => {
+    if (biomeName === 'arctic') {
+      return 'igloo';
     }
+
+    // Non-arctic: mix skyscrapers + houses
+    // Example: every 3rd building is a skyscraper
+    return index % 3 === 0 ? 'skyscraper' : 'house';
+  };
     
-    group.position.set(
-      buildingData.position.x, 
-      buildingData.position.y || 0,
-      buildingData.position.z
-    );
-    group.rotation.y = buildingData.rotation || 0;
-    
-    // OPTIMIZATION: Mark entire building as static
+  const createBuilding = (buildingData, idx, type, gridOrigin) => {
+    if (!type) {
+      console.warn('createBuilding called without type, defaulting to house');
+      type = 'house';
+    }
+    const group = new THREE.Group();
+    let mesh;
+
+    // Pastel colors palette
+    const pastelColors = [
+      0x18e7d7, 
+      0x6bcdeb,
+      0xFAA869,
+      0xC3B1E1, 
+      0xFFFACD  
+    ];
+    const color = pastelColors[Math.floor(Math.random() * pastelColors.length)];
+
+    if (type === "igloo") {
+      const radius = (buildingData.width || 4) * 1.5;
+      const geometry = new THREE.SphereGeometry(radius, 16, 16, 0, Math.PI);
+      const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
+      mesh = new THREE.Mesh(geometry, material);
+      mesh.position.y = radius / 2; // lift above terrain
+      group.add(mesh);
+
+    } else if (type === "skyscraper") {
+      console.log("ADDING SKYSCRAPER", buildingData);
+      const height = (buildingData.height || 15);
+      const width = (buildingData.width || 4) * 2;
+      const depth = (buildingData.depth || 4) * 2;
+
+      const baseColor = new THREE.Color(color);
+      const lighter = baseColor.clone().lerp(new THREE.Color(0xffffff), 0.35);
+      const darker = baseColor.clone().lerp(new THREE.Color(0x000000), 0.25);
+
+      const makeGradientMaterial = (geometry, h) => {
+        const colors = [];
+        for (let i = 0; i < geometry.attributes.position.count; i++) {
+          const y = geometry.attributes.position.getY(i);
+          const t = (y + h / 2) / h;
+          const c = t < 0.5 ? baseColor : lighter;
+          colors.push(c.r, c.g, c.b);
+        }
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        return new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.6,
+          metalness: 0.2,
+          flatShading: true
+        });
+      };
+
+      /* ---------- BASE PODIUM ---------- */
+      const baseHeight = height * 0.12;
+      const baseGeom = new THREE.BoxGeometry(width * 1.2, baseHeight, depth * 1.2);
+      baseGeom.translate(0, baseHeight / 2, 0);
+
+      const baseMat = makeGradientMaterial(baseGeom, baseHeight);
+      const base = new THREE.Mesh(baseGeom, baseMat);
+      base.castShadow = true;
+      base.receiveShadow = true;
+      base.matrixAutoUpdate = false;
+      base.updateMatrix();
+      group.add(base);
+
+      /* ---------- MAIN SHAFT ---------- */
+      const shaftHeight = height * 0.7;
+      const shaftGeom = new THREE.BoxGeometry(width, shaftHeight, depth);
+      shaftGeom.translate(0, baseHeight + shaftHeight / 2, 0);
+
+      const shaftMat = makeGradientMaterial(shaftGeom, shaftHeight);
+      const shaft = new THREE.Mesh(shaftGeom, shaftMat);
+      shaft.castShadow = true;
+      shaft.receiveShadow = true;
+      shaft.matrixAutoUpdate = false;
+      shaft.updateMatrix();
+      group.add(shaft);
+
+      /* ---------- UPPER TIER ---------- */
+      const upperHeight = height * 0.18;
+      const upperGeom = new THREE.BoxGeometry(
+        width * 0.7,
+        upperHeight,
+        depth * 0.7
+      );
+      upperGeom.translate(
+        0,
+        baseHeight + shaftHeight + upperHeight / 2,
+        0
+      );
+
+      const upperMat = makeGradientMaterial(upperGeom, upperHeight);
+      const upper = new THREE.Mesh(upperGeom, upperMat);
+      upper.castShadow = true;
+      upper.matrixAutoUpdate = false;
+      upper.updateMatrix();
+      group.add(upper);
+
+      /* ---------- CROWN ---------- */
+      const crownHeight = height * 0.1;
+      const crownGeom = new THREE.CylinderGeometry(
+        width * 0.15,
+        width * 0.35,
+        crownHeight,
+        6
+      );
+      crownGeom.translate(
+        0,
+        baseHeight + shaftHeight + upperHeight + crownHeight / 2,
+        0
+      );
+
+      const crownColors = [];
+      for (let i = 0; i < crownGeom.attributes.position.count; i++) {
+        crownColors.push(darker.r, darker.g, darker.b);
+      }
+      crownGeom.setAttribute(
+        'color',
+        new THREE.Float32BufferAttribute(crownColors, 3)
+      );
+
+      const crown = new THREE.Mesh(
+        crownGeom,
+        new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.7,
+          metalness: 0.25,
+          flatShading: true
+        })
+      );
+      crown.matrixAutoUpdate = false;
+      crown.updateMatrix();
+      group.add(crown);
+
+      /* ---------- SPIRE ---------- */
+      const spireHeight = height * 0.25;
+      const spireGeom = new THREE.CylinderGeometry(
+        width * 0.05,
+        width * 0.05,
+        spireHeight,
+        6
+      );
+      spireGeom.translate(
+        0,
+        baseHeight + shaftHeight + upperHeight + crownHeight + spireHeight / 2,
+        0
+      );
+
+      const spire = new THREE.Mesh(
+        spireGeom,
+        new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          roughness: 0.4,
+          metalness: 0.6
+        })
+      );
+      spire.matrixAutoUpdate = false;
+      spire.updateMatrix();
+      group.add(spire);
+
+    } else {
+      // Victorian / normal house
+      mesh = new THREE.Group();
+
+      const width = (buildingData.width || 4) * 2;
+      const depth = (buildingData.depth || 4) * 2;
+      const height = (buildingData.height || 6) * 2;
+
+      // Base box
+      const baseGeom = new THREE.BoxGeometry(width, height * 0.6, depth);
+      baseGeom.translate(0, (height * 0.6) / 2, 0);
+      const baseMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.6 });
+      const baseMesh = new THREE.Mesh(baseGeom, baseMat);
+      mesh.add(baseMesh);
+
+      group.add(mesh);
+    }
+
+    // Position on terrain
+    const gridPos = getBuildingGridPosition(idx, buildingGridConfig, gridOrigin);
+    occupiedCells.add(`${Math.round(gridPos.x)}:${Math.round(gridPos.z)}`);
+    const terrainY = getHeightAt(gridPos.x, gridPos.z);
+    group.position.set(gridPos.x, terrainY, gridPos.z);
+
+    group.rotation.y = (Math.random() - 0.5) * 0.1;
+
     group.matrixAutoUpdate = false;
     group.updateMatrix();
-    
+
     return group;
   };
 
   const createMountainPeak = (peakData) => {
-    const geometry = new THREE.ConeGeometry(100, 100, 4);
+    const height = 80; 
+    const geometry = new THREE.ConeGeometry(40, height, 4);
     const material = new THREE.MeshStandardMaterial({ 
       color: 0xF0F0F0,
       emissive: 0x888888,
       emissiveIntensity: 0.2
     });
     const peak = new THREE.Mesh(geometry, material);
-    peak.position.set(peakData.position.x, peakData.position.y + 50, peakData.position.z);
+    const terrainY = getHeightAt(peakData.position.x, peakData.position.z)
+    const scaledHeight = height * peakData.scale;
+    peak.position.set(
+      peakData.position.x,
+      terrainY +  scaledHeight / 2, // optional offset if you want some lift
+      peakData.position.z
+    );
     peak.scale.setScalar(peakData.scale);
     peak.rotation.y = Math.random() * Math.PI * 2;
     peak.castShadow = true;
@@ -685,28 +863,37 @@ const VoiceWorldBuilder = () => {
 
   const createCloud = (x, y, z, scale = 1) => {
     const cloudGroup = new THREE.Group();
-    const boxCount = 3 + Math.floor(Math.random() * 3);
+    
+    // More boxes for fluffier clouds
+    const boxCount = 5 + Math.floor(Math.random() * 4); // 5-8 boxes
+    
     for (let i = 0; i < boxCount; i++) {
-      const width = 5 * scale + Math.random() * 5 * scale;
-      const height = 2 * scale + Math.random() * 2 * scale;
-      const depth = 3 * scale + Math.random() * 3 * scale;
+      // More variation in size
+      const width = (4 + Math.random() * 6) * scale;
+      const height = (2 + Math.random() * 3) * scale;
+      const depth = (3 + Math.random() * 5) * scale;
 
       const geometry = new THREE.BoxGeometry(width, height, depth);
-      const material = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        roughness: 0.8,
-        metalness: 0.1,
+      
+      // Slight variation in cloud color for depth
+      const brightness = 0.95 + Math.random() * 0.05;
+      const material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(brightness, brightness, brightness),
       });
 
       const box = new THREE.Mesh(geometry, material);
+      
+      // More spread out positioning for bigger, fluffier clouds
       box.position.set(
-        (Math.random() - 0.5) * 10 * scale,
-        (Math.random() - 0.5) * 4 * scale,          
-        (Math.random() - 0.5) * 5 * scale
+        (Math.random() - 0.5) * 15 * scale,
+        (Math.random() - 0.5) * 6 * scale,          
+        (Math.random() - 0.5) * 10 * scale
       );
-      box.castShadow = true;
+      
+      box.castShadow = false; // Clouds typically don't cast shadows
       cloudGroup.add(box);
     }
+    
     cloudGroup.position.set(x, y, z);
     return cloudGroup;
   };
@@ -741,13 +928,14 @@ const VoiceWorldBuilder = () => {
 
       const objectsToRemove = [];
       scene.children.forEach((child) => {
-        if (!child.isLight) objectsToRemove.push(child);
+        if (!child.isLight && !child.userData?.isSky) objectsToRemove.push(child);
       });
       objectsToRemove.forEach((obj) => scene.remove(obj));
       
       terrainMeshRef.current = null;
       enemiesRef.current = [];
       structuresRef.current = [];
+      occupiedCells.clear();
 
       if (data.world && data.world.lighting_config) {
         console.log('[FRONTEND LIGHTING DEBUG] Applying lighting:', data.world.lighting_config);
@@ -769,20 +957,27 @@ const VoiceWorldBuilder = () => {
         if (data.structures.trees) {
           console.log(`[FRONTEND] Creating ${data.structures.trees.length} trees...`);
           data.structures.trees.forEach((treeData) => {
+            // Map tree position to terrain mask indices
+            const row = Math.floor((treeData.position.z + 128) / 256 * terrainPlacementMaskRef.current.length);
+            const col = Math.floor((treeData.position.x + 128) / 256 * terrainPlacementMaskRef.current.length);
+
+            // Skip this tree if the cell is occupied
+            if (terrainPlacementMaskRef.current[row][col] === 0) return;
+
             const tree = createTree(treeData);
             tree.userData = { structureType: 'tree' };
             scene.add(tree);
             structuresRef.current.push(tree);
           });
-          console.log(`✓ Added ${data.structures.trees.length} trees`);
+          console.log(`✓ Added ${structuresRef.current.filter(obj => obj.userData.structureType === 'tree').length} trees`);
         }
 
         const cloudCount = 30;
         for (let i = 0; i < cloudCount; i++) {
           const x = (Math.random() - 0.5) * 500;
-          const y = 40 + Math.random() * 90;
-          const z = (Math.random() - 0.5) * 500;
-          const scale = 3 + Math.random() * 0.5;
+          const y = 60 + Math.random() * 90;
+          const z = (Math.random() - 0.5) * 600;
+          const scale = 3 + Math.random() * 2;
           const cloud = createCloud(x, y, z, scale);
           scene.add(cloud);
         }
@@ -807,17 +1002,49 @@ const VoiceWorldBuilder = () => {
           console.log(`✓ Added ${data.structures.peaks.length} mountain peaks`);
         }
 
-        if (data.structures.buildings) {
-          console.log(`[FRONTEND] Creating ${data.structures.buildings.length} buildings...`);
-          data.structures.buildings.forEach(buildingData => {
-            const building = createBuilding(buildingData);
-            building.userData = { structureType: 'building' };
-            const terrainY = getHeightAt(buildingData.position.x, buildingData.position.z);
-            building.position.y = terrainY;
-            scene.add(building);
-            structuresRef.current.push(building);
+          if (data.structures?.buildings) {
+            const biomeName = data.world?.biome_name;
+
+            data.structures.buildings.forEach((buildingData, idx) => {
+              const gridIndex = Math.floor(
+                idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ)
+              );
+              const localIndex =
+                idx % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
+              const gridOrigin =
+                buildingGridOrigins[gridIndex % buildingGridOrigins.length];
+
+              const buildingType = getBuildingTypeForBiome(biomeName, idx);
+
+              const building = createBuilding(
+                buildingData,
+                localIndex,
+                buildingType,
+                gridOrigin
+              );
+
+              building.userData = {
+                structureType: 'building',
+                buildingType,
+              };
+
+              scene.add(building);
+              structuresRef.current.push(building);
+            });
+
+          // Update terrainPlacementMask to mark building locations as occupied
+          data.structures.buildings.forEach((buildingData, idx) => {
+            const gridIndex = Math.floor(idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ));
+            const localIndex = idx % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
+            const gridOrigin = buildingGridOrigins[gridIndex % buildingGridOrigins.length];
+            const gridPos = getBuildingGridPosition(localIndex, buildingGridConfig, gridOrigin);
+
+            const row = Math.floor((gridPos.z + 128) / 256 * terrainPlacementMaskRef.current.length);
+            const col = Math.floor((gridPos.x + 128) / 256 * terrainPlacementMaskRef.current.length);
+
+            terrainPlacementMaskRef.current[row][col] = 0; // mark as occupied
           });
-          console.log(`✓ Added ${data.structures.buildings.length} buildings`);
+
         }
       }
 
@@ -960,14 +1187,21 @@ const VoiceWorldBuilder = () => {
       if (data.structures?.trees && newTreeCount > oldTreeCount) {
         const newTrees = data.structures.trees.slice(oldTreeCount);
         console.log(`[MODIFY] Adding ${newTrees.length} new trees...`);
-        
+
         newTrees.forEach(treeData => {
+          const row = Math.floor((treeData.position.z + 128) / 256 * terrainPlacementMaskRef.current.length);
+          const col = Math.floor((treeData.position.x + 128) / 256 * terrainPlacementMaskRef.current.length);
+
+          // Skip if cell occupied
+          if (terrainPlacementMaskRef.current[row][col] === 0) return;
+
           const tree = createTree(treeData);
           tree.userData = { ...tree.userData, structureType: 'tree' };
           scene.add(tree);
           structuresRef.current.push(tree);
         });
       }
+
 
       if (data.structures?.rocks && newRockCount > oldRockCount) {
         const newRocks = data.structures.rocks.slice(oldRockCount);
@@ -982,18 +1216,34 @@ const VoiceWorldBuilder = () => {
       }
 
       if (data.structures?.buildings && newBuildingCount > oldBuildingCount) {
+        const biomeName = data.world?.biome_name;
         const newBuildings = data.structures.buildings.slice(oldBuildingCount);
-        console.log(`[MODIFY] Adding ${newBuildings.length} new buildings...`);
-        
-        newBuildings.forEach(buildingData => {
-          const building = createBuilding(buildingData);
-          building.userData = { ...building.userData, structureType: 'building' };
-          const terrainY = getHeightAt(buildingData.position.x, buildingData.position.z);
-          building.position.set(
-            buildingData.position.x,
-            terrainY,
-            buildingData.position.z
+
+        newBuildings.forEach((buildingData, idx) => {
+          const globalIndex = oldBuildingCount + idx;
+
+          const gridIndex = Math.floor(
+            globalIndex / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ)
           );
+          const localIndex =
+            globalIndex % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
+          const gridOrigin =
+            buildingGridOrigins[gridIndex % buildingGridOrigins.length];
+
+          const buildingType = getBuildingTypeForBiome(biomeName, globalIndex);
+
+          const building = createBuilding(
+            buildingData,
+            localIndex,
+            buildingType,
+            gridOrigin
+          );
+
+          building.userData = {
+            structureType: 'building',
+            buildingType,
+          };
+
           scene.add(building);
           structuresRef.current.push(building);
         });
@@ -1069,10 +1319,62 @@ const VoiceWorldBuilder = () => {
       console.log(`[FRONTEND LIGHTING] Directional: ${lightingConfig.directional.color} @ ${lightingConfig.directional.intensity}`);
     }
         
-    scene.background = new THREE.Color(lightingConfig.background);
-    console.log(`[FRONTEND LIGHTING] Background: ${lightingConfig.background}`);
+    // Update gradient sky sphere with time-of-day aware gradients
+    const skyMesh = scene.children.find(c => c.userData?.isSky);
+    if (skyMesh) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const context = canvas.getContext('2d');
+      
+      // Create radial gradient from center (horizon) to edge (top of sky)
+      const gradient = context.createRadialGradient(256, 256, 0, 256, 256, 256);
+      
+      // Parse the background color
+      const bgColor = new THREE.Color(lightingConfig.background);
+      
+      // Get HSL values
+      const hsl = {};
+      bgColor.getHSL(hsl);
+      
+      // Determine time of day based on lightness and adjust gradient accordingly
+      let horizonColor, middleColor, topColor;
+      
+      if (hsl.l < 0.3) {
+        // NIGHT - Dark sky, subtle gradient
+        horizonColor = new THREE.Color().setHSL(hsl.h, hsl.s, Math.min(0.4, hsl.l * 1.3));
+        middleColor = bgColor.clone();
+        topColor = new THREE.Color().setHSL(hsl.h, hsl.s, Math.max(0.05, hsl.l * 0.7));
+        
+      } else if (hsl.l > 0.6) {
+        // NOON/DAY - Bright sky, strong gradient from light horizon to darker top
+        horizonColor = new THREE.Color().setHSL(hsl.h, hsl.s, Math.min(0.95, hsl.l * 1.2));
+        middleColor = bgColor.clone();
+        topColor = new THREE.Color().setHSL(hsl.h, hsl.s, Math.max(0.3, hsl.l * 0.6));
+        
+      } else {
+        // SUNSET/SUNRISE - Medium lightness, keep colors rich and saturated
+        horizonColor = new THREE.Color().setHSL(hsl.h, hsl.s, Math.min(0.6, hsl.l * 1.1));
+        middleColor = bgColor.clone();
+        topColor = new THREE.Color().setHSL(hsl.h, hsl.s, Math.max(0.1, hsl.l * 0.4));
+      }
+      
+      gradient.addColorStop(0, `#${horizonColor.getHexString()}`);
+      gradient.addColorStop(0.5, `#${middleColor.getHexString()}`);
+      gradient.addColorStop(1, `#${topColor.getHexString()}`);
+      
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, 512, 512);
+      
+      const skyTexture = new THREE.CanvasTexture(canvas);
+      skyMesh.material.map = skyTexture;
+      skyMesh.material.needsUpdate = true;
+      
+      console.log(`[FRONTEND LIGHTING] Background gradient: ${lightingConfig.background}`);
+      console.log(`  Time: ${hsl.l < 0.3 ? 'NIGHT' : hsl.l > 0.6 ? 'DAY' : 'SUNSET/SUNRISE'}`);
+      console.log(`  Horizon: #${horizonColor.getHexString()}, Middle: #${middleColor.getHexString()}, Top: #${topColor.getHexString()}`);
+    }
   };
-
   const startVoiceCapture = (forceModify = false) => {
     if (!('webkitSpeechRecognition' in window)) {
       return alert('Speech recognition not supported. Use Chrome or Edge.');
@@ -1260,17 +1562,98 @@ const VoiceWorldBuilder = () => {
 
       {gameState === GameState.GENERATING && (
         <div style={{
-          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100,
-          display: 'flex', justifyContent: 'center', alignItems: 'center',
-          backgroundColor: 'rgba(0,0,0,0.9)', flexDirection: 'column'
+          position: 'absolute',
+          inset: 0,
+          zIndex: 100,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: 'rgba(0,0,0,0.92)',
+          color: '#fff',
+          fontFamily: 'monospace'
         }}>
+
+          {/* Text */}
           <div style={{
-            width: '80px', height: '80px', border: '8px solid rgba(255,255,255,0.1)',
-            borderTop: '8px solid #4444ff', borderRadius: '50%',
-            animation: 'spin 1s linear infinite'
-          }} />
-          <h2 style={{ color: '#fff', marginTop: '30px', fontSize: '24px' }}>Generating World...</h2>
-          <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+            fontSize: '32px',
+            marginBottom: '30px',
+            letterSpacing: '1px'
+          }}>
+            Cooking up <span style={{ color: '#4fa3ff' }}>YOUR</span> world…
+          </div>
+
+          {/* Animation */}
+          <div className="pan-container">
+
+            <div className="egg" />
+            <div className="pan" />
+          </div>
+
+          <style>{`
+            .pan-container {
+              position: relative;
+              width: 200px;
+              height: 140px;
+            }
+
+            .pan {
+              position: absolute;
+              bottom: 0;
+              left: 50%;
+              width: 140px;
+              height: 30px;
+              background: #222;
+              border-radius: 0 0 20px 20px;
+              transform: translateX(-50%);
+            }
+
+            .pan::after {
+              content: '';
+              position: absolute;
+              right: -50px;
+              top: 6px;
+              width: 60px;
+              height: 10px;
+              background: #5a3a1a;
+              border-radius: 10px;
+            }
+
+            .egg {
+              position: absolute;
+              bottom: 25px;
+              left: 50%;
+              width: 60px;
+              height: 40px;
+              background: #fff;
+              border-radius: 50%;
+              transform: translateX(-50%);
+              animation: eggFlip 1s ease-in-out infinite;
+            }
+
+            .egg::after {
+              content: '';
+              position: absolute;
+              top: 10px;
+              left: 20px;
+              width: 18px;
+              height: 18px;
+              background: orange;
+              border-radius: 50%;
+            }
+
+            @keyframes eggFlip {
+              0% {
+                transform: translate(-50%, 0) rotate(0deg);
+              }
+              50% {
+                transform: translate(-50%, -50px) rotate(180deg);
+              }
+              100% {
+                transform: translate(-50%, 0) rotate(360deg);
+              }
+            }
+          `}</style>
         </div>
       )}
     </div>

@@ -14,7 +14,7 @@ BIOME_SETTINGS = {
 
 GROUND_COLORS = {
     "snow": (245, 245, 245),
-    "street": (128, 128, 128),
+    "street": (253, 228, 172),
     "grass": (34, 177, 76)
 }
 
@@ -93,7 +93,19 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
     for y in range(height):
         for x in range(width):
             nx, ny = x / width, y / height
-            val = snoise2(nx / scale, ny / scale, octaves=4)
+            if biome_name == "city":
+            # Low-frequency, low-detail noise = flatter terrain
+                val = snoise2(
+                    nx / (scale * 3),
+                    ny / (scale * 3),
+                    octaves=1
+            )
+            else:
+                val = snoise2(
+                    nx / scale,
+                    ny / scale,
+                    octaves=4
+            )
             heightmap[y, x] = (val + 1) / 2 * height_multiplier
 
     # Masks
