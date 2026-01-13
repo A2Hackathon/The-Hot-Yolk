@@ -154,6 +154,92 @@ def generate_rocks(
     print(f"[Structures] Placed {len(rocks)} rocks")
     return rocks
 
+def generate_street_lamps(
+    heightmap_raw: List[List[float]],
+    placement_mask: List[List[int]],
+    biome: str,
+    count: int = 20,
+    terrain_size: float = 256.0
+) -> List[Dict]:
+    """Generate street lamp positions for city biome."""
+    street_lamps = []
+    biome_lower = biome.lower()
+    
+    if biome_lower != "city":
+        return []  # Only generate street lamps for city
+    
+    segments = len(heightmap_raw) - 1
+    
+    # Find valid points along walkable areas (roads/paths)
+    valid_points = []
+    for z in range(5, segments - 5):
+        for x in range(5, segments - 5):
+            if placement_mask[z][x] == 1:
+                h = heightmap_raw[z][x]
+                # Street lamps need relatively flat ground
+                if 0.15 <= h <= 0.5:
+                    # Check neighbors for flatness
+                    is_flat = True
+                    for dz in range(-1, 2):
+                        for dx in range(-1, 2):
+                            if abs(heightmap_raw[z + dz][x + dx] - h) > 0.03:
+                                is_flat = False
+                                break
+                        if not is_flat:
+                            break
+                    if is_flat:
+                        valid_points.append((x, z))
+    
+    if not valid_points:
+        print(f"[STREET_LAMPS] No valid points found for street lamps")
+        return []
+    
+    # Place street lamps with spacing, closer to center
+    random.shuffle(valid_points)
+    placed_positions = []
+    min_distance = 15  # Minimum distance between street lamps
+    
+    # Limit placement range to be closer to center (within 60 units of center instead of 128)
+    center_range = 60  # Reduced from terrain_size/2 (128)
+    
+    for i in range(len(valid_points)):
+        if len(street_lamps) >= count:
+            break
+        
+        x_idx, z_idx = valid_points[i]
+        world_x = (x_idx / segments) * terrain_size - terrain_size / 2
+        world_z = (z_idx / segments) * terrain_size - terrain_size / 2
+        
+        # Filter to only place within center range
+        if abs(world_x) > center_range or abs(world_z) > center_range:
+            continue
+        
+        # Check distance from other street lamps
+        too_close = False
+        for px, pz in placed_positions:
+            dist = math.sqrt((world_x - px)**2 + (world_z - pz)**2)
+            if dist < min_distance:
+                too_close = True
+                break
+        
+        if too_close:
+            continue
+        
+        world_y = heightmap_raw[z_idx][x_idx] * 10
+        scale = random.uniform(0.9, 1.1)  # Slight variation in size
+        rotation = random.uniform(0, math.pi * 2)
+        
+        street_lamps.append({
+            "position": {"x": float(world_x), "y": float(world_y), "z": float(world_z)},
+            "scale": float(scale),
+            "rotation": float(rotation)
+        })
+        
+        placed_positions.append((world_x, world_z))
+    
+    print(f"[Structures] Placed {len(street_lamps)} street lamps")
+    return street_lamps
+
 def generate_buildings(
     heightmap_raw: List[List[float]],
     placement_mask: List[List[int]],
@@ -173,10 +259,10 @@ def generate_buildings(
     # --- Define building types ---
     if biome_lower == "city":
         building_types = [
-            {"type": "skyscraper", "height": 60, "width": 10, "depth": 10, "color": 0x666666},
-            {"type": "house", "height": 30, "width": 7, "depth": 10, "color": 0x777777},
-            {"type": "skyscraper", "height": 35, "width": 8, "depth": 8, "color": 0x555555},
-            {"type": "house", "height": 18, "width": 10, "depth": 7, "color": 0x888888},
+            {"type": "skyscraper", "height": 70, "width": 10, "depth": 10, "color": 0x666666},
+            {"type": "house", "height": 40, "width": 7, "depth": 10, "color": 0x777777},
+            {"type": "skyscraper", "height": 50, "width": 8, "depth": 8, "color": 0x555555},
+            {"type": "house", "height": 20, "width": 10, "depth": 7, "color": 0x888888},
         ]
     elif biome_lower == "arctic":
         building_types = [
@@ -439,6 +525,9 @@ async def generate_world(prompt: Dict) -> Dict:
         
         # Building count for city biome
         building_count = structure_counts.get("building", 15 if biome.lower() == "city" else 0)
+        
+        # Street lamp count for city biome (limited to 3 to avoid texture unit limits)
+        street_lamp_count = structure_counts.get("street_lamp", 3 if biome.lower() == "city" else 0)
 
         terrain_size = 256
 
@@ -452,7 +541,8 @@ async def generate_world(prompt: Dict) -> Dict:
             ),
             "rocks": generate_rocks(heightmap_raw, biome, rock_count, terrain_size),
             "peaks": generate_mountain_peaks(heightmap_raw, biome, terrain_size, max_peaks=mountain_count) if mountain_count > 0 else [],
-            "buildings": generate_buildings(heightmap_raw, placement_mask, biome, building_count, terrain_size)
+            "buildings": generate_buildings(heightmap_raw, placement_mask, biome, building_count, terrain_size),
+            "street_lamps": generate_street_lamps(heightmap_raw, placement_mask, biome, street_lamp_count, terrain_size)
         }
 
         # --- Determine player spawn on a walkable point ---

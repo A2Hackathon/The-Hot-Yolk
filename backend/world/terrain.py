@@ -14,7 +14,7 @@ BIOME_SETTINGS = {
 
 GROUND_COLORS = {
     "snow": (245, 245, 245),
-    "street": (253, 228, 172),
+    "street": (245, 245, 245),
     "grass": (34, 177, 76)
 }
 

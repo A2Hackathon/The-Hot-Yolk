@@ -9,9 +9,12 @@ router = APIRouter()
 class ModifyRequest(BaseModel):
     command: str
     current_world: Optional[Dict] = None
+    player_position: Optional[Dict] = None
+    player_direction: Optional[Dict] = None
     from_time: Optional[str] = None   
     to_time: Optional[str] = None         
-    progress: Optional[float] = 1.0       
+    progress: Optional[float] = 1.0
+    image_data: Optional[str] = None  # base64 encoded image       
 
 @router.patch("/modify-world")
 @router.patch("/modify-world")
@@ -21,6 +24,10 @@ async def modify_world(request: ModifyRequest) -> Dict:
 
     try:
         print(f"[API] Received command: {request.command}")
+        print(f"[API] Image data provided: {request.image_data is not None}")
+        if request.image_data:
+            print(f"[API] Image data length: {len(request.image_data)} characters")
+            print(f"[API] Image data preview (first 100 chars): {request.image_data[:100]}...")
         print(f"[API] request.current_world type: {type(request.current_world)}")
         print(f"[API] request.current_world value: {request.current_world}")
         
@@ -40,13 +47,16 @@ async def modify_world(request: ModifyRequest) -> Dict:
 
         print(f"[API] Calling handle_live_command with current_world type: {type(current_world)}")
         
-        # Pass current world and lighting interpolation params to AI
+        # Pass current world, player position, lighting interpolation params, and image to AI
         ai_diff = handle_live_command(
             command=request.command,
             current_world=current_world,
+            player_position=request.player_position,
+            player_direction=request.player_direction,
             from_time=request.from_time,
             to_time=request.to_time,
-            progress=request.progress
+            progress=request.progress,
+            image_data=request.image_data
         )
 
         print(f"[API] AI returned diff")

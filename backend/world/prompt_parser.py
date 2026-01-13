@@ -1,6 +1,7 @@
 from groq import Groq
 import json
 import os
+import re
 
 
 def get_groq_client():
@@ -47,7 +48,13 @@ IMPORTANT RULES:
    - Otherwise → weapon: "dash"
 
 5. Structures (optional):
-   - Count of mountains, hills, rivers if mentioned
+   - Extract counts for: trees, rocks, buildings, mountains, hills, rivers, street_lamps
+   - Look for patterns like "3 trees", "5 rocks", "10 buildings", etc.
+   - If not mentioned, don't include that key (will use defaults)
+   - Examples:
+     * "give me 3 trees" → structure: {"tree": 3}
+     * "5 trees and 2 rocks" → structure: {"tree": 5, "rock": 2}
+     * "city with 10 buildings" → structure: {"building": 10}
 
 Return ONLY this JSON structure (no markdown, no backticks, no explanation):
 {
@@ -55,7 +62,7 @@ Return ONLY this JSON structure (no markdown, no backticks, no explanation):
   "time": "noon"|"sunset"|"night",
   "enemy_count": 3-8,
   "weapon": "double_jump"|"dash"|"none",
-  "structure": {"mountain": 0, "hill": 0, "river": 0}
+  "structure": {"tree": 0, "rock": 0, "building": 0, "mountain": 0, "hill": 0, "river": 0, "street_lamp": 0}
 }"""
                 },
                 {"role": "user", "content": prompt}
@@ -129,7 +136,6 @@ def fallback_parse(prompt: str) -> dict:
     
     # Detect enemy count
     enemy_count = 5
-    import re
     enemy_match = re.search(r'(\d+)\s*enem', prompt_lower)
     if enemy_match:
         enemy_count = int(enemy_match.group(1))
@@ -144,12 +150,41 @@ def fallback_parse(prompt: str) -> dict:
     else:
         weapon = "dash"
     
+    # Extract structure counts
+    import re
+    structure = {}
+    
+    # Extract tree count
+    tree_match = re.search(r'(\d+)\s*tree', prompt_lower)
+    if tree_match:
+        structure["tree"] = int(tree_match.group(1))
+    
+    # Extract rock count
+    rock_match = re.search(r'(\d+)\s*rock', prompt_lower)
+    if rock_match:
+        structure["rock"] = int(rock_match.group(1))
+    
+    # Extract building count
+    building_match = re.search(r'(\d+)\s*(?:building|house|houses)', prompt_lower)
+    if building_match:
+        structure["building"] = int(building_match.group(1))
+    
+    # Extract mountain count
+    mountain_match = re.search(r'(\d+)\s*mountain', prompt_lower)
+    if mountain_match:
+        structure["mountain"] = int(mountain_match.group(1))
+    
+    # Extract street lamp count
+    lamp_match = re.search(r'(\d+)\s*(?:street\s*)?lamp', prompt_lower)
+    if lamp_match:
+        structure["street_lamp"] = int(lamp_match.group(1))
+    
     result = {
         "biome": biome,
         "time": time,
         "enemy_count": min(10, enemy_count),
         "weapon": weapon,
-        "structure": {}
+        "structure": structure
     }
     
     print(f"[FALLBACK PARSER] Result: {result}")
