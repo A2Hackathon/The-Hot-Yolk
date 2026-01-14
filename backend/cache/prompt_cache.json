@@ -79,10 +79,10 @@
       "weapon": "dash",
       "structure": {}
     },
-    "timestamp": 1768380847.9896271,
+    "timestamp": 1768418682.431485,
     "hit_count": 0,
-    "last_accessed": 1768380847.9896278,
-    "prompt_preview": "city "
+    "last_accessed": 1768418682.431485,
+    "prompt_preview": "city"
   },
   "7a4d573e8ec206e3": {
     "params": {
@@ -153,9 +153,67 @@
         "tree": 25
       }
     },
-    "timestamp": 1768383800.4862216,
+    "timestamp": 1768430779.1402538,
     "hit_count": 0,
-    "last_accessed": 1768383800.4862232,
+    "last_accessed": 1768430779.1402538,
     "prompt_preview": "arctic"
+  },
+  "d8d271c2be86ead6": {
+    "params": {
+      "biome": "arctic",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "mountain": 1
+      }
+    },
+    "timestamp": 1768418469.950467,
+    "hit_count": 0,
+    "last_accessed": 1768418469.950467,
+    "prompt_preview": "arctic mountains"
+  },
+  "962c8d8684305be4": {
+    "params": {
+      "biome": "arctic",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "mountain": 1
+      }
+    },
+    "timestamp": 1768411254.7311072,
+    "hit_count": 0,
+    "last_accessed": 1768411254.7311072,
+    "prompt_preview": "arctic mountain"
+  },
+  "588d3b19cf558bbf": {
+    "params": {
+      "biome": "arctic",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 25
+      }
+    },
+    "timestamp": 1768424227.7836518,
+    "hit_count": 0,
+    "last_accessed": 1768424227.7836518,
+    "prompt_preview": "arctic at night"
+  },
+  "4d6f560d4ce20174": {
+    "params": {
+      "biome": "arctic",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {}
+    },
+    "timestamp": 1768424813.988469,
+    "hit_count": 0,
+    "last_accessed": 1768424813.988469,
+    "prompt_preview": "arctic night"
   }
 }
