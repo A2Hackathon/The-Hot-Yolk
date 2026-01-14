@@ -48,7 +48,6 @@ const VoiceWorldBuilder = () => {
   gravity: 20.0,
   jumpHeight: 3.0
 });
-  const physicsSettingsRef = useRef(physicsSettings);
   const buildingGridConfig = {
     gridSizeX: 2,   // buildings per row
     gridSizeZ: 2,   // buildings per column
@@ -182,11 +181,11 @@ const VoiceWorldBuilder = () => {
       if (e.key === ' ' && playerRef.current) {
         e.preventDefault();
         if (playerState.current.isGrounded) {
-          const jumpVelocity = physicsSettingsRef.current.jumpHeight * 0.133;
+          const jumpVelocity = physicsSettings.jumpHeight * 0.133;
           playerState.current.velocity.y = jumpVelocity;
           playerState.current.isGrounded = false;
         } else if (playerState.current.canDoubleJump) {
-          const jumpVelocity = physicsSettingsRef.current.jumpHeight * 0.133;
+          const jumpVelocity = physicsSettings.jumpHeight * 0.133;
           playerState.current.velocity.y = jumpVelocity;
           playerState.current.canDoubleJump = false;
         }
@@ -225,9 +224,9 @@ const VoiceWorldBuilder = () => {
         const targetYaw = Math.atan2(camDir.x, camDir.z);
         player.rotation.y += ((targetYaw - player.rotation.y + Math.PI) % (2 * Math.PI) - Math.PI) * 0.1;
 
-        const moveSpeed = physicsSettingsRef.current.speed * 0.06;
+        const moveSpeed = physicsSettings.speed * 0.06;
         const dashSpeed = moveSpeed * 4;
-        const gravity = -(physicsSettingsRef.current.gravity * 0.0009);
+        const gravity = -(physicsSettings.gravity * 0.0009);
 
         if (pressedKeys.current.has('arrowleft')) cameraOffset.current.angle += 0.04;
         if (pressedKeys.current.has('arrowright')) cameraOffset.current.angle -= 0.04;
@@ -2507,11 +2506,6 @@ const VoiceWorldBuilder = () => {
     recognition.start();
   };
  
-  // Update ref whenever physicsSettings changes
-  useEffect(() => {
-    physicsSettingsRef.current = physicsSettings;
-  }, [physicsSettings]);
-
   const handlePhysicsChange = useCallback((newSettings) => {
     setPhysicsSettings(newSettings);
   }, []);
@@ -2530,17 +2524,14 @@ const VoiceWorldBuilder = () => {
     setModifyPrompt('');
   };
 
-
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative', background: '#000' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute' }} />
 
-     {gameState === GameState.PLAYING && (
-  <GameSettingsPanel 
-    onSettingsChange={handlePhysicsChange}
-    initialSettings={physicsSettings}
-  />
-)}
+      <GameSettingsPanel 
+        onSettingsChange={handlePhysicsChange}
+        initialSettings={physicsSettings}
+      />
 
       {gameState === GameState.PLAYING && (
         <>
@@ -2591,7 +2582,7 @@ const VoiceWorldBuilder = () => {
               e.target.style.transform = 'scale(1)';
             }}
           >
-            🏠 Home
+            ðŸ              🏠 Home
           </button>
 
           <button
@@ -2659,7 +2650,7 @@ const VoiceWorldBuilder = () => {
                     padding: '0 10px'
                   }}
                 >
-                  ×
+                  Ã—
                 </button>
               </div>
               <div style={{ padding: '20px' }}>
@@ -3061,7 +3052,7 @@ const VoiceWorldBuilder = () => {
             marginBottom: '30px',
             letterSpacing: '1px'
           }}>
-            Cooking up <span style={{ color: '#4fa3ff' }}>YOUR</span> world...
+            Cooking up <span style={{ color: '#4fa3ff' }}>YOUR</span> worldâ€¦
           </div>
 
           {/* Animation */}
