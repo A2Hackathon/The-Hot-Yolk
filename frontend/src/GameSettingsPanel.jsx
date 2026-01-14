@@ -55,19 +55,23 @@ const GameSettingsPanel = ({ onSettingsChange, initialSettings }) => {
   return (
     <div style={{
       position: 'fixed',
-      top: '76px',
-      right: '20px',
+      top: '20px',
+      right: '80px',
       zIndex: 200,
-      pointerEvents: 'none'
+      pointerEvents: 'none',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'flex-end'
     }}>
-      {/* Toggle Button */}
+      {/* Toggle Button - circular to match other controls */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
-          backgroundColor: 'rgba(100, 100, 200, 0.8)',
+          backgroundColor: 'rgba(100, 100, 200, 0.9)',
           color: '#fff',
-          padding: '12px 24px',
-          borderRadius: '8px',
+          width: '56px',
+          height: '56px',
+          borderRadius: '50%',
           border: '2px solid rgba(150, 150, 255, 0.9)',
           cursor: 'pointer',
           boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
@@ -75,23 +79,18 @@ const GameSettingsPanel = ({ onSettingsChange, initialSettings }) => {
           pointerEvents: 'auto',
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
-          fontFamily: 'monospace',
-          fontSize: '14px',
-          fontWeight: 'bold',
-          marginBottom: '10px'
+          justifyContent: 'center'
         }}
         onMouseEnter={(e) => {
-          e.target.style.backgroundColor = 'rgba(120, 120, 220, 0.95)';
-          e.target.style.transform = 'scale(1.05)';
+          e.currentTarget.style.backgroundColor = 'rgba(120, 120, 220, 0.95)';
+          e.currentTarget.style.transform = 'scale(1.05)';
         }}
         onMouseLeave={(e) => {
-          e.target.style.backgroundColor = 'rgba(100, 100, 200, 0.8)';
-          e.target.style.transform = 'scale(1)';
+          e.currentTarget.style.backgroundColor = 'rgba(100, 100, 200, 0.9)';
+          e.currentTarget.style.transform = 'scale(1)';
         }}
       >
-        <Settings size={20} />
-        {!isOpen && 'Settings'}
+        <Settings size={22} />
       </button>
       
       {/* Settings Panel */}

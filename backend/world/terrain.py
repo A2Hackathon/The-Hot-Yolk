@@ -14,7 +14,7 @@ BIOME_SETTINGS = {
 
 GROUND_COLORS = {
     "snow": (245, 245, 245),
-    "street": (245, 245, 245),
+    "street": (220, 200, 230),  # Light purple-grey for city terrain
     "grass": (34, 177, 76)
 }
 
@@ -156,6 +156,12 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
                     break  # exit retry loop once placed
 
     placement_mask = generate_placement_mask(heightmap, biome_name)
+    
+    # Exclude mountain areas from placement mask (no trees/structures on mountains)
+    for y in range(height):
+        for x in range(width):
+            if mountain_mask[y, x]:
+                placement_mask[y, x] = 0
 
     # Colour map
     colour_map_array = np.zeros((height, width, 3), dtype=np.uint8)
@@ -164,6 +170,7 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
             if river_mask[y, x]:
                 colour_map_array[y, x] = (0, 120, 255)
             elif biome_name == "arctic":
+                # All terrain (including mountains) should be white snow in arctic
                 colour_map_array[y, x] = get_arctic_snow_colour(
                     heightmap[y, x],
                     height_multiplier * 1.5

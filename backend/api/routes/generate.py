@@ -431,14 +431,19 @@ def place_trees_on_terrain(
     placement_mask, 
     biome: str, 
     tree_count: int = 40, 
-    terrain_size: float = 256.0
+    terrain_size: float = 256.0,
+    existing_peaks: list = None
 ) -> list:
     """
     Generate trees using walkable points, independent of placed_tree_positions.
     Ensures trees appear even on flat arctic terrain.
+    Excludes areas near mountain peaks to prevent collision.
     """
     segments = len(heightmap_raw) - 1
     trees = []
+    
+    if existing_peaks is None:
+        existing_peaks = []
 
     biome_lower = biome.lower()
     is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen"]
@@ -451,6 +456,10 @@ def place_trees_on_terrain(
     types_for_biome = tree_types.get(biome_lower, tree_types["default"])
 
     # --- Gather all walkable points within placement_mask ---
+    # Exclude areas near mountain peaks (mountain radius ~30 units, add buffer)
+    MOUNTAIN_RADIUS = 30.0
+    MIN_DISTANCE_FROM_PEAK = MOUNTAIN_RADIUS * 1.5  # Safety buffer
+    
     valid_points = []
     for z in range(1, segments-1):
         for x in range(1, segments-1):
@@ -460,7 +469,22 @@ def place_trees_on_terrain(
                 min_h = 0.0 if is_winter else 0.2
                 max_h = 1.5 if is_winter else 1.0
                 if min_h <= h <= max_h:
-                    valid_points.append((x, z))
+                    # Check distance from mountain peaks
+                    world_x = (x / segments) * terrain_size - terrain_size / 2
+                    world_z = (z / segments) * terrain_size - terrain_size / 2
+                    
+                    too_close_to_peak = False
+                    for peak in existing_peaks:
+                        peak_x = peak.get("position", {}).get("x", 0)
+                        peak_z = peak.get("position", {}).get("z", 0)
+                        peak_scale = peak.get("scale", 1.0)
+                        distance = math.sqrt((world_x - peak_x)**2 + (world_z - peak_z)**2)
+                        if distance < MIN_DISTANCE_FROM_PEAK * peak_scale:
+                            too_close_to_peak = True
+                            break
+                    
+                    if not too_close_to_peak:
+                        valid_points.append((x, z))
 
     if not valid_points:
         print("[TREE DEBUG] No valid points found for trees!")
@@ -516,7 +540,8 @@ async def generate_world(prompt: Dict) -> Dict:
         placement_mask = terrain_data["placement_mask"]
 
         # --- Generate 3D structures ---
-        base_tree_count = 40 if biome.lower() in ["arctic", "winter", "icy"] else 25 if biome.lower() == "city" else 50
+        # Default tree count: 25 for arctic, 10 for others
+        base_tree_count = 25 if biome.lower() in ["arctic", "winter", "icy"] else 10
         tree_count = structure_counts.get("tree", base_tree_count)
 
         base_rock_count = 15 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
@@ -531,16 +556,20 @@ async def generate_world(prompt: Dict) -> Dict:
 
         terrain_size = 256
 
+        # Generate peaks first (they affect tree placement)
+        peaks = generate_mountain_peaks(heightmap_raw, biome, terrain_size, max_peaks=mountain_count) if mountain_count > 0 else []
+        
         structures = {
             "trees": place_trees_on_terrain(
                 heightmap_raw=heightmap_raw,
                 placement_mask=placement_mask,
                 biome=biome,
                 tree_count=tree_count,
-                terrain_size=terrain_size
+                terrain_size=terrain_size,
+                existing_peaks=peaks  # Pass peaks so trees avoid them
             ),
             "rocks": generate_rocks(heightmap_raw, biome, rock_count, terrain_size),
-            "peaks": generate_mountain_peaks(heightmap_raw, biome, terrain_size, max_peaks=mountain_count) if mountain_count > 0 else [],
+            "peaks": peaks,
             "buildings": generate_buildings(heightmap_raw, placement_mask, biome, building_count, terrain_size),
             "street_lamps": generate_street_lamps(heightmap_raw, placement_mask, biome, street_lamp_count, terrain_size)
         }

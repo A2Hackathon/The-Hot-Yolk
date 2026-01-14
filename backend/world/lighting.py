@@ -20,11 +20,11 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
         "noon": {
             "ambient": {
                 "color": "#ffffff",
-                "intensity": 0.7
+                "intensity": 0.8
             },
             "directional": {
                 "color": "#ffffff",
-                "intensity": 0.6,
+                "intensity": 0.8,
                 "position": {"x": 50, "y": 100, "z": 50}
             },
             "fog": {
@@ -32,7 +32,7 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
                 "near": 50,
                 "far": 200
             },
-            "background": "#64abff"
+            "background": "#87CEEB"  # Bright sky blue
         },
         
         "sunset": {
@@ -78,17 +78,33 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
     # Apply biome-specific modifications for arctic/icy/winter environments
     is_winter = biome.lower() in ["arctic", "winter", "icy"]
     
+    # City-specific modifications for noon
+    if biome.lower() == "city" and time == "noon":
+        config["background"] = "#D7AFF5"  # Purple-pink sky transitioning to butter cream yellow
+        config["ambient"]["intensity"] = 0.85  # Bright ambient light
+        config["directional"]["intensity"] = 0.85  # Bright directional light
+    
+    # Remove fog for non-arctic biomes (cities, default, etc.)
+    if not is_winter:
+        config["fog"] = None
+    
     if is_winter:
-        # Add blue fog tint for icy environments
+        # Add very light white fog for arctic landscapes (very faint, closer but not blocking sky)
         if time == "noon":
-            config["fog"]["color"] = "#CCF0FF"  
-            config["background"] = "#C6F5FF"
+            config["fog"]["color"] = "#FFFFFF"  # Very light white fog
+            config["fog"]["near"] = 80   # Start fog a bit closer than before
+            config["fog"]["far"] = 500   # Long range so fog stays very subtle
+            config["background"] = "#87CEEB"  # Blue sky visible
             config["ambient"]["color"] = "#ffffff"  # Slightly blue-tinted ambient
         elif time == "sunset":
-            config["fog"]["color"] = "#ffa366"  # Cool sunset fog
+            config["fog"]["color"] = "#FFF5E6"  # Warm white fog for sunset
+            config["fog"]["near"] = 120
+            config["fog"]["far"] = 350
             config["background"] = "#D85365"
         elif time == "night":
-            config["fog"]["color"] = "#7881FF"  # Keep dark blue at night
+            config["fog"]["color"] = "#E6E6FF"  # Slightly blue-tinted white fog at night
+            config["fog"]["near"] = 80
+            config["fog"]["far"] = 250
             config["background"] = "#2543DE"
     
     return config

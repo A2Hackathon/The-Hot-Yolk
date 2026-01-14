@@ -1,4 +1,4 @@
-﻿﻿import * as THREE from 'three';
+﻿import * as THREE from 'three';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import GameSettingsPanel from './GameSettingsPanel';
 
@@ -713,7 +713,7 @@ const VoiceWorldBuilder = () => {
     const baseWidth = 0.6 * baseScale;
     const baseGeometry = new THREE.BoxGeometry(baseWidth, baseHeight, baseWidth);
     const baseMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0x2a2a2a,  // Dark brown/bronze
+      color: 0xD2B48C,  // Beige color
       roughness: 0.8,
       metalness: 0.2
     });
@@ -863,6 +863,113 @@ const VoiceWorldBuilder = () => {
     return { x, z };
   };
 
+  const addRoadsToColorMap = (colorMapArray, terrainSize, buildingDataArray = []) => {
+    // Road color: beige (sand/tan color)
+    const roadColor = [210, 180, 140]; // Beige RGB
+    const roadWidth = 5; // Road width in world units (natural connecting paths)
+    
+    // Convert world position to terrain array index
+    const worldToIndex = (worldPos, terrainSize, arraySize) => {
+      const normalizedX = (worldPos + terrainSize / 2) / terrainSize;
+      const normalizedZ = (worldPos + terrainSize / 2) / terrainSize;
+      const col = Math.floor(normalizedX * (arraySize - 1));
+      const row = Math.floor(normalizedZ * (arraySize - 1));
+      return { row: Math.max(0, Math.min(arraySize - 1, row)), col: Math.max(0, Math.min(arraySize - 1, col)) };
+    };
+    
+    const drawRoadSegment = (startX, startZ, endX, endZ) => {
+      const startIdx = worldToIndex(startX, terrainSize, colorMapArray.length);
+      const endIdx = worldToIndex(endX, terrainSize, colorMapArray.length);
+      const startZIdx = worldToIndex(startZ, terrainSize, colorMapArray.length);
+      const endZIdx = worldToIndex(endZ, terrainSize, colorMapArray.length);
+      
+      // Draw horizontal road segment
+      if (Math.abs(startZIdx.row - endZIdx.row) < 2) {
+        const row = startZIdx.row;
+        const minCol = Math.min(startIdx.col, endIdx.col);
+        const maxCol = Math.max(startIdx.col, endIdx.col);
+        for (let col = minCol; col <= maxCol; col++) {
+          for (let offset = -roadWidth; offset <= roadWidth; offset++) {
+            const r = Math.max(0, Math.min(colorMapArray.length - 1, row + offset));
+            const c = Math.max(0, Math.min(colorMapArray.length - 1, col));
+            if (colorMapArray[r] && colorMapArray[r][c]) {
+              colorMapArray[r][c] = [...roadColor];
+            }
+          }
+        }
+      }
+      
+      // Draw vertical road segment
+      if (Math.abs(startIdx.col - endIdx.col) < 2) {
+        const col = startIdx.col;
+        const minRow = Math.min(startZIdx.row, endZIdx.row);
+        const maxRow = Math.max(startZIdx.row, endZIdx.row);
+        for (let row = minRow; row <= maxRow; row++) {
+          for (let offset = -roadWidth; offset <= roadWidth; offset++) {
+            const r = Math.max(0, Math.min(colorMapArray.length - 1, row));
+            const c = Math.max(0, Math.min(colorMapArray.length - 1, col + offset));
+            if (colorMapArray[r] && colorMapArray[r][c]) {
+              colorMapArray[r][c] = [...roadColor];
+            }
+          }
+        }
+      }
+    };
+    
+    const arraySize = colorMapArray.length;
+    
+    // Collect all grid building positions
+    const gridBuildings = [];
+    buildingDataArray.forEach((buildingData, idx) => {
+      const gridIndex = Math.floor(idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ));
+      const localIndex = idx % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
+      
+      if (gridIndex < buildingGridOrigins.length) {
+        const gridOrigin = buildingGridOrigins[gridIndex];
+        const gridPos = getBuildingGridPosition(localIndex, buildingGridConfig, gridOrigin);
+        gridBuildings.push({
+          x: gridPos.x,
+          z: gridPos.z,
+          row: Math.floor(localIndex / buildingGridConfig.gridSizeX),
+          col: localIndex % buildingGridConfig.gridSizeX,
+          gridIndex,
+          idx
+        });
+      }
+    });
+    
+    // Draw natural connecting roads - just one side (south side) connecting buildings
+    gridBuildings.forEach((building) => {
+      const buildingData = buildingDataArray[building.idx];
+      const buildingWidth = (buildingData?.width || 4) * 2;
+      const buildingDepth = (buildingData?.depth || 4) * 2;
+      
+      // Draw road on south side (front) of building
+      const roadStartX = building.x - buildingWidth / 2 - roadWidth;
+      const roadEndX = building.x + buildingWidth / 2 + roadWidth;
+      const roadZ = building.z + buildingDepth / 2 + roadWidth;
+      
+      drawRoadSegment(roadStartX, roadZ, roadEndX, roadZ);
+      
+      // Connect to next building in same row (if exists)
+      const nextBuilding = gridBuildings.find(b => 
+        b.gridIndex === building.gridIndex && 
+        b.row === building.row && 
+        b.col === building.col + 1
+      );
+      
+      if (nextBuilding) {
+        const nextData = buildingDataArray[nextBuilding.idx];
+        const nextWidth = (nextData?.width || 4) * 2;
+        const nextDepth = (nextData?.depth || 4) * 2;
+        const connectStartX = building.x + buildingWidth / 2 + roadWidth;
+        const connectEndX = nextBuilding.x - nextWidth / 2 - roadWidth;
+        const connectZ = building.z + buildingDepth / 2 + roadWidth;
+        drawRoadSegment(connectStartX, connectZ, connectEndX, connectZ);
+      }
+    });
+  };
+
   const getBuildingTypeForBiome = (biomeName, index) => {
     if (biomeName === 'arctic') {
       return 'igloo';
@@ -981,15 +1088,18 @@ const VoiceWorldBuilder = () => {
     const group = new THREE.Group();
     let mesh;
 
-    // Pastel colors palette
-    const pastelColors = [
-      0x18e7d7, 
-      0x6bcdeb,
-      0xFAA869,
-      0xC3B1E1, 
-      0xFFFACD  
+    // City building colors - light pink and light blue pastels (from second image)
+    const cityColors = [
+      0xFFB6C1,  // Light pink (bright light hitting surface)
+      0xFFC0CB,  // Pink
+      0xFFD1DC,  // Very light pink
+      0xB0E0E6,  // Powder blue
+      0xADD8E6,  // Light blue
+      0xE0F6FF,  // Very light blue
+      0xFFE4E1,  // Misty rose (pink-white)
+      0xF0F8FF   // Alice blue (very light blue)
     ];
-    const color = pastelColors[Math.floor(Math.random() * pastelColors.length)];
+    const color = cityColors[Math.floor(Math.random() * cityColors.length)];
 
     if (type === "igloo") {
       const radius = (buildingData.width || 4) * 1.5;
@@ -1006,8 +1116,9 @@ const VoiceWorldBuilder = () => {
       const depth = (buildingData.depth || 4) * 2;
 
       const baseColor = new THREE.Color(color);
-      const lighter = baseColor.clone().lerp(new THREE.Color(0xffffff), 0.35);
-      const darker = baseColor.clone().lerp(new THREE.Color(0x000000), 0.25);
+      // For pastel colors, make them even lighter and brighter (light pink where bright light hits)
+      const lighter = baseColor.clone().lerp(new THREE.Color(0xffffff), 0.5); // More white blend for bright surfaces
+      const darker = baseColor.clone().lerp(new THREE.Color(0xffffff), 0.1); // Very subtle darkening, still light
 
       const makeGradientMaterial = (geometry, h) => {
         const colors = [];
@@ -1038,6 +1149,49 @@ const VoiceWorldBuilder = () => {
       base.matrixAutoUpdate = false;
       base.updateMatrix();
       group.add(base);
+
+      /* ---------- BUSHES AROUND BASE ---------- */
+      const bushGroup = new THREE.Group();
+      const bushCount = 8; // Number of bushes around the perimeter
+      const baseWidth = width * 1.2;
+      const baseDepth = depth * 1.2;
+      const bushSize = Math.min(baseWidth, baseDepth) * 0.15; // Bush size relative to base
+      const bushHeight = bushSize * 0.6;
+      
+      // Green colors for bushes - match tree green shade
+      // Default tree greens: 0x4BBB6D (leafless) and 0x9adf8f (normal), use similar shades
+      const bushColors = [0x4BBB6D, 0x9adf8f, 0x7BC87A, 0x5BCF6B]; // Match tree green shades
+      
+      for (let i = 0; i < bushCount; i++) {
+        const angle = (i / bushCount) * Math.PI * 2;
+        // Position bushes around the perimeter of the base, with spacing so they don't touch
+        const baseRadius = Math.max(baseWidth, baseDepth) / 2;
+        const spacing = bushSize * 1.5; // Space between bush edge and building edge
+        const radius = baseRadius + spacing + bushSize / 2; // Position bush center outside building
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        
+        // Create a low-poly bush using a sphere
+        const bushGeom = new THREE.SphereGeometry(bushSize, 6, 4);
+        bushGeom.scale(1, 0.6, 1); // Flatten slightly
+        const bushColor = bushColors[Math.floor(Math.random() * bushColors.length)];
+        const bushMat = new THREE.MeshStandardMaterial({
+          color: bushColor,
+          roughness: 0.9,
+          metalness: 0.0
+        });
+        const bush = new THREE.Mesh(bushGeom, bushMat);
+        bush.position.set(x, bushHeight / 2, z); // Position at ground level
+        bush.castShadow = true;
+        bush.receiveShadow = true;
+        bush.matrixAutoUpdate = false;
+        bush.updateMatrix();
+        bushGroup.add(bush);
+      }
+      
+      bushGroup.matrixAutoUpdate = false;
+      bushGroup.updateMatrix();
+      group.add(bushGroup);
 
       /* ---------- MAIN SHAFT ---------- */
       const shaftHeight = height * 0.7;
@@ -1186,18 +1340,11 @@ const VoiceWorldBuilder = () => {
       const depth = (buildingData.depth || 4) * 2;
       const height = (buildingData.height || 6) * 2;
 
-      // Summery bright palette for houses
+      // City house colors - specific palette
       const houseColors = [
-        0xFF6B6B,  // Coral Pink - warm sunset
-        0x4ECDC4,  // Turquoise - ocean breeze
-        0x95E1D3,  // Mint Green - fresh
-        0xF38181,  // Salmon Pink - warm
-        0xAAE3E2,  // Sky Blue - clear sky
-        0xFFB84D,  // Peach - tropical
-        0xB8E6B8,  // Light Green - fresh grass
-        0xFFB3BA,  // Soft Pink - gentle
-        0xBAE1FF,  // Light Blue - sky
-        0xC7CEEA   // Lavender Blue - soft
+        0x687FE5,  // Blue
+        0xFEEBF6,  // Pink
+        0xFCD8CD   // Peach/pink
       ];
       const mainColor = houseColors[Math.floor(Math.random() * houseColors.length)];
       
@@ -1263,14 +1410,6 @@ const VoiceWorldBuilder = () => {
       doorFrame.position.set(0, doorHeight / 2, depth / 2 + 0.04);
       mesh.add(doorFrame);
 
-      // Chimney
-      const chimneyGeom = new THREE.BoxGeometry(width * 0.15, height * 0.25, width * 0.15);
-      const chimneyMat = new THREE.MeshBasicMaterial({ color: 0x8B4513 });
-      const chimney = new THREE.Mesh(chimneyGeom, chimneyMat);
-      chimney.position.set(width * 0.3, height * 0.9, 0);
-      chimney.castShadow = true;
-      mesh.add(chimney);
-
       group.add(mesh);
     }
     
@@ -1318,13 +1457,18 @@ const VoiceWorldBuilder = () => {
     return group;
   }
 
-  const createMountainPeak = (peakData) => {
+  const createMountainPeak = (peakData, biome = null) => {
     const height = 80; 
     const geometry = new THREE.ConeGeometry(40, height, 4);
+    
+    // Use white snow color for arctic biome, grey stone for others
+    const isArctic = biome && biome.toLowerCase() === 'arctic';
     const material = new THREE.MeshStandardMaterial({ 
-      color: 0xF0F0F0,
-      emissive: 0x888888,
-      emissiveIntensity: 0.2
+      color: isArctic ? 0xFFFFFF : 0xE0E0E0,  // White snow for arctic, grey stone for others
+      roughness: 0.95,  // Very rough surface (0 = smooth, 1 = completely rough)
+      metalness: 0.1,   // Low metalness for matte, non-shiny appearance
+      emissive: isArctic ? 0xCCCCCC : 0x666666,  // Light grey emissive for arctic, darker for others
+      emissiveIntensity: 0.15
     });
     const peak = new THREE.Mesh(geometry, material);
     const terrainY = getHeightAt(peakData.position.x, peakData.position.z)
@@ -1464,7 +1608,7 @@ const VoiceWorldBuilder = () => {
     });
   };
 
-  const createCloud = (x, y, z, scale = 1) => {
+  const createCloud = (x, y, z, scale = 1, biomeName = null) => {
     const cloudGroup = new THREE.Group();
     
     // More boxes for fluffier clouds
@@ -1478,11 +1622,22 @@ const VoiceWorldBuilder = () => {
 
       const geometry = new THREE.BoxGeometry(width, height, depth);
       
-      // Slight variation in cloud color for depth
+      // Cloud color based on biome
+      let material;
+      if (biomeName && biomeName.toLowerCase() === 'city') {
+        // White clouds with slight pinkish tint for city at noon
+        const brightness = 0.98 + Math.random() * 0.02;
+        const pinkTint = 0.95 + Math.random() * 0.05; // Slight pinkish tint
+        material = new THREE.MeshBasicMaterial({
+          color: new THREE.Color(brightness, pinkTint, brightness),
+        });
+      } else {
+        // Standard white clouds for other biomes
       const brightness = 0.95 + Math.random() * 0.05;
-      const material = new THREE.MeshBasicMaterial({
+        material = new THREE.MeshBasicMaterial({
         color: new THREE.Color(brightness, brightness, brightness),
       });
+      }
 
       const box = new THREE.Mesh(geometry, material);
       
@@ -1554,6 +1709,8 @@ const VoiceWorldBuilder = () => {
         terrainPlacementMaskRef.current = heightmapRef.current.map(row =>
           row.map(height => (height >= 0 ? 1 : 0))
         );
+        
+        // Create terrain mesh (roads will be added after buildings are placed)
         const terrainMesh = createTerrain(heightmapRef.current, colorMapRef.current, 256);
         terrainMeshRef.current = terrainMesh;
         scene.add(terrainMesh);
@@ -1600,14 +1757,53 @@ const VoiceWorldBuilder = () => {
           console.log(`✅ Added ${structuresRef.current.filter(obj => obj.userData.structureType === 'tree').length} trees`);
         }
 
-        const cloudCount = 30;
+        const cloudCount = 15;
+        const minCloudDistance = 80; // Minimum distance between clouds to prevent clumping
+        const cloudPositions = []; // Track cloud positions for spacing
+        
         for (let i = 0; i < cloudCount; i++) {
-          const x = (Math.random() - 0.5) * 500;
-          const y = 60 + Math.random() * 90;
-          const z = (Math.random() - 0.5) * 600;
-          const scale = 3 + Math.random() * 2;
-          const cloud = createCloud(x, y, z, scale);
+          let attempts = 0;
+          let validPosition = false;
+          let x, y, z, scale;
+          
+          // Try to find a position that's not too close to other clouds
+          while (!validPosition && attempts < 50) {
+            x = (Math.random() - 0.5) * 500;
+            y = 60 + Math.random() * 90;
+            z = (Math.random() - 0.5) * 600;
+            scale = 3 + Math.random() * 2;
+            
+            // Check distance from existing clouds
+            let tooClose = false;
+            for (const existingPos of cloudPositions) {
+              const dist = Math.sqrt(
+                (x - existingPos.x) ** 2 + 
+                (y - existingPos.y) ** 2 + 
+                (z - existingPos.z) ** 2
+              );
+              // Account for cloud scale - larger clouds need more space
+              const requiredDistance = minCloudDistance * (scale / 3);
+              if (dist < requiredDistance) {
+                tooClose = true;
+                break;
+              }
+            }
+            
+            if (!tooClose) {
+              validPosition = true;
+            }
+            attempts++;
+          }
+          
+          // If we couldn't find a perfect position after many attempts, skip this cloud
+          if (!validPosition) {
+            console.log('[CLOUDS] Skipping cloud placement: no valid position found after 50 attempts');
+            continue;
+          }
+          
+          const cloud = createCloud(x, y, z, scale, biomeName);
           scene.add(cloud);
+          cloudPositions.push({ x, y, z, scale });
         }
 
         if (data.structures.rocks) {
@@ -1622,7 +1818,7 @@ const VoiceWorldBuilder = () => {
         
         if (data.structures.peaks) {
           data.structures.peaks.forEach(peakData => {
-            const peak = createMountainPeak(peakData);
+            const peak = createMountainPeak(peakData, biomeName);
             peak.userData = { structureType: 'peak' };
             scene.add(peak);
             structuresRef.current.push(peak);
@@ -1762,11 +1958,10 @@ const VoiceWorldBuilder = () => {
                 attempts++;
               }
               
-              // If we couldn't find a valid position after many attempts, place it anyway at a random location
+              // If we couldn't find a valid position after many attempts, skip this skyscraper
               if (!validPosition) {
-                randomX = (Math.random() - 0.5) * terrainSize * 0.7;
-                randomZ = (Math.random() - 0.5) * terrainSize * 0.7;
-                console.log(`[SKYSCRAPERS] Warning: Could not find ideal position for skyscraper ${i + 1}, placing at (${randomX.toFixed(1)}, ${randomZ.toFixed(1)})`);
+                console.log(`[SKYSCRAPERS] Skipping skyscraper ${i + 1}: no valid position found after ${attempts} attempts`);
+                continue;
               }
               
               // Create skyscraper building data
@@ -2115,7 +2310,39 @@ const VoiceWorldBuilder = () => {
         }
       }
 
-      if (newStreetLampCount < oldStreetLampCount) {
+      // Check if street lamps should be replaced (set operation when counts match)
+      const shouldReplaceAllLamps = newStreetLampCount === oldStreetLampCount && newStreetLampCount > 0 && oldStreetLampCount > 0;
+      
+      if (shouldReplaceAllLamps) {
+        // Replace all street lamps (for set operations)
+        console.log(`[MODIFY] Replacing all ${oldStreetLampCount} street lamps...`);
+        const lampsToRemove = structuresRef.current.filter(obj => obj.userData?.structureType === 'street_lamp');
+        lampsToRemove.forEach(lamp => {
+          scene.remove(lamp);
+        });
+        structuresRef.current = structuresRef.current.filter(obj => obj.userData?.structureType !== 'street_lamp');
+        
+        // Determine if it's night
+        const timeOfDay = data.world?.time || 'noon';
+        const isNight = timeOfDay === 'night' || timeOfDay === 'midnight' || timeOfDay === 'evening';
+        let isNightFromLighting = false;
+        if (data.world?.lighting_config?.background) {
+          const bgColor = new THREE.Color(data.world.lighting_config.background);
+          const hsl = {};
+          bgColor.getHSL(hsl);
+          isNightFromLighting = hsl.l < 0.3;
+        }
+        const shouldGlow = isNight || isNightFromLighting;
+        
+        // Add all new street lamps
+        data.structures.street_lamps.forEach(lampData => {
+          const lamp = createStreetLamp(lampData, shouldGlow);
+          lamp.userData = { structureType: 'street_lamp' };
+          scene.add(lamp);
+          structuresRef.current.push(lamp);
+        });
+        console.log(`[MODIFY] ✓ Successfully replaced ${data.structures.street_lamps.length} street lamps`);
+      } else if (newStreetLampCount < oldStreetLampCount) {
         const toRemove = oldStreetLampCount - newStreetLampCount;
         console.log(`[MODIFY] Removing ${toRemove} street lamps...`);
         for (let i = 0; i < toRemove; i++) {
@@ -2226,14 +2453,16 @@ const VoiceWorldBuilder = () => {
           scene.add(building);
           structuresRef.current.push(building);
         });
+            
       }
 
       if (data.structures?.peaks && newPeakCount > oldPeakCount) {
         const newPeaks = data.structures.peaks.slice(oldPeakCount);
+        const currentBiome = data.world?.biome || data.world?.biome_name || biomeName;
         console.log(`[MODIFY] Adding ${newPeaks.length} new peaks...`);
         
         newPeaks.forEach(peakData => {
-          const peak = createMountainPeak(peakData);
+          const peak = createMountainPeak(peakData, currentBiome);
           peak.userData = { ...peak.userData, structureType: 'peak' };
           scene.add(peak);
           structuresRef.current.push(peak);
@@ -2373,6 +2602,12 @@ const VoiceWorldBuilder = () => {
       );
       console.log(`[FRONTEND LIGHTING] Directional: ${lightingConfig.directional.color} @ ${lightingConfig.directional.intensity}`);
     }
+    
+    // Remove fog entirely (no fog in any biome)
+    if (scene.fog) {
+      scene.fog = null;
+      console.log('[FRONTEND LIGHTING] Fog removed (disabled globally)');
+    }
         
     // Update gradient sky sphere with time-of-day aware gradients
     const skyMesh = scene.children.find(c => c.userData?.isSky);
@@ -2396,7 +2631,19 @@ const VoiceWorldBuilder = () => {
       const isNight = hsl.l < 0.3;
       let horizonColor, middleColor, topColor;
       
-      if (isNight) {
+      // Check if it's city biome at noon for special gradient
+      const biomeName = currentWorld?.world?.biome || currentWorld?.world?.biome_name;
+      const timeOfDay = currentWorld?.world?.time;
+      const isCityNoon = biomeName?.toLowerCase() === 'city' && 
+                        (timeOfDay === 'noon' || hsl.l > 0.6);
+      
+      if (isCityNoon) {
+        // CITY NOON - #D7AFF5 transitioning to pastel pale butter cream yellow
+        topColor = new THREE.Color(0xD7AFF5); // Purple-pink at top
+        middleColor = new THREE.Color(0xD7AFF5).lerp(new THREE.Color(0xFFF8DC), 0.5); // Blend between purple and butter cream
+        horizonColor = new THREE.Color(0xFFF8DC); // Pastel pale butter cream yellow at horizon
+        
+      } else if (isNight) {
         // NIGHT - Dark sky, subtle gradient
         horizonColor = new THREE.Color().setHSL(hsl.h, hsl.s, Math.min(0.4, hsl.l * 1.3));
         middleColor = bgColor.clone();
@@ -2515,7 +2762,7 @@ const VoiceWorldBuilder = () => {
   const handlePhysicsChange = useCallback((newSettings) => {
     setPhysicsSettings(newSettings);
   }, []);
- 
+
   const handleTextSubmit = () => {
     if (!prompt.trim()) return;
     setSubmittedPrompt(prompt);
@@ -2544,6 +2791,7 @@ const VoiceWorldBuilder = () => {
 
       {gameState === GameState.PLAYING && (
         <>
+          {/* Top-right circular controls: Home and Chat History */}
           <button
             onClick={() => {
               setGameState(GameState.IDLE);
@@ -2567,62 +2815,70 @@ const VoiceWorldBuilder = () => {
             }}
             style={{
               position: 'absolute',
-              top: 20,
-              right: 20,
+              top: 90,
+              right: 40,
               zIndex: 10,
-              padding: '12px 24px',
-              backgroundColor: 'rgba(100, 100, 200, 0.8)',
+              width: '56px',
+              height: '56px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(100, 100, 200, 0.9)',
               color: '#fff',
               border: '2px solid rgba(150, 150, 255, 0.9)',
-              borderRadius: '8px',
               cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               fontFamily: 'monospace',
-              fontSize: '14px',
+              fontSize: '22px',
               fontWeight: 'bold',
               transition: 'all 0.3s ease',
               boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
             }}
             onMouseEnter={(e) => {
-              e.target.style.backgroundColor = 'rgba(120, 120, 220, 0.95)';
-              e.target.style.transform = 'scale(1.05)';
+              e.currentTarget.style.backgroundColor = 'rgba(120, 120, 220, 0.95)';
+              e.currentTarget.style.transform = 'scale(1.05)';
             }}
             onMouseLeave={(e) => {
-              e.target.style.backgroundColor = 'rgba(100, 100, 200, 0.8)';
-              e.target.style.transform = 'scale(1)';
+              e.currentTarget.style.backgroundColor = 'rgba(100, 100, 200, 0.9)';
+              e.currentTarget.style.transform = 'scale(1)';
             }}
           >
-            🏠 Home
+            H
           </button>
 
           <button
             onClick={() => setShowChatHistory(!showChatHistory)}
             style={{
               position: 'absolute',
-              top: 20,
-              right: 140,
+              top: 90,
+              right: 120,
               zIndex: 10,
-              padding: '12px 24px',
-              backgroundColor: 'rgba(100, 100, 200, 0.8)',
+              width: '56px',
+              height: '56px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(100, 100, 200, 0.9)',
               color: '#fff',
               border: '2px solid rgba(150, 150, 255, 0.9)',
-              borderRadius: '8px',
               cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               fontFamily: 'monospace',
-              fontSize: '14px',
+              fontSize: '22px',
               fontWeight: 'bold',
               transition: 'all 0.3s ease',
               boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
             }}
             onMouseEnter={(e) => {
-              e.target.style.backgroundColor = 'rgba(120, 120, 220, 0.95)';
-              e.target.style.transform = 'scale(1.05)';
+              e.currentTarget.style.backgroundColor = 'rgba(120, 120, 220, 0.95)';
+              e.currentTarget.style.transform = 'scale(1.05)';
             }}
             onMouseLeave={(e) => {
-              e.target.style.backgroundColor = 'rgba(100, 100, 200, 0.8)';
-              e.target.style.transform = 'scale(1)';
+              e.currentTarget.style.backgroundColor = 'rgba(100, 100, 200, 0.9)';
+              e.currentTarget.style.transform = 'scale(1)';
             }}
           >
-            💬 Chat History
+            C
           </button>
 
           {/* Chat History Side Panel */}
@@ -2960,7 +3216,7 @@ const VoiceWorldBuilder = () => {
           </div>
 
           <div style={{
-            position: 'fixed', bottom: 30, right: 30, zIndex: 20
+            position: 'fixed', top: 80, right: 80, zIndex: 20
           }}>
             <button
               onClick={() => startVoiceCapture(true)}
