@@ -757,11 +757,24 @@ async def scan_world(request: ScanRequest) -> Dict:
         # Handle streaming analysis from Overshoot AI SDK
         if request.use_streaming and request.streaming_analysis:
             print("[SCAN] Using streaming analysis from Overshoot AI SDK")
-            print(f"[SCAN] Streaming analysis keys: {list(request.streaming_analysis.keys())}")
+            print(f"[SCAN] Streaming analysis keys: {list(request.streaming_analysis.keys()) if isinstance(request.streaming_analysis, dict) else 'Not a dict'}")
+            print(f"[SCAN] Streaming analysis type: {type(request.streaming_analysis)}")
             
-            # Convert Overshoot streaming format to our format
-            scan_data = generate_world_from_scan(request.streaming_analysis)
-            print(f"[SCAN] Converted streaming analysis: biome={scan_data.get('biome')}, objects={scan_data.get('objects')}")
+            # The streaming_analysis from frontend is already parsed JSON from the SDK
+            # It might be in raw format or already parsed - handle both cases
+            from world.overshoot_integration import parse_overshoot_response
+            
+            # If it's already in the format we expect (has biome, objects keys), use directly
+            if isinstance(request.streaming_analysis, dict) and "biome" in request.streaming_analysis:
+                # Already in our expected format
+                scan_data = request.streaming_analysis
+            else:
+                # Parse it through parse_overshoot_response to normalize format
+                scan_data = parse_overshoot_response(request.streaming_analysis)
+            
+            # Then convert to world params using generate_world_from_scan
+            # Note: generate_world_from_scan expects parsed format, so scan_data should already be parsed
+            print(f"[SCAN] Parsed streaming analysis: biome={scan_data.get('biome')}, objects={scan_data.get('objects')}")
         
         # Handle single image analysis (legacy or fallback)
         elif request.image_data:
@@ -801,6 +814,16 @@ async def scan_world(request: ScanRequest) -> Dict:
             raise HTTPException(
                 status_code=500, 
                 detail=error_detail
+            )
+        
+        # Validate scan_data format
+        if not isinstance(scan_data, dict):
+            raise HTTPException(status_code=500, detail="Invalid scan data format")
+        
+        if "biome" not in scan_data or "objects" not in scan_data:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Invalid scan data: missing required keys. Got: {list(scan_data.keys())}"
             )
         
         print(f"[SCAN] Detected: biome={scan_data['biome']}, objects={scan_data['objects']}")
