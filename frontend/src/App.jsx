@@ -2357,6 +2357,12 @@ const VoiceWorldBuilder = () => {
   // Camera capture functions for Overshoot AI scanning
   const startCameraCapture = async () => {
     try {
+      // Prevent concurrent streaming
+      if (streamingActive || overshootVisionRef.current) {
+        console.warn('[CAMERA] Streaming already active, ignoring request');
+        return;
+      }
+
       // Check if getUserMedia is available
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         alert('Camera API is not supported in this browser. Please use Chrome, Firefox, Edge, or Safari.');
