@@ -1459,32 +1459,185 @@ const VoiceWorldBuilder = () => {
   }
 
   const createMountainPeak = (peakData, biome = null) => {
-    const height = 80; 
-    const geometry = new THREE.ConeGeometry(40, height, 4);
+  const group = new THREE.Group();
+  const baseHeight = 80;
+  const isArctic = biome && (biome.toLowerCase() === 'arctic' || biome.toLowerCase() === 'winter' || biome.toLowerCase() === 'icy' || biome.toLowerCase() === 'snow' || biome.toLowerCase() === 'frozen');
+  
+  // Create main mountain with more detailed geometry for jagged peaks
+  const mainGeometry = new THREE.ConeGeometry(40, baseHeight, 16, 1); // Increased segments for more detail
+  const positions = mainGeometry.attributes.position;
+  
+  // Create jagged, sharp peaks with aggressive vertex displacement
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i);
+    const y = positions.getY(i);
+    const z = positions.getZ(i);
     
-    // Use white snow color for arctic biome, grey stone for others
-    const isArctic = biome && biome.toLowerCase() === 'arctic';
-    const material = new THREE.MeshStandardMaterial({ 
-      color: isArctic ? 0xFFFFFF : 0xE0E0E0,  // White snow for arctic, grey stone for others
-      roughness: 0.95,  // Very rough surface (0 = smooth, 1 = completely rough)
-      metalness: 0.1,   // Low metalness for matte, non-shiny appearance
-      emissive: isArctic ? 0xCCCCCC : 0x666666,  // Light grey emissive for arctic, darker for others
-      emissiveIntensity: 0.15
-    });
-    const peak = new THREE.Mesh(geometry, material);
-    const terrainY = getHeightAt(peakData.position.x, peakData.position.z)
-    const scaledHeight = height * peakData.scale;
-    peak.position.set(
-      peakData.position.x,
-      terrainY +  scaledHeight / 2, // optional offset if you want some lift
-      peakData.position.z
+    // Don't modify base vertices
+    if (y > -baseHeight / 2 + 5) {
+      // More aggressive displacement for jagged peaks
+      const displacement = (Math.random() - 0.5) * 15;
+      const heightFactor = Math.pow((y + baseHeight / 2) / baseHeight, 1.5); // Non-linear for sharper peaks
+      
+      // More displacement near the peak for dramatic effect
+      const scaledDisplacement = displacement * heightFactor;
+      
+      positions.setX(i, x + scaledDisplacement * 1.2);
+      positions.setZ(i, z + scaledDisplacement * 1.2);
+      positions.setY(i, y + scaledDisplacement * 0.5);
+    }
+  }
+  
+  mainGeometry.computeVertexNormals();
+  
+  // Calculate normals for slope-based coloring
+  const normals = mainGeometry.attributes.normal;
+  
+  // Create realistic colors: white snow at top/gentle slopes, dark rock on steep faces
+  const colors = [];
+  for (let i = 0; i < positions.count; i++) {
+    const y = positions.getY(i);
+    const heightRatio = (y + baseHeight / 2) / baseHeight;
+    
+    // Get surface normal for slope calculation
+    const nx = normals.getX(i);
+    const ny = normals.getY(i);
+    const nz = normals.getZ(i);
+    const slope = Math.acos(Math.max(0, Math.min(1, ny))); // Angle from vertical (0 = flat, PI/2 = vertical)
+    
+    // Always apply snow-capped peaks on top portion of mountains
+    const isSteep = slope > Math.PI / 4; // Steep faces (45+ degrees)
+    const isHigh = heightRatio > 0.5; // Upper 50% of mountain gets snow
+    
+    if (isHigh) {
+      // Snow at high altitudes: bright white with slight blue tint in shadows
+      const snowBrightness = 0.95 + heightRatio * 0.05;
+      const blueTint = 0.08 + (1 - ny) * 0.12; // More blue on vertical faces (shadows)
+      colors.push(snowBrightness, snowBrightness, snowBrightness + blueTint);
+    } else if (isSteep) {
+      // Exposed dark rock on steep lower faces
+      const rockDarkness = 0.3 + (1 - heightRatio) * 0.2;
+      colors.push(rockDarkness, rockDarkness, rockDarkness + 0.05);
+    } else {
+      // Lower gentle slopes: transition from snow to rock
+      const transition = heightRatio * 2; // 0 to 1 in lower half
+      const snowBrightness = 0.85 + transition * 0.1;
+      const rockDarkness = 0.4 + (1 - transition) * 0.15;
+      const r = snowBrightness * transition + rockDarkness * (1 - transition);
+      const g = r;
+      const b = r + 0.05 * transition;
+      colors.push(r, g, b);
+    }
+  }
+  
+  mainGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  
+  // Enhanced material for realistic snow/rock appearance
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.85, // Snow is slightly less rough
+    metalness: 0.05,
+    flatShading: false, // Smooth shading for better lighting
+    envMapIntensity: 0.3
+  });
+  
+  const mainPeak = new THREE.Mesh(mainGeometry, material);
+  mainPeak.castShadow = true;
+  mainPeak.receiveShadow = true;
+  group.add(mainPeak);
+  
+  // Add 2-4 smaller jagged sub-peaks for complexity
+  const subPeakCount = 2 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < subPeakCount; i++) {
+    const subHeight = baseHeight * (0.35 + Math.random() * 0.4);
+    const subRadius = 12 + Math.random() * 18;
+    const subGeometry = new THREE.ConeGeometry(subRadius, subHeight, 12, 1); // More segments
+    const subPositions = subGeometry.attributes.position;
+    
+    // Randomize sub-peak vertices for jagged appearance
+    for (let j = 0; j < subPositions.count; j++) {
+      const x = subPositions.getX(j);
+      const y = subPositions.getY(j);
+      const z = subPositions.getZ(j);
+      
+      if (y > -subHeight / 2 + 3) {
+        const displacement = (Math.random() - 0.5) * 12;
+        const heightFactor = Math.pow((y + subHeight / 2) / subHeight, 1.5);
+        const scaledDisplacement = displacement * heightFactor;
+        
+        subPositions.setX(j, x + scaledDisplacement * 1.0);
+        subPositions.setZ(j, z + scaledDisplacement * 1.0);
+        subPositions.setY(j, y + scaledDisplacement * 0.4);
+      }
+    }
+    
+    subGeometry.computeVertexNormals();
+    const subNormals = subGeometry.attributes.normal;
+    
+    // Color sub-peaks with same logic - always snow-capped
+    const subColors = [];
+    for (let j = 0; j < subPositions.count; j++) {
+      const y = subPositions.getY(j);
+      const heightRatio = (y + subHeight / 2) / subHeight;
+      const ny = subNormals.getY(j);
+      const slope = Math.acos(Math.max(0, Math.min(1, ny)));
+      
+      const isSteep = slope > Math.PI / 4;
+      const isHigh = heightRatio > 0.5;
+      
+      if (isHigh) {
+        // Snow at high altitudes
+        const snowBrightness = 0.95 + heightRatio * 0.05;
+        const blueTint = 0.08 + (1 - ny) * 0.12;
+        subColors.push(snowBrightness, snowBrightness, snowBrightness + blueTint);
+      } else if (isSteep) {
+        // Exposed dark rock on steep lower faces
+        const rockDarkness = 0.3 + (1 - heightRatio) * 0.2;
+        subColors.push(rockDarkness, rockDarkness, rockDarkness + 0.05);
+      } else {
+        // Lower gentle slopes: transition from snow to rock
+        const transition = heightRatio * 2;
+        const snowBrightness = 0.85 + transition * 0.1;
+        const rockDarkness = 0.4 + (1 - transition) * 0.15;
+        const r = snowBrightness * transition + rockDarkness * (1 - transition);
+        const g = r;
+        const b = r + 0.05 * transition;
+        subColors.push(r, g, b);
+      }
+    }
+    
+    subGeometry.setAttribute('color', new THREE.Float32BufferAttribute(subColors, 3));
+    
+    const subPeak = new THREE.Mesh(subGeometry, material.clone());
+    subPeak.castShadow = true;
+    subPeak.receiveShadow = true;
+    
+    // Position sub-peaks around main peak
+    const angle = (i / subPeakCount) * Math.PI * 2 + Math.random() * 0.5;
+    const distance = 18 + Math.random() * 20;
+    subPeak.position.set(
+      Math.cos(angle) * distance,
+      baseHeight * 0.1,
+      Math.sin(angle) * distance
     );
-    peak.scale.setScalar(peakData.scale);
-    peak.rotation.y = Math.random() * Math.PI * 2;
-    peak.castShadow = true;
-    return peak;
-  };
+    subPeak.rotation.y = Math.random() * Math.PI * 2;
     
+    group.add(subPeak);
+  }
+  
+  // Position the entire mountain group
+  const terrainY = getHeightAt(peakData.position.x, peakData.position.z);
+  const scaledHeight = baseHeight * peakData.scale;
+  group.position.set(
+    peakData.position.x,
+    terrainY + scaledHeight / 2,
+    peakData.position.z
+  );
+  group.scale.setScalar(peakData.scale);
+  group.rotation.y = Math.random() * Math.PI * 2;
+  
+  return group;
+};
   const getHeightAt = (x, z) => {
     if (!heightmapRef.current) return 0;
     const hm = heightmapRef.current;
