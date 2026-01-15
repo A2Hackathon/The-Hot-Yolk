@@ -13,3 +13,4 @@ pocketsphinx
 librosa
 python-multipart
 requests
+openai

@@ -1,5 +1,5 @@
 # voice.py
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import sounddevice as sd
 import numpy as np
 import queue

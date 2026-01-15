@@ -2,6 +2,7 @@
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import GameSettingsPanel from './GameSettingsPanel';
+import { RealtimeVision } from '@overshoot/sdk';
 
 
 const API_BASE = 'http://localhost:8000/api';
@@ -48,6 +49,12 @@ const VoiceWorldBuilder = () => {
   const [historyChatInput, setHistoryChatInput] = useState('');
   const [uploadedImage, setUploadedImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+  const [scanMode, setScanMode] = useState(false);
+  const [cameraStream, setCameraStream] = useState(null);
+  const videoRef = useRef(null);
+  const overshootVisionRef = useRef(null);
+  const [streamingActive, setStreamingActive] = useState(false);
+  const [lastScanResult, setLastScanResult] = useState(null);
   const [physicsSettings, setPhysicsSettings] = useState({
   speed: 5.0,
   gravity: 20.0,
@@ -2347,6 +2354,773 @@ const VoiceWorldBuilder = () => {
     aurora.material.opacity = baseOpacity - layer * 0.05 + pulse;
   });
 };
+  // Camera capture functions for Overshoot AI scanning
+  const startCameraCapture = async () => {
+    try {
+      // Check if getUserMedia is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('Camera API is not supported in this browser. Please use Chrome, Firefox, Edge, or Safari.');
+        return;
+      }
+
+      // Check if we're on HTTPS or localhost (required for camera access)
+      const hostname = location.hostname;
+      const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+      const isHTTPS = location.protocol === 'https:';
+      
+      // If using IP address (not localhost), warn user
+      if (!isLocalhost && !isHTTPS) {
+        const useLocalhost = confirm(
+          '⚠️ Camera access requires HTTPS or localhost.\n\n' +
+          'You are currently using: ' + hostname + ':3000\n\n' +
+          'SOLUTION: Access the site via localhost instead:\n' +
+          'http://localhost:3000\n\n' +
+          'Click OK to open localhost:3000, or Cancel to continue (may not work).'
+        );
+        
+        if (useLocalhost) {
+          window.location.href = 'http://localhost:3000';
+          return;
+        }
+        console.warn('[CAMERA] Attempting camera access from non-secure context:', hostname);
+      }
+
+      // Check for Overshoot API key
+      // Use window.prompt to avoid conflict with state variable 'prompt'
+      const overshootApiKeyRaw = window.prompt(
+        'Enter your Overshoot AI API Key:\n\n' +
+        'Get your key from: https://overshoot.ai\n\n' +
+        '(Leave empty to use camera only without streaming)'
+      );
+      
+      if (!overshootApiKeyRaw || overshootApiKeyRaw.trim() === '') {
+        // Fallback to basic camera without streaming
+        console.log('[CAMERA] No Overshoot API key provided, using basic camera');
+        await startBasicCamera();
+        return;
+      }
+
+      // Clean the API key: remove all whitespace, newlines, carriage returns, and non-printable characters
+      // This fixes the "String contains non ISO-8859-1 code point" error
+      const overshootApiKey = overshootApiKeyRaw
+        .replace(/\r\n/g, '')  // Remove Windows line breaks
+        .replace(/\r/g, '')     // Remove carriage returns
+        .replace(/\n/g, '')     // Remove newlines
+        .replace(/\s+/g, '')    // Remove all whitespace
+        .trim();
+
+      if (!overshootApiKey || overshootApiKey.length < 10) {
+        alert('Invalid API key format. Please paste only the API key without any extra characters or spaces.');
+        await startBasicCamera();
+        return;
+      }
+
+      // Start Overshoot AI streaming
+      await startOvershootStreaming(overshootApiKey);
+      
+    } catch (error) {
+      console.error('[CAMERA] Error:', error);
+      alert('Failed to start camera streaming: ' + error.message);
+    }
+  };
+
+  const startBasicCamera = async () => {
+    try {
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          } 
+        });
+      } catch (constraintError) {
+        console.log('[CAMERA] Advanced constraints failed, trying basic video...');
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      }
+      
+      setCameraStream(stream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          console.log('[CAMERA] Camera ready:', videoRef.current.videoWidth, 'x', videoRef.current.videoHeight);
+        };
+      }
+      setScanMode(true);
+      console.log('[CAMERA] Camera access granted (basic mode)');
+    } catch (error) {
+      console.error('[CAMERA] Error accessing camera:', error);
+      handleCameraError(error);
+    }
+  };
+
+  const startOvershootStreaming = async (apiKey) => {
+    try {
+      console.log('[OVERSHOOT] Starting video streaming with Overshoot AI...');
+      console.log('[OVERSHOOT] API Key preview:', apiKey.substring(0, 10) + '...' + apiKey.substring(apiKey.length - 5));
+      
+      // Validate API key format (already cleaned in startCameraCapture)
+      if (!apiKey || apiKey.length < 10) {
+        throw new Error('Invalid API key format. Please check your Overshoot AI API key.');
+      }
+
+      // Note: The Overshoot API endpoint may not be publicly available yet
+      // The domain api.overshoot.ai doesn't resolve (DNS error)
+      // This suggests the service is still in development or requires special access
+      console.log('[OVERSHOOT] Note: api.overshoot.ai endpoint may not be publicly available yet');
+
+      // Create Overshoot Vision instance
+      // Configuration matches the Overshoot API Playground
+      const visionConfig = {
+        apiUrl: 'https://api.overshoot.ai',
+        apiKey: apiKey, // Already cleaned, no need to trim
+        prompt: `Identify what you see in this real-world environment and return JSON with:
+{
+  "objects": [{"type": "tree", "count": 5}, {"type": "rock", "count": 3}],
+  "terrain": {"type": "arctic|forest|desert|city|mountainous"},
+  "weather": {"condition": "clear|cloudy|rainy|snowy|foggy"},
+  "colors": {"palette": ["#HEX", "#HEX"]},
+  "spatial_layout": [{"object": "tree", "position": "foreground|midground|background"}]
+}
+Detect objects: trees, rocks, buildings, mountains, street lamps.`,
+        backend: 'overshoot', // Match playground: "Overshoot"
+        model: 'Qwen/Qwen3-VL-30B-A3B-Instruct', // Match playground model
+        outputSchema: {
+          type: "object",
+          properties: {
+            objects: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  type: { type: "string" },
+                  count: { type: "number" }
+                }
+              }
+            },
+            terrain: {
+              type: "object",
+              properties: {
+                type: { type: "string" }
+              }
+            },
+            weather: {
+              type: "object",
+              properties: {
+                condition: { type: "string" }
+              }
+            },
+            colors: {
+              type: "object",
+              properties: {
+                palette: {
+                  type: "array",
+                  items: { type: "string" }
+                }
+              }
+            },
+            spatial_layout: {
+              type: "array",
+              items: { type: "object" }
+            }
+          }
+        },
+        source: { type: 'camera', cameraFacing: 'environment' }, // Environment-facing camera
+        processing: {
+          sampling_ratio: 0.1, // Process 10% of frames
+          fps: 30,
+          clip_length_seconds: 2,
+          delay_seconds: 1
+        },
+        onResult: async (result) => {
+          console.log('[OVERSHOOT] Received analysis:', result);
+          
+          try {
+            // Result might already be parsed if outputSchema is used
+            let analysis;
+            if (typeof result.result === 'string') {
+              analysis = JSON.parse(result.result);
+            } else {
+              analysis = result.result; // Already an object
+            }
+            
+            console.log('[OVERSHOOT] Parsed analysis:', analysis);
+            setLastScanResult(analysis);
+            
+            // Send to backend for world generation
+            await processStreamingResult(analysis);
+          } catch (parseError) {
+            console.error('[OVERSHOOT] Error parsing result:', parseError);
+            console.log('[OVERSHOOT] Raw result:', result.result);
+            console.log('[OVERSHOOT] Result type:', typeof result.result);
+          }
+        },
+        onError: (error) => {
+          console.error('[OVERSHOOT] SDK Error callback:', error);
+          console.error('[OVERSHOOT] Error details:', {
+            message: error.message,
+            name: error.name,
+            stack: error.stack
+          });
+        }
+      };
+
+      console.log('[OVERSHOOT] Creating RealtimeVision with config:', {
+        apiUrl: visionConfig.apiUrl,
+        apiKey: visionConfig.apiKey.substring(0, 10) + '...',
+        hasPrompt: !!visionConfig.prompt,
+        hasSource: !!visionConfig.source
+      });
+
+      const vision = new RealtimeVision(visionConfig);
+
+      overshootVisionRef.current = vision;
+      
+      console.log('[OVERSHOOT] Attempting to start stream...');
+      
+      // Start the stream
+      await vision.start();
+      
+      setStreamingActive(true);
+      setScanMode(true);
+      
+      console.log('[OVERSHOOT] ✅ Video streaming started successfully');
+      
+      // Show video preview if available
+      if (videoRef.current) {
+        // Try to get video element from vision instance
+        if (vision.videoElement) {
+          videoRef.current.srcObject = vision.videoElement.srcObject;
+        } else if (vision.source) {
+          // Alternative way to access video stream
+          videoRef.current.srcObject = vision.source;
+        }
+      }
+      
+    } catch (error) {
+      console.error('[OVERSHOOT] Error starting streaming:', error);
+      console.error('[OVERSHOOT] Error type:', error.constructor.name);
+      console.error('[OVERSHOOT] Full error:', error);
+      
+      let errorMessage = 'Failed to start Overshoot streaming.\n\n';
+      
+      if (error.message && (error.message.includes('fetch') || error.message.includes('NAME_NOT_RESOLVED'))) {
+        errorMessage += '⚠️ DNS Resolution Failed: api.overshoot.ai cannot be reached.\n\n';
+        errorMessage += 'This means:\n';
+        errorMessage += '• The Overshoot API endpoint may not be publicly available yet\n';
+        errorMessage += '• The service might be in private beta/development\n';
+        errorMessage += '• You may need special access or a different endpoint URL\n\n';
+        errorMessage += 'SOLUTION:\n';
+        errorMessage += '1. Contact Overshoot support at https://overshoot.ai\n';
+        errorMessage += '   Ask for the correct API endpoint URL\n';
+        errorMessage += '2. Check if you need special access/whitelisting\n';
+        errorMessage += '3. Use basic camera mode for now (working)\n';
+        errorMessage += '4. Check Overshoot documentation for updates\n\n';
+      } else if (error.message && error.message.includes('401') || error.message.includes('403')) {
+        errorMessage += 'Authentication Error: Invalid API key.\n\n';
+        errorMessage += 'SOLUTION:\n';
+        errorMessage += '1. Verify your API key at https://overshoot.ai\n';
+        errorMessage += '2. Make sure the key is correct and active\n\n';
+      } else {
+        errorMessage += `Error: ${error.message || 'Unknown error'}\n\n`;
+        errorMessage += 'Check browser console (F12) for details.\n\n';
+      }
+      
+      errorMessage += 'Falling back to basic camera mode.';
+      
+      alert(errorMessage);
+      await startBasicCamera();
+    }
+  };
+
+  const processStreamingResult = async (analysis) => {
+    try {
+      console.log('[OVERSHOOT] Processing streaming result:', analysis);
+      
+      // Send to backend to generate world from streaming analysis
+      const res = await fetch(`${API_BASE}/scan-world`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          streaming_analysis: analysis,
+          use_streaming: true 
+        }),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('[OVERSHOOT] Backend error:', errorText);
+        return;
+      }
+
+      const data = await res.json();
+      
+      // Only update world if we're not already playing (to avoid interruptions)
+      if (gameState !== GameState.PLAYING) {
+        console.log('[OVERSHOOT] Updating world from streaming analysis...');
+        await loadWorldFromScan(data);
+      } else {
+        // If already playing, we could do incremental updates
+        console.log('[OVERSHOOT] World already active, skipping update');
+      }
+      
+    } catch (error) {
+      console.error('[OVERSHOOT] Error processing result:', error);
+    }
+  };
+
+  const loadWorldFromScan = async (data) => {
+    // This will reuse the same loading logic from captureAndScanWorld
+    setCurrentWorld(data);
+    
+    const scene = sceneRef.current;
+    if (!scene) {
+      console.error('[OVERSHOOT] Scene not available');
+      return;
+    }
+
+    const biomeName = data.world?.biome || data.world?.biome_name;
+    createGround(scene, biomeName);
+
+    // Clear existing objects
+    const objectsToRemove = [];
+    scene.children.forEach((child) => {
+      if (!child.isLight && !child.userData?.isSky) objectsToRemove.push(child);
+    });
+    objectsToRemove.forEach((obj) => scene.remove(obj));
+    
+    terrainMeshRef.current = null;
+    enemiesRef.current = [];
+    structuresRef.current = [];
+    occupiedCells.clear();
+
+    if (data.world && data.world.lighting_config) {
+      updateLighting(data.world.lighting_config);
+    }
+
+    if (data.world && data.world.heightmap_raw && data.world.colour_map_array) {
+      heightmapRef.current = data.world.heightmap_raw;
+      colorMapRef.current = data.world.colour_map_array;
+      terrainPlacementMaskRef.current = heightmapRef.current.map(row =>
+        row.map(height => (height >= 0 ? 1 : 0))
+      );
+      
+      const terrainMesh = createTerrain(heightmapRef.current, colorMapRef.current, 256);
+      terrainMeshRef.current = terrainMesh;
+      scene.add(terrainMesh);
+    }
+
+    // Load structures (same logic as captureAndScanWorld)
+    // ... (reuse the structure loading code)
+    
+    setGameState(GameState.PLAYING);
+  };
+
+  const handleCameraError = (error) => {
+    let errorMessage = 'Could not access camera.\n\n';
+    
+    if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+      errorMessage += 'Camera permission was denied.\n\n' +
+        'SOLUTION:\n' +
+        '1. Click the lock/camera icon in your browser address bar\n' +
+        '2. Find "Camera" → Change to "Allow"\n' +
+        '3. Reload the page and try again\n\n' +
+        'IMPORTANT: If using IP address, switch to:\n' +
+        'http://localhost:3000';
+    } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+      errorMessage += 'No camera found.\n\nPlease connect a camera and try again.';
+    } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+      errorMessage += 'Camera is already in use.\n\n' +
+        'Please close other applications using the camera and try again.';
+    } else {
+      errorMessage += `Error: ${error.name}\n\n${error.message}\n\n` +
+        'SOLUTION: Try accessing via http://localhost:3000 instead of IP address.';
+    }
+    
+    alert(errorMessage);
+  };
+
+  const stopCameraCapture = async () => {
+    // Stop Overshoot streaming if active
+    if (overshootVisionRef.current && streamingActive) {
+      try {
+        await overshootVisionRef.current.stop();
+        console.log('[OVERSHOOT] Streaming stopped');
+      } catch (error) {
+        console.error('[OVERSHOOT] Error stopping stream:', error);
+      }
+      overshootVisionRef.current = null;
+      setStreamingActive(false);
+    }
+    
+    // Stop basic camera stream if active
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    
+    setScanMode(false);
+  };
+
+  const captureAndScanWorld = async () => {
+    if (!videoRef.current) return;
+    
+    // Capture current video frame
+    const canvas = document.createElement('canvas');
+    const videoWidth = videoRef.current.videoWidth || 640;
+    const videoHeight = videoRef.current.videoHeight || 480;
+    
+    if (videoWidth === 0 || videoHeight === 0) {
+      alert('Video not ready yet. Please wait for the camera to initialize.');
+      return;
+    }
+    
+    canvas.width = videoWidth;
+    canvas.height = videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(videoRef.current, 0, 0, videoWidth, videoHeight);
+    
+    // Convert to base64
+    const imageData = canvas.toDataURL('image/jpeg', 0.8);
+    
+    console.log('[SCAN] Captured image, sending to backend...');
+    console.log('[SCAN] Image data length:', imageData.length, 'characters');
+    console.log('[SCAN] Video dimensions:', videoWidth, 'x', videoHeight);
+    
+    if (!imageData || imageData.length < 100) {
+      alert('Failed to capture image. Please try again.');
+      return;
+    }
+    setGameState(GameState.GENERATING);
+    stopCameraCapture();
+    
+    try {
+      const res = await fetch(`${API_BASE}/scan-world`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_data: imageData }),
+      });
+      
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('[SCAN] API Error Response:', errorText);
+        
+        // Try to parse as JSON for better error message
+        let errorDetail = errorText;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorDetail = errorJson.detail || errorText;
+        } catch (e) {
+          // Not JSON, use as-is
+        }
+        
+        throw new Error(`Scan failed: ${res.status}\n\n${errorDetail}`);
+      }
+      
+      const data = await res.json();
+      console.log('[SCAN] World generated from scan:', data);
+      
+      // Use the same world loading logic as generateWorld
+      // Since generateWorld does all loading inline, we'll do the same here
+      // The scan response format matches generate-world response format
+      
+      // Simply delegate to generateWorld's loading by calling a helper
+      // Actually, let's just set currentWorld and let the existing logic handle it
+      // But generateWorld loads inline, so we need to replicate...
+      
+      // For now, let's create a helper that both can use, or just duplicate the logic
+      // Simplest: call the same loading code inline like generateWorld does
+      
+      setCurrentWorld(data);
+      
+      const scene = sceneRef.current;
+      if (!scene) {
+        console.error('[SCAN] Scene not available');
+        setGameState(GameState.IDLE);
+        return;
+      }
+
+      const biomeName = data.world?.biome || data.world?.biome_name;
+      createGround(scene, biomeName);
+
+      // Clear existing objects (same as generateWorld)
+      const objectsToRemove = [];
+      scene.children.forEach((child) => {
+        if (!child.isLight && !child.userData?.isSky) objectsToRemove.push(child);
+      });
+      objectsToRemove.forEach((obj) => scene.remove(obj));
+      
+      terrainMeshRef.current = null;
+      enemiesRef.current = [];
+      structuresRef.current = [];
+      occupiedCells.clear();
+
+      if (data.world && data.world.lighting_config) {
+        console.log('[SCAN] Applying lighting:', data.world.lighting_config);
+        updateLighting(data.world.lighting_config);
+      }
+
+      if (data.world && data.world.heightmap_raw && data.world.colour_map_array) {
+        heightmapRef.current = data.world.heightmap_raw;
+        colorMapRef.current = data.world.colour_map_array;
+        terrainPlacementMaskRef.current = heightmapRef.current.map(row =>
+          row.map(height => (height >= 0 ? 1 : 0))
+        );
+        
+        // Create terrain mesh
+        const terrainMesh = createTerrain(heightmapRef.current, colorMapRef.current, 256);
+        terrainMeshRef.current = terrainMesh;
+        scene.add(terrainMesh);
+      }
+
+      // Load structures (same as generateWorld)
+      if (data.structures) {
+        if (data.structures.trees) {
+          console.log(`[SCAN] Creating ${data.structures.trees.length} trees...`);
+          data.structures.trees.forEach((treeData) => {
+            const scale = treeData.scale || 1.0;
+            const leafSize = treeData.leafless ? 3 * scale : 2.2 * scale;
+            const randomOffset = 0.6 * scale;
+            const treeRadius = leafSize + randomOffset + 1;
+            
+            if (!checkRadiusClear(
+              treeData.position.x,
+              treeData.position.z,
+              treeRadius,
+              terrainPlacementMaskRef.current
+            )) {
+              return;
+            }
+
+            const tree = createTree(treeData);
+            tree.userData = { 
+              structureType: 'tree',
+              scale: treeData.scale || 1.0,
+              leafless: treeData.leafless || false
+            };
+            scene.add(tree);
+            structuresRef.current.push(tree);
+            
+            markRadiusOccupied(
+              treeData.position.x,
+              treeData.position.z,
+              treeRadius,
+              terrainPlacementMaskRef.current
+            );
+          });
+          console.log(`[SCAN] ✅ Added ${structuresRef.current.filter(obj => obj.userData.structureType === 'tree').length} trees`);
+        }
+
+        // Add clouds
+        const cloudCount = 15;
+        const minCloudDistance = 80;
+        const cloudPositions = [];
+        
+        for (let i = 0; i < cloudCount; i++) {
+          let attempts = 0;
+          let validPosition = false;
+          let x, y, z, scale;
+          
+          while (!validPosition && attempts < 50) {
+            x = (Math.random() - 0.5) * 500;
+            y = 60 + Math.random() * 90;
+            z = (Math.random() - 0.5) * 600;
+            scale = 3 + Math.random() * 2;
+            
+            let tooClose = false;
+            for (const existingPos of cloudPositions) {
+              const dist = Math.sqrt(
+                (x - existingPos.x) ** 2 + 
+                (y - existingPos.y) ** 2 + 
+                (z - existingPos.z) ** 2
+              );
+              const requiredDistance = minCloudDistance * (scale / 3);
+              if (dist < requiredDistance) {
+                tooClose = true;
+                break;
+              }
+            }
+            
+            if (!tooClose) {
+              validPosition = true;
+            }
+            attempts++;
+          }
+          
+          if (!validPosition) continue;
+          
+          const cloud = createCloud(x, y, z, scale, biomeName);
+          scene.add(cloud);
+          cloudPositions.push({ x, y, z, scale });
+        }
+
+        if (data.structures.rocks) {
+          data.structures.rocks.forEach(rockData => {
+            const rock = createRock(rockData);
+            rock.userData = { structureType: 'rock' };
+            scene.add(rock);
+            structuresRef.current.push(rock);
+          });
+          console.log(`[SCAN] ✅ Added ${data.structures.rocks.length} rocks`);
+        }
+        
+        if (data.structures.peaks) {
+          data.structures.peaks.forEach(peakData => {
+            const peak = createMountainPeak(peakData, biomeName);
+            peak.userData = { structureType: 'peak' };
+            scene.add(peak);
+            structuresRef.current.push(peak);
+          });
+          console.log(`[SCAN] ✅ Added ${data.structures.peaks.length} mountain peaks`);
+        }
+
+        if (data.structures.buildings) {
+          data.structures.buildings.forEach((buildingData, idx) => {
+            const gridIndex = Math.floor(
+              idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ)
+            );
+            const localIndex = idx % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
+            const gridOrigin = buildingGridOrigins[gridIndex % buildingGridOrigins.length];
+            const buildingType = getBuildingTypeForBiome(biomeName, idx);
+
+            const building = createBuilding(
+              buildingData,
+              localIndex,
+              buildingType,
+              gridOrigin
+            );
+
+            building.userData = {
+              ...building.userData,
+              structureType: 'building',
+              buildingType,
+            };
+
+            scene.add(building);
+            structuresRef.current.push(building);
+          });
+
+          // Mark building locations as occupied
+          data.structures.buildings.forEach((buildingData, idx) => {
+            const gridIndex = Math.floor(idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ));
+            const localIndex = idx % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
+            const gridOrigin = buildingGridOrigins[gridIndex % buildingGridOrigins.length];
+            const gridPos = getBuildingGridPosition(localIndex, buildingGridConfig, gridOrigin);
+
+            const buildingWidth = (buildingData.width || 4) * 2;
+            const buildingDepth = (buildingData.depth || 4) * 2;
+            const buildingRadius = Math.max(buildingWidth, buildingDepth) / 2 + 2;
+            
+            markRadiusOccupied(
+              gridPos.x,
+              gridPos.z,
+              buildingRadius,
+              terrainPlacementMaskRef.current
+            );
+          });
+        }
+
+        if (data.structures.street_lamps) {
+          const timeOfDay = data.world?.time || 'noon';
+          const isNight = timeOfDay === 'night' || timeOfDay === 'midnight' || timeOfDay === 'evening';
+          let isNightFromLighting = false;
+          if (data.world?.lighting_config?.background) {
+            const bgColor = new THREE.Color(data.world.lighting_config.background);
+            const hsl = {};
+            bgColor.getHSL(hsl);
+            isNightFromLighting = hsl.l < 0.3;
+          }
+          const shouldGlow = isNight || isNightFromLighting;
+          
+          data.structures.street_lamps.forEach(lampData => {
+            const lamp = createStreetLamp(lampData, shouldGlow);
+            lamp.userData = { structureType: 'street_lamp' };
+            scene.add(lamp);
+            structuresRef.current.push(lamp);
+          });
+          console.log(`[SCAN] ✅ Added ${data.structures.street_lamps.length} street lamps`);
+        }
+      }
+
+      // Determine spawn location
+      let spawn = data.spawn_point || { x: 0, z: 0 };
+      let spawnY = null;
+      
+      const spawnBiomeName = data.world?.biome || data.world?.biome_name;
+      if (spawnBiomeName && spawnBiomeName.toLowerCase() === 'city') {
+        const buildings = structuresRef.current.filter(
+          s => s.userData?.structureType === 'building'
+        );
+        
+        if (buildings.length > 0) {
+          const building = buildings[Math.floor(Math.random() * buildings.length)];
+          const buildingHeight = building.userData?.buildingHeight || 0;
+          spawn = {
+            x: building.position.x,
+            z: building.position.z
+          };
+          spawnY = building.position.y + buildingHeight + 2;
+        }
+      }
+      
+      const playerMesh = createPlayer(spawn, spawnY);
+      playerRef.current = playerMesh;
+      scene.add(playerMesh);
+
+      // Load enemies
+      if (data.combat && data.combat.enemies) {
+        enemiesRef.current = data.combat.enemies.map((enemyData, idx) => {
+          if (!enemyData.position) enemyData.position = { x: 0, z: 0 };
+          if (typeof enemyData.position.x !== 'number') enemyData.position.x = 0;
+          if (typeof enemyData.position.z !== 'number') enemyData.position.z = 0;
+
+          const terrainHalf = 128;
+          enemyData.position.x = Math.max(-terrainHalf, Math.min(terrainHalf, enemyData.position.x));
+          enemyData.position.z = Math.max(-terrainHalf, Math.min(terrainHalf, enemyData.position.z));
+
+          const enemy = createEnemies(enemyData.position, idx);
+          scene.add(enemy);
+          return enemy;
+        });
+        setEnemyCount(enemiesRef.current.length);
+      }
+      
+      setGameState(GameState.PLAYING);
+      
+    } catch (error) {
+      console.error('[SCAN ERROR]:', error);
+      
+      let errorMessage = 'Failed to generate world from scan.\n\n';
+      
+      if (error.message.includes('OVERSHOOT') || error.message.includes('API key')) {
+        errorMessage += '⚠️ OVERSHOOT AI API NOT CONFIGURED\n\n' +
+          'The scan feature requires an Overshoot AI API key.\n\n' +
+          'SOLUTION:\n' +
+          '1. Get your Overshoot AI API key\n' +
+          '2. Add to backend/.env file:\n' +
+          '   OVERSHOOT_API_KEY=your_api_key_here\n' +
+          '3. Restart the backend server\n\n' +
+          'For now, you can use voice/text prompts to generate worlds.';
+      } else if (error.message.includes('Failed to analyze')) {
+        errorMessage += '⚠️ IMAGE ANALYSIS FAILED\n\n' +
+          'The backend could not analyze the captured image.\n\n' +
+          'Check the backend console for detailed error messages.\n\n' +
+          'Possible causes:\n' +
+          '- Overshoot API key missing or invalid\n' +
+          '- Network connectivity issues\n' +
+          '- Invalid API endpoint';
+      } else {
+        errorMessage += `Error: ${error.message}\n\n` +
+          'Check the browser console (F12) and backend terminal for details.';
+      }
+      
+      alert(errorMessage);
+      setGameState(GameState.IDLE);
+    }
+  };
+
   const generateWorld = async (promptText) => {
     setGameState(GameState.GENERATING);
     try {
@@ -4471,6 +5245,116 @@ const VoiceWorldBuilder = () => {
                 </div>
               ))}
             </div>
+
+            {/* Scan Mode Button */}
+            <div style={{ padding: '12px 16px', borderTop: '1px solid #e0e0e0' }}>
+              <button
+                onClick={scanMode ? stopCameraCapture : startCameraCapture}
+                style={{
+                  width: '100%',
+                  padding: '12px 20px',
+                  fontSize: '16px',
+                  backgroundColor: scanMode ? '#FF5555' : '#4A90E2',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  transition: 'background-color 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  if (!scanMode) e.currentTarget.style.backgroundColor = '#357ABD';
+                }}
+                onMouseLeave={(e) => {
+                  if (!scanMode) e.currentTarget.style.backgroundColor = '#4A90E2';
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 12.5c1.38 0 2.5-1.12 2.5-2.5S13.38 7.5 12 7.5 9.5 8.62 9.5 10s1.12 2.5 2.5 2.5zm0-7c2.49 0 4.5 2.01 4.5 4.5S14.49 14.5 12 14.5 7.5 12.49 7.5 10 9.51 5.5 12 5.5zM12 19c-7 0-11-4.03-11-9V6h2v4c0 4.97 3.51 7 9 7s9-2.03 9-7V6h2v4c0 4.97-4 9-11 9z"/>
+                </svg>
+                {scanMode ? (streamingActive ? '🛑 Stop Streaming' : 'Cancel Scan') : '📹 Start Video Streaming'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Camera View Overlay */}
+      {scanMode && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: '#000',
+          zIndex: 200,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            style={{
+              width: '100%',
+              maxWidth: '800px',
+              maxHeight: '80vh',
+              borderRadius: '12px',
+              transform: 'scaleX(-1)' // Mirror the video for better UX
+            }}
+          />
+          
+          <div style={{
+            marginTop: '30px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '15px'
+          }}>
+            <button
+              onClick={captureAndScanWorld}
+              style={{
+                padding: '20px 40px',
+                fontSize: '18px',
+                backgroundColor: '#4CAF50',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                transition: 'background-color 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#45a049'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#4CAF50'}
+            >
+              {streamingActive ? '📹 Streaming...' : '📹 Start Video Streaming'}
+            </button>
+            
+            <button
+              onClick={stopCameraCapture}
+              style={{
+                padding: '12px 24px',
+                fontSize: '14px',
+                backgroundColor: 'transparent',
+                color: '#fff',
+                border: '2px solid #fff',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                transition: 'background-color 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}

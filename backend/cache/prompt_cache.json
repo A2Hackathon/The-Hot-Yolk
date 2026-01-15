@@ -13,5 +13,50 @@
     "hit_count": 0,
     "last_accessed": 1768469179.3651862,
     "prompt_preview": "give me arctic world"
+  },
+  "7a4d573e8ec206e3": {
+    "params": {
+      "biome": "arctic",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 25
+      }
+    },
+    "timestamp": 1768503305.3205974,
+    "hit_count": 0,
+    "last_accessed": 1768503305.3205974,
+    "prompt_preview": "arctic world"
+  },
+  "d8d271c2be86ead6": {
+    "params": {
+      "biome": "arctic",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "mountain": 1
+      }
+    },
+    "timestamp": 1768504040.800795,
+    "hit_count": 0,
+    "last_accessed": 1768504040.800795,
+    "prompt_preview": "arctic mountains"
+  },
+  "962c8d8684305be4": {
+    "params": {
+      "biome": "arctic",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "mountain": 1
+      }
+    },
+    "timestamp": 1768504216.2950182,
+    "hit_count": 0,
+    "last_accessed": 1768504216.2950182,
+    "prompt_preview": "arctic mountain"
   }
 }

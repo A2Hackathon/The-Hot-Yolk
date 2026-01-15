@@ -8,6 +8,7 @@ from world.terrain import generate_heightmap, get_walkable_points
 from world.enemy_placer import place_enemies
 from world.lighting import get_lighting_preset, get_sky_color
 from world.physics_config import get_combined_config
+from world.overshoot_integration import analyze_environment, generate_world_from_scan
 
 router = APIRouter()
 
@@ -703,6 +704,212 @@ Return ONLY your response text, no JSON, no markdown formatting."""
         
     except Exception as e:
         print(f"[Chat ERROR] {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ScanRequest(BaseModel):
+    image_data: Optional[str] = None
+    streaming_analysis: Optional[Dict] = None
+    use_streaming: Optional[bool] = False  # Base64 encoded image
+
+
+def generate_trees_with_colors(
+    heightmap_raw,
+    placement_mask,
+    biome: str,
+    count: int,
+    terrain_size: float = 256.0,
+    leaf_color: Optional[str] = None,
+    trunk_color: Optional[str] = None,
+    existing_peaks: list = None
+) -> List[Dict]:
+    """Enhanced tree generation with custom colors from Overshoot scan."""
+    trees = place_trees_on_terrain(
+        heightmap_raw=heightmap_raw,
+        placement_mask=placement_mask,
+        biome=biome,
+        tree_count=count,
+        terrain_size=terrain_size,
+        existing_peaks=existing_peaks
+    )
+    
+    # Apply custom colors if provided
+    if leaf_color or trunk_color:
+        for tree in trees:
+            if leaf_color:
+                tree["leaf_color"] = leaf_color
+            if trunk_color:
+                tree["trunk_color"] = trunk_color
+    
+    return trees
+
+
+@router.post("/scan-world")
+async def scan_world(request: ScanRequest) -> Dict:
+    """
+    Generate world from camera scan using Overshoot AI.
+    """
+    try:
+        print("[SCAN] Processing scan request...")
+        
+        # Handle streaming analysis from Overshoot AI SDK
+        if request.use_streaming and request.streaming_analysis:
+            print("[SCAN] Using streaming analysis from Overshoot AI SDK")
+            print(f"[SCAN] Streaming analysis keys: {list(request.streaming_analysis.keys())}")
+            
+            # Convert Overshoot streaming format to our format
+            scan_data = generate_world_from_scan(request.streaming_analysis)
+            print(f"[SCAN] Converted streaming analysis: biome={scan_data.get('biome')}, objects={scan_data.get('objects')}")
+        
+        # Handle single image analysis (legacy or fallback)
+        elif request.image_data:
+            print("[SCAN] Analyzing single image with Vision AI...")
+            print(f"[SCAN] Received image_data length: {len(request.image_data)} characters")
+            
+            if len(request.image_data) < 100:
+                raise HTTPException(status_code=400, detail=f"Image data too small ({len(request.image_data)} chars). Make sure camera captured the image properly.")
+            
+            print(f"[SCAN] Image data preview (first 100 chars): {request.image_data[:100]}...")
+            
+            # Analyze image with vision API
+            scan_data = await analyze_environment(request.image_data)
+        else:
+            raise HTTPException(status_code=400, detail="Either image_data or streaming_analysis must be provided")
+        
+        if not scan_data:
+            # Check if it's an API key issue
+            import os
+            api_key = os.getenv("OVERSHOOT_API_KEY")
+            api_url = os.getenv("OVERSHOOT_API_URL", "https://api.overshoot.ai/v1/analyze")
+            
+            if not api_key:
+                raise HTTPException(
+                    status_code=500, 
+                    detail="OVERSHOOT_API_KEY not set in environment. Please add OVERSHOOT_API_KEY to your backend/.env file and restart the server."
+                )
+            
+            # Provide more helpful error message
+            error_detail = (
+                f"Failed to analyze environment with Vision AI.\n\n"
+                f"Check your backend console terminal for detailed error messages.\n\n"
+                f"Recommended: Set OPENAI_API_KEY in backend/.env for single image analysis.\n"
+                f"Alternative: Set OVERSHOOT_API_KEY (NOTE: Overshoot SDK is for streaming video).\n\n"
+                f"Get OpenAI API key: https://platform.openai.com/api-keys"
+            )
+            raise HTTPException(
+                status_code=500, 
+                detail=error_detail
+            )
+        
+        print(f"[SCAN] Detected: biome={scan_data['biome']}, objects={scan_data['objects']}")
+        
+        # Generate world parameters from scan
+        world_params = generate_world_from_scan(scan_data)
+        
+        biome = world_params["biome"]
+        time_of_day = world_params["time"]
+        enemy_count = world_params["enemy_count"]
+        weapon = world_params["weapon"]
+        structure_counts = world_params["structure"]
+        tree_colors = world_params.get("tree_colors", {})
+        
+        print(f"[SCAN] World params: biome={biome}, time={time_of_day}, structures={structure_counts}")
+        
+        # Use existing world generation pipeline
+        terrain_data = generate_heightmap(biome, structure_counts)
+        heightmap_raw = terrain_data["heightmap_raw"]
+        placement_mask = terrain_data["placement_mask"]
+        
+        terrain_size = 256
+        
+        # Generate peaks first (they affect tree placement)
+        mountain_count = structure_counts.get("mountain", 0)
+        peaks = generate_mountain_peaks(heightmap_raw, biome, terrain_size, max_peaks=mountain_count) if mountain_count > 0 else []
+        
+        # Generate structures with scan-based parameters
+        tree_count = structure_counts.get("tree", 10)
+        rock_count = structure_counts.get("rock", 5)
+        building_count = structure_counts.get("building", 0)
+        street_lamp_count = structure_counts.get("street_lamp", 0)
+        
+        structures = {
+            "trees": generate_trees_with_colors(
+                heightmap_raw=heightmap_raw,
+                placement_mask=placement_mask,
+                biome=biome,
+                count=tree_count,
+                terrain_size=terrain_size,
+                leaf_color=tree_colors.get("leaf_color"),
+                trunk_color=tree_colors.get("trunk_color"),
+                existing_peaks=peaks
+            ),
+            "rocks": generate_rocks(heightmap_raw, biome, rock_count, terrain_size),
+            "peaks": peaks,
+            "buildings": generate_buildings(heightmap_raw, placement_mask, biome, building_count, terrain_size),
+            "street_lamps": generate_street_lamps(heightmap_raw, placement_mask, biome, street_lamp_count, terrain_size)
+        }
+        
+        # Determine player spawn on a walkable point
+        walkable_points = get_walkable_points(placement_mask=placement_mask, radius=1)
+        if not walkable_points:
+            raise HTTPException(status_code=500, detail="No valid player spawn points")
+        
+        spawn_idx_x, spawn_idx_z = random.choice(walkable_points)
+        segments = len(heightmap_raw) - 1
+        
+        spawn_x = (spawn_idx_x / segments) * terrain_size - terrain_size / 2
+        spawn_z = (spawn_idx_z / segments) * terrain_size - terrain_size / 2
+        spawn_y = heightmap_raw[spawn_idx_z][spawn_idx_x] * 10 + 0.5
+        
+        spawn_point = {"x": float(spawn_x), "y": float(spawn_y), "z": float(spawn_z)}
+        
+        # Place enemies
+        enemies = place_enemies(
+            heightmap_raw=heightmap_raw,
+            placement_mask=placement_mask,
+            enemy_count=enemy_count,
+            player_spawn=spawn_point
+        )
+        
+        # Physics + combat config
+        configs = get_combined_config(weapon)
+        
+        # Lighting and sky (now biome-aware)
+        lighting_config = get_lighting_preset(time_of_day, biome)
+        sky_colour = get_sky_color(time_of_day, biome)
+        
+        print(f"[SCAN] Lighting config: {lighting_config}")
+        print(f"[SCAN] Sky color: {sky_colour}")
+        print("="*60 + "\n")
+        
+        # Build response
+        response = {
+            "world": {
+                "biome": biome,
+                "time": time_of_day,
+                "heightmap_raw": heightmap_raw,
+                "heightmap_url": terrain_data.get("heightmap_url"),
+                "texture_url": terrain_data.get("texture_url"),
+                "lighting_config": lighting_config,
+                "sky_colour": sky_colour,
+                "colour_map_array": terrain_data.get('colour_map_array')
+            },
+            "structures": structures,
+            "combat": {
+                "enemy_count": len(enemies),
+                "enemies": enemies,
+                "combat_config": configs["combat"]
+            },
+            "physics": configs["physics"],
+            "spawn_point": spawn_point
+        }
+        
+        return response
+        
+    except Exception as e:
+        print(f"[SCAN ERROR] {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
