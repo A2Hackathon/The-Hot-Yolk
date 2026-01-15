@@ -2712,7 +2712,228 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
     }
 
     // Load structures (same logic as captureAndScanWorld)
-    // ... (reuse the structure loading code)
+    if (data.structures) {
+      if (data.structures.trees) {
+        console.log(`[OVERSHOOT] Creating ${data.structures.trees.length} trees...`);
+        data.structures.trees.forEach((treeData) => {
+          const scale = treeData.scale || 1.0;
+          const leafSize = treeData.leafless ? 3 * scale : 2.2 * scale;
+          const randomOffset = 0.6 * scale;
+          const treeRadius = leafSize + randomOffset + 1;
+          
+          if (!checkRadiusClear(
+            treeData.position.x,
+            treeData.position.z,
+            treeRadius,
+            terrainPlacementMaskRef.current
+          )) {
+            return;
+          }
+
+          const tree = createTree(treeData);
+          tree.userData = { 
+            structureType: 'tree',
+            scale: treeData.scale || 1.0,
+            leafless: treeData.leafless || false
+          };
+          scene.add(tree);
+          structuresRef.current.push(tree);
+          
+          markRadiusOccupied(
+            treeData.position.x,
+            treeData.position.z,
+            treeRadius,
+            terrainPlacementMaskRef.current
+          );
+        });
+        console.log(`[OVERSHOOT] ✅ Added ${structuresRef.current.filter(obj => obj.userData.structureType === 'tree').length} trees`);
+      }
+
+      // Add clouds
+      const cloudCount = 15;
+      const minCloudDistance = 80;
+      const cloudPositions = [];
+      
+      for (let i = 0; i < cloudCount; i++) {
+        let attempts = 0;
+        let validPosition = false;
+        let x, y, z, scale;
+        
+        while (!validPosition && attempts < 50) {
+          x = (Math.random() - 0.5) * 500;
+          y = 60 + Math.random() * 90;
+          z = (Math.random() - 0.5) * 600;
+          scale = 3 + Math.random() * 2;
+          
+          let tooClose = false;
+          for (const existingPos of cloudPositions) {
+            const dist = Math.sqrt(
+              (x - existingPos.x) ** 2 + 
+              (y - existingPos.y) ** 2 + 
+              (z - existingPos.z) ** 2
+            );
+            const requiredDistance = minCloudDistance * (scale / 3);
+            if (dist < requiredDistance) {
+              tooClose = true;
+              break;
+            }
+          }
+          
+          if (!tooClose) {
+            validPosition = true;
+          }
+          attempts++;
+        }
+        
+        if (!validPosition) continue;
+        
+        const cloud = createCloud(x, y, z, scale, biomeName);
+        scene.add(cloud);
+        cloudPositions.push({ x, y, z, scale });
+      }
+
+      if (data.structures.rocks) {
+        data.structures.rocks.forEach(rockData => {
+          const rock = createRock(rockData);
+          rock.userData = { structureType: 'rock' };
+          scene.add(rock);
+          structuresRef.current.push(rock);
+        });
+        console.log(`[OVERSHOOT] ✅ Added ${data.structures.rocks.length} rocks`);
+      }
+      
+      if (data.structures.peaks) {
+        data.structures.peaks.forEach(peakData => {
+          const peak = createMountainPeak(peakData, biomeName);
+          peak.userData = { structureType: 'peak' };
+          scene.add(peak);
+          structuresRef.current.push(peak);
+        });
+        console.log(`[OVERSHOOT] ✅ Added ${data.structures.peaks.length} mountain peaks`);
+      }
+
+      if (data.structures.buildings) {
+        data.structures.buildings.forEach((buildingData, idx) => {
+          const gridIndex = Math.floor(
+            idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ)
+          );
+          const localIndex = idx % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
+          const gridOrigin = buildingGridOrigins[gridIndex % buildingGridOrigins.length];
+          const buildingType = getBuildingTypeForBiome(biomeName, idx);
+
+          const building = createBuilding(
+            buildingData,
+            localIndex,
+            buildingType,
+            gridOrigin
+          );
+
+          building.userData = {
+            ...building.userData,
+            structureType: 'building',
+            buildingType,
+          };
+
+          scene.add(building);
+          structuresRef.current.push(building);
+        });
+
+        // Mark building locations as occupied
+        data.structures.buildings.forEach((buildingData, idx) => {
+          const gridIndex = Math.floor(idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ));
+          const localIndex = idx % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
+          const gridOrigin = buildingGridOrigins[gridIndex % buildingGridOrigins.length];
+          const gridPos = getBuildingGridPosition(localIndex, buildingGridConfig, gridOrigin);
+
+          const buildingWidth = (buildingData.width || 4) * 2;
+          const buildingDepth = (buildingData.depth || 4) * 2;
+          const buildingRadius = Math.max(buildingWidth, buildingDepth) / 2 + 2;
+          
+          markRadiusOccupied(
+            gridPos.x,
+            gridPos.z,
+            buildingRadius,
+            terrainPlacementMaskRef.current
+          );
+        });
+      }
+
+      if (data.structures.street_lamps) {
+        const timeOfDay = data.world?.time || 'noon';
+        const isNight = timeOfDay === 'night' || timeOfDay === 'midnight' || timeOfDay === 'evening';
+        let isNightFromLighting = false;
+        if (data.world?.lighting_config?.background) {
+          const bgColor = new THREE.Color(data.world.lighting_config.background);
+          const hsl = {};
+          bgColor.getHSL(hsl);
+          isNightFromLighting = hsl.l < 0.3;
+        }
+        const shouldGlow = isNight || isNightFromLighting;
+        
+        data.structures.street_lamps.forEach(lampData => {
+          const lamp = createStreetLamp(lampData, shouldGlow);
+          lamp.userData = { structureType: 'street_lamp' };
+          scene.add(lamp);
+          structuresRef.current.push(lamp);
+        });
+        console.log(`[OVERSHOOT] ✅ Added ${data.structures.street_lamps.length} street lamps`);
+      }
+
+      if (data.structures.creative_objects) {
+        data.structures.creative_objects.forEach(objData => {
+          try {
+            const creativeObj = createCreativeObject(objData);
+            scene.add(creativeObj);
+            structuresRef.current.push(creativeObj);
+          } catch (error) {
+            console.error(`[OVERSHOOT] Error creating creative object:`, error, objData);
+          }
+        });
+      }
+    }
+
+    // Determine spawn location
+    let spawn = data.spawn_point || { x: 0, z: 0 };
+    let spawnY = null;
+    
+    const spawnBiomeName = data.world?.biome || data.world?.biome_name;
+    if (spawnBiomeName && spawnBiomeName.toLowerCase() === 'city') {
+      const buildings = structuresRef.current.filter(
+        s => s.userData?.structureType === 'building'
+      );
+      
+      if (buildings.length > 0) {
+        const building = buildings[Math.floor(Math.random() * buildings.length)];
+        const buildingHeight = building.userData?.buildingHeight || 0;
+        spawn = {
+          x: building.position.x,
+          z: building.position.z
+        };
+        spawnY = building.position.y + buildingHeight + 2;
+      }
+    }
+    
+    const playerMesh = createPlayer(spawn, spawnY);
+    playerRef.current = playerMesh;
+    scene.add(playerMesh);
+
+    // Load enemies
+    if (data.combat && data.combat.enemies) {
+      enemiesRef.current = data.combat.enemies.map((enemyData, idx) => {
+        if (!enemyData.position) enemyData.position = { x: 0, z: 0 };
+        if (typeof enemyData.position.x !== 'number') enemyData.position.x = 0;
+        if (typeof enemyData.position.z !== 'number') enemyData.position.z = 0;
+
+        const terrainHalf = 128;
+        enemyData.position.x = Math.max(-terrainHalf, Math.min(terrainHalf, enemyData.position.x));
+        enemyData.position.z = Math.max(-terrainHalf, Math.min(terrainHalf, enemyData.position.z));
+
+        const enemy = createEnemies(enemyData.position, idx);
+        scene.add(enemy);
+        return enemy;
+      });
+      setEnemyCount(enemiesRef.current.length);
+    }
     
     setGameState(GameState.PLAYING);
   };
