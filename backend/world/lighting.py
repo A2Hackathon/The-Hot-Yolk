@@ -77,6 +77,7 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
     
     # Apply biome-specific modifications for arctic/icy/winter environments
     is_winter = biome.lower() in ["arctic", "winter", "icy"]
+    is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen"]
     
     # City-specific modifications for noon
     if biome.lower() == "city" and time == "noon":
@@ -106,6 +107,9 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
             config["fog"]["near"] = 80
             config["fog"]["far"] = 250
             config["background"] = "#2543DE"
+    
+    # Add northern lights flag for arctic biomes
+    config["northern_lights"] = is_arctic
     
     return config
 
@@ -168,6 +172,9 @@ def interpolate_lighting(from_time: str, to_time: str, progress: float, biome: s
         
         return f"#{r:02x}{g:02x}{b:02x}"
     
+    # Northern lights flag doesn't interpolate - it's based on biome
+    is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen"]
+    
     return {
         "ambient": {
             "color": lerp_color(from_preset["ambient"]["color"], to_preset["ambient"]["color"], progress),
@@ -187,7 +194,8 @@ def interpolate_lighting(from_time: str, to_time: str, progress: float, biome: s
             "near": lerp(from_preset["fog"]["near"], to_preset["fog"]["near"], progress),
             "far": lerp(from_preset["fog"]["far"], to_preset["fog"]["far"], progress)
         },
-        "background": lerp_color(from_preset["background"], to_preset["background"], progress)
+        "background": lerp_color(from_preset["background"], to_preset["background"], progress),
+        "northern_lights": is_arctic
     }
 
 
