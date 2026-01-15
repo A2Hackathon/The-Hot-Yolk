@@ -1,8 +1,8 @@
 # update.py
 from fastapi import APIRouter, HTTPException
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from pydantic import BaseModel
-from voice.voice import handle_live_command, merge_world
+from voice.voice import handle_live_command, merge_world, handle_chat_conversation
 
 router = APIRouter()
 
@@ -75,5 +75,44 @@ async def modify_world(request: ModifyRequest) -> Dict:
         print(f"[API] ERROR TYPE: {type(e)}")
         import traceback
         print("[API] Full traceback:")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
+class ChatModifyRequest(BaseModel):
+    messages: List[ChatMessage]
+    current_world: Optional[Dict] = None
+    player_position: Optional[Dict] = None
+    player_direction: Optional[Dict] = None
+
+
+@router.post("/chat-modify")
+async def chat_modify(request: ChatModifyRequest) -> Dict:
+    """
+    Interactive chat endpoint for world modifications.
+    Uses handle_chat_conversation from voice.py (same AI system as handle_live_command).
+    AI asks clarifying questions before modifying to prevent hallucination.
+    """
+    try:
+        # Convert Pydantic models to dict format for handle_chat_conversation
+        messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+        
+        # Call the chat conversation handler from voice.py
+        result = handle_chat_conversation(
+            messages=messages,
+            current_world=request.current_world,
+            player_position=request.player_position
+        )
+        
+        return result
+        
+    except Exception as e:
+        print(f"[Chat Modify ERROR] {e}")
+        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

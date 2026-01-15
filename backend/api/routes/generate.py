@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException
-from typing import Dict, List
+from typing import Dict, List, Optional
+from pydantic import BaseModel
 import random
 import math
-from world.prompt_parser import parse_prompt
+from world.prompt_parser import parse_prompt, get_groq_client
 from world.terrain import generate_heightmap, get_walkable_points
 from world.enemy_placer import place_enemies
 from world.lighting import get_lighting_preset, get_sky_color
@@ -633,6 +634,75 @@ async def generate_world(prompt: Dict) -> Dict:
 
     except Exception as e:
         print(f"[Backend ERROR] {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+
+
+@router.post("/chat")
+async def chat(request: ChatRequest) -> Dict:
+    """
+    Interactive chat endpoint for world generation.
+    AI asks clarifying questions before generating to prevent hallucination.
+    """
+    try:
+        client = get_groq_client()
+        
+        # Build conversation history
+        messages = [
+            {
+                "role": "system",
+                "content": """You are a helpful AI assistant that helps users create 3D game worlds. 
+Your job is to understand what the user wants and ask clarifying questions if needed to prevent misunderstandings.
+
+IMPORTANT RULES:
+1. If the user's request is vague or unclear, ask ONE specific clarifying question
+2. If you understand the request clearly, summarize what you'll create and ask: "Sounds good! Do you want me to start generating now?"
+3. Be friendly and conversational
+4. Keep responses concise (1-2 sentences for questions, 2-3 for confirmations)
+5. Focus on understanding: biome (arctic/city/default), time of day, structures (trees, buildings, etc.), and enemy count
+
+When you're ready to generate, end your message with: "Sounds good! Do you want me to start generating now?"
+
+Return ONLY your response text, no JSON, no markdown formatting."""
+            }
+        ]
+        
+        # Add conversation history
+        for msg in request.messages:
+            messages.append({
+                "role": msg.role,
+                "content": msg.content
+            })
+        
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=200
+        )
+        
+        response_text = completion.choices[0].message.content.strip()
+        
+        # Check if AI is ready to generate
+        ready_to_generate = "start generating now" in response_text.lower() or "generate now" in response_text.lower()
+        
+        return {
+            "message": response_text,
+            "ready_to_generate": ready_to_generate
+        }
+        
+    except Exception as e:
+        print(f"[Chat ERROR] {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

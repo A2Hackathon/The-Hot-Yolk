@@ -53,9 +53,9 @@
       "weapon": "dash",
       "structure": {}
     },
-    "timestamp": 1768381022.9718614,
+    "timestamp": 1768466669.148572,
     "hit_count": 0,
-    "last_accessed": 1768381022.9718623,
+    "last_accessed": 1768466669.1485732,
     "prompt_preview": "city at noon"
   },
   "e09c8aa052e61822": {
@@ -66,9 +66,9 @@
       "weapon": "dash",
       "structure": {}
     },
-    "timestamp": 1768381235.0515642,
+    "timestamp": 1768464045.6878116,
     "hit_count": 0,
-    "last_accessed": 1768381235.0515654,
+    "last_accessed": 1768464045.687812,
     "prompt_preview": "city at night"
   },
   "11a62c23412b7747": {
@@ -157,5 +157,150 @@
     "hit_count": 0,
     "last_accessed": 1768383800.4862232,
     "prompt_preview": "arctic"
+  },
+  "5c26973b15283421": {
+    "params": {
+      "biome": "arctic",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 25
+      }
+    },
+    "timestamp": 1768456803.3737023,
+    "hit_count": 0,
+    "last_accessed": 1768456803.373704,
+    "prompt_preview": "look for an arctic world"
+  },
+  "38571f58e7ac7d1d": {
+    "params": {
+      "biome": "city",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {}
+    },
+    "timestamp": 1768461770.655848,
+    "hit_count": 0,
+    "last_accessed": 1768461770.6558487,
+    "prompt_preview": "look for a city at night"
+  },
+  "00caed1c48c54879": {
+    "params": {
+      "biome": "city",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {}
+    },
+    "timestamp": 1768462238.4823065,
+    "hit_count": 0,
+    "last_accessed": 1768462238.4823077,
+    "prompt_preview": "a dark city "
+  },
+  "35ac412d42902c3e": {
+    "params": {
+      "biome": "city",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {}
+    },
+    "timestamp": 1768462955.0474207,
+    "hit_count": 0,
+    "last_accessed": 1768462955.0474215,
+    "prompt_preview": "city dark world"
+  },
+  "c01977cc359b8494": {
+    "params": {
+      "biome": "city",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {}
+    },
+    "timestamp": 1768463227.8083436,
+    "hit_count": 0,
+    "last_accessed": 1768463227.8083448,
+    "prompt_preview": "i want a city at night"
+  },
+  "27109735832a3804": {
+    "params": {
+      "biome": "city",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {}
+    },
+    "timestamp": 1768463496.7889874,
+    "hit_count": 0,
+    "last_accessed": 1768463496.7889884,
+    "prompt_preview": "give a city at night"
+  },
+  "3249eecd94ffb853": {
+    "params": {
+      "biome": "city",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {}
+    },
+    "timestamp": 1768464000.0607202,
+    "hit_count": 0,
+    "last_accessed": 1768464000.060721,
+    "prompt_preview": "look for city at night"
+  },
+  "d0a7e71195f217cf": {
+    "params": {
+      "biome": "city",
+      "time": "noon",
+      "enemy_count": 0,
+      "weapon": "dash",
+      "structure": {}
+    },
+    "timestamp": 1768465027.8059585,
+    "hit_count": 0,
+    "last_accessed": 1768465027.80596,
+    "prompt_preview": "build me a blank template"
+  },
+  "3ec498402bc38809": {
+    "params": {
+      "biome": "default",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {}
+    },
+    "timestamp": 1768466961.7154646,
+    "hit_count": 0,
+    "last_accessed": 1768466961.7154658,
+    "prompt_preview": "blank world"
+  },
+  "2e6fa0a5640425ee": {
+    "params": {
+      "biome": "default",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {}
+    },
+    "timestamp": 1768467195.3362634,
+    "hit_count": 0,
+    "last_accessed": 1768467195.336264,
+    "prompt_preview": "give me a blank world"
+  },
+  "1e10863bc980352a": {
+    "params": {
+      "biome": "default",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {}
+    },
+    "timestamp": 1768468262.378918,
+    "hit_count": 0,
+    "last_accessed": 1768468262.3789184,
+    "prompt_preview": "blank terrain"
   }
 }

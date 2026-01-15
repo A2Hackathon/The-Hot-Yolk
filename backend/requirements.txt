@@ -12,3 +12,4 @@ PyAudio==0.2.14
 pocketsphinx
 librosa
 python-multipart
+requests

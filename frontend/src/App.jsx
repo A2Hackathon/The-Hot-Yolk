@@ -1,4 +1,5 @@
 ﻿import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import GameSettingsPanel from './GameSettingsPanel';
 
@@ -8,6 +9,7 @@ const API_BASE = 'http://localhost:8000/api';
 const GameState = {
   IDLE: 'idle',
   LISTENING: 'listening',
+  CHATTING: 'chatting',
   GENERATING: 'generating',
   PLAYING: 'playing',
 };
@@ -41,6 +43,9 @@ const VoiceWorldBuilder = () => {
   const [enemyCount, setEnemyCount] = useState(0);
   const [chatHistory, setChatHistory] = useState([]);
   const [showChatHistory, setShowChatHistory] = useState(false);
+  const [chatConversation, setChatConversation] = useState([]);
+  const [isWaitingForAI, setIsWaitingForAI] = useState(false);
+  const [historyChatInput, setHistoryChatInput] = useState('');
   const [uploadedImage, setUploadedImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [physicsSettings, setPhysicsSettings] = useState({
@@ -1581,9 +1586,320 @@ const VoiceWorldBuilder = () => {
     healthBarBg.add(healthBar);
 
     group.userData = { health: 3, maxHealth: 3, id, healthBar };
-    group.position.set(position.x, getHeightAt(position.x, position.z), position.z);
 
     return group;
+  };
+
+  const createCreativeObject = (objData) => {
+    /**
+     * Creates a creative object from Claude's description.
+     * objData should have: name, position, rotation (optional), scale (optional), parts[]
+     * Each part has: shape, position, rotation (optional), dimensions/radius, color, material (optional)
+     */
+    const group = new THREE.Group();
+    const baseScale = objData.scale || 1.0;
+    const basePos = objData.position || { x: 0, y: 0, z: 0 };
+    const baseRot = objData.rotation || { x: 0, y: 0, z: 0 };
+
+    // Set base position and rotation
+    group.position.set(basePos.x, basePos.y, basePos.z);
+    group.rotation.set(baseRot.x, baseRot.y, baseRot.z);
+
+    // Create each part
+    objData.parts.forEach((part, index) => {
+      let geometry;
+      const partScale = baseScale;
+      const partPos = part.position || { x: 0, y: 0, z: 0 };
+      const partRot = part.rotation || { x: 0, y: 0, z: 0 };
+      
+      // Parse color
+      const colorHex = typeof part.color === 'string' 
+        ? parseInt(part.color.replace('#', ''), 16) 
+        : (part.color || 0x888888);
+      
+      // Create material
+      const materialProps = part.material || { roughness: 0.7, metalness: 0.1 };
+      const material = new THREE.MeshStandardMaterial({
+        color: colorHex,
+        roughness: materialProps.roughness || 0.7,
+        metalness: materialProps.metalness || 0.1,
+        emissive: materialProps.emissive ? new THREE.Color(materialProps.emissive) : 0x000000,
+        emissiveIntensity: materialProps.emissiveIntensity || 0
+      });
+
+      // Create geometry based on shape type
+      switch (part.shape.toLowerCase()) {
+        case 'box':
+          const dims = part.dimensions || { width: 1, height: 1, depth: 1 };
+          geometry = new THREE.BoxGeometry(
+            dims.width * partScale,
+            dims.height * partScale,
+            dims.depth * partScale
+          );
+          break;
+        
+        case 'cylinder':
+          const cylRadius = (part.radius || 0.5) * partScale;
+          const cylHeight = (part.height || 1.0) * partScale;
+          const cylSegments = part.segments || 16;
+          geometry = new THREE.CylinderGeometry(cylRadius, cylRadius, cylHeight, cylSegments);
+          break;
+        
+        case 'sphere':
+          const sphereRadius = (part.radius || 0.5) * partScale;
+          const sphereSegments = part.segments || 16;
+          geometry = new THREE.SphereGeometry(sphereRadius, sphereSegments, sphereSegments);
+          break;
+        
+        case 'cone':
+          const coneRadius = (part.radius || 0.5) * partScale;
+          const coneHeight = (part.height || 1.0) * partScale;
+          const coneSegments = part.segments || 16;
+          geometry = new THREE.ConeGeometry(coneRadius, coneHeight, coneSegments);
+          break;
+        
+        case 'torus':
+          const torusRadius = (part.radius || 0.5) * partScale;
+          const torusTube = (part.tube || 0.2) * partScale;
+          const torusSegments = part.segments || 16;
+          const torusArc = part.arc || Math.PI * 2;
+          geometry = new THREE.TorusGeometry(torusRadius, torusTube, torusSegments, 16, torusArc);
+          break;
+        
+        default:
+          console.warn(`Unknown shape type: ${part.shape}, defaulting to box`);
+          geometry = new THREE.BoxGeometry(1 * partScale, 1 * partScale, 1 * partScale);
+      }
+
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(partPos.x * partScale, partPos.y * partScale, partPos.z * partScale);
+      mesh.rotation.set(partRot.x, partRot.y, partRot.z);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      
+      group.add(mesh);
+    });
+
+    // Calculate terrain height at position
+    const terrainY = getHeightAt(basePos.x, basePos.z);
+    group.position.y = terrainY + basePos.y;
+
+    group.userData = {
+      structureType: 'creative_object',
+      name: objData.name || 'creative_object',
+      originalData: objData,
+      detailedModel: objData.detailed_model || false,
+      modelLoading: false,
+      modelLoaded: false
+    };
+
+    // If detailed_model is requested, try to load it
+    if (objData.detailed_model) {
+      loadDetailedModel(group, objData);
+    }
+
+    return group;
+  };
+
+  const loadDetailedModel = async (group, objData) => {
+    /**
+     * Loads a detailed 3D model for a creative object.
+     * First checks cache, then requests generation if needed.
+     */
+    group.userData.modelLoading = true;
+    
+    try {
+      // Check if model exists in cache
+      const cacheKey = objData.name?.toLowerCase().replace(/\s+/g, '_') || 'unknown';
+      const modelUrl = `http://localhost:8000/assets/models_cache/${cacheKey}.glb`;
+      
+      // Try to load from cache first
+      const loader = new GLTFLoader();
+      
+      loader.load(
+        modelUrl,
+        (gltf) => {
+          // Model loaded successfully - replace basic shapes with detailed model
+          const detailedModel = gltf.scene;
+          detailedModel.scale.setScalar(objData.scale || 1.0);
+          
+          // Enhance materials and colors for better appearance
+          detailedModel.traverse((child) => {
+            if (child.isMesh) {
+              // Enhance existing materials
+              if (child.material) {
+                // If material is an array, process each one
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                
+                materials.forEach((material) => {
+                  // Enhance material properties for better appearance
+                  if (material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) {
+                    // Improve lighting and color
+                    material.roughness = Math.min(material.roughness || 0.7, 0.8);
+                    material.metalness = Math.max(material.metalness || 0.1, 0.0);
+                    
+                    // Enhance color saturation if color exists
+                    if (material.color) {
+                      const hsl = {};
+                      material.color.getHSL(hsl);
+                      // Increase saturation slightly for more vibrant colors
+                      hsl.s = Math.min(hsl.s * 1.2, 1.0);
+                      // Ensure minimum lightness for visibility
+                      hsl.l = Math.max(hsl.l, 0.3);
+                      material.color.setHSL(hsl.h, hsl.s, hsl.l);
+                    }
+                    
+                    // Ensure shadows work properly
+                    material.needsUpdate = true;
+                  }
+                  
+                  // If no color/texture, apply a default color based on object name
+                  if (!material.map && !material.color || material.color.getHex() === 0xffffff) {
+                    const defaultColor = getDefaultColorForObject(objData.name);
+                    material.color = new THREE.Color(defaultColor);
+                    material.needsUpdate = true;
+                  }
+                });
+                
+                // Update child material reference
+                if (!Array.isArray(child.material)) {
+                  child.material = materials[0];
+                }
+              }
+              
+              // Ensure shadows
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+          
+          // Remove basic shape parts
+          while (group.children.length > 0) {
+            group.remove(group.children[0]);
+          }
+          
+          // Add detailed model
+          group.add(detailedModel);
+          group.userData.modelLoaded = true;
+          group.userData.modelLoading = false;
+          
+          console.log(`[Creative Object] Loaded detailed model for: ${objData.name}`);
+        },
+        (progress) => {
+          // Loading progress
+          console.log(`[Creative Object] Loading model for ${objData.name}: ${(progress.loaded / progress.total * 100).toFixed(1)}%`);
+        },
+        (error) => {
+          // Model not in cache - request generation (but keep basic shapes for now)
+          console.log(`[Creative Object] Model not cached for ${objData.name}, requesting generation...`);
+          requestModelGeneration(objData.name, objData.description || objData.name);
+          group.userData.modelLoading = false;
+        }
+      );
+    } catch (error) {
+      console.error(`[Creative Object] Error loading detailed model:`, error);
+      group.userData.modelLoading = false;
+    }
+  };
+
+  const requestModelGeneration = async (objectName, description) => {
+    /**
+     * Requests generation of a detailed 3D model.
+     * This happens in the background - basic shapes remain visible.
+     */
+    try {
+      const response = await fetch('http://localhost:8000/api/generate-model', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          object_name: objectName,
+          description: description,
+          force_regenerate: false
+        })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log(`[Creative Object] Model generation requested for: ${objectName}`, result);
+        
+        // Poll for model completion
+        if (result.status === 'generating') {
+          pollModelStatus(result.cache_key, objectName);
+        }
+      } else {
+        const error = await response.json();
+        console.log(`[Creative Object] Model generation not available: ${error.detail}`);
+        // Model generation API not integrated - basic shapes will remain
+      }
+    } catch (error) {
+      console.error(`[Creative Object] Error requesting model generation:`, error);
+    }
+  };
+
+  const getDefaultColorForObject = (objectName) => {
+    /**
+     * Returns a default color based on object name/type.
+     * Used when Replicate models don't have good colors.
+     */
+    const name = objectName.toLowerCase();
+    
+    // Furniture colors
+    if (name.includes('chair') || name.includes('seat')) return 0x8B4513; // Brown wood
+    if (name.includes('table') || name.includes('desk')) return 0xD2691E; // Chocolate
+    if (name.includes('bench')) return 0x654321; // Dark brown
+    
+    // Statues/monuments
+    if (name.includes('statue') || name.includes('monument')) return 0xC0C0C0; // Silver
+    if (name.includes('liberty')) return 0x87CEEB; // Sky blue (Statue of Liberty)
+    
+    // Vehicles
+    if (name.includes('car') || name.includes('vehicle')) return 0xFF0000; // Red
+    if (name.includes('truck')) return 0x0000FF; // Blue
+    
+    // Decorative
+    if (name.includes('fountain')) return 0x4682B4; // Steel blue
+    if (name.includes('lamp') || name.includes('light')) return 0xFFD700; // Gold
+    
+    // Default: neutral gray with slight color tint
+    return 0x888888;
+  };
+
+  const pollModelStatus = async (cacheKey, objectName) => {
+    /**
+     * Polls for model generation status and loads when ready.
+     */
+    const maxAttempts = 60; // 60 attempts = 1 minute (poll every second)
+    let attempts = 0;
+    
+    const poll = async () => {
+      try {
+        const response = await fetch(`http://localhost:8000/api/model-status/${cacheKey}`);
+        const status = await response.json();
+        
+        if (status.status === 'ready' && status.model_url) {
+          // Model is ready - find the object and reload it
+          const creativeObjects = structuresRef.current.filter(
+            obj => obj.userData?.structureType === 'creative_object' && 
+                   obj.userData?.name === objectName &&
+                   !obj.userData?.modelLoaded
+          );
+          
+          creativeObjects.forEach(obj => {
+            const objData = obj.userData.originalData;
+            loadDetailedModel(obj, objData);
+          });
+        } else if (attempts < maxAttempts) {
+          attempts++;
+          setTimeout(poll, 1000); // Poll every second
+        }
+      } catch (error) {
+        console.error(`[Creative Object] Error polling model status:`, error);
+      }
+    };
+    
+    setTimeout(poll, 1000); // Start polling after 1 second
   };
 
   const updateEnemyHealthBars = () => {
@@ -1824,6 +2140,27 @@ const VoiceWorldBuilder = () => {
             structuresRef.current.push(peak);
           });
           console.log(`✅ Added ${data.structures.peaks.length} mountain peaks`);
+        }
+
+        if (data.structures.creative_objects) {
+          console.log(`[FRONTEND] Creating ${data.structures.creative_objects.length} creative objects...`);
+          data.structures.creative_objects.forEach(objData => {
+            try {
+              // Log the full AI output
+              console.log(`[FRONTEND] AI Output for "${objData.name || 'unnamed'}":`, JSON.stringify(objData, null, 2));
+              console.log(`[FRONTEND] Parts breakdown:`, objData.parts?.map((p, i) => 
+                `Part ${i+1}: ${p.shape} at y=${p.position?.y || 0}, color=${p.color || 'default'}`
+              ));
+              
+              const creativeObj = createCreativeObject(objData);
+              scene.add(creativeObj);
+              structuresRef.current.push(creativeObj);
+              console.log(`[FRONTEND] ✓ Created creative object: ${objData.name || 'unnamed'} at (${objData.position?.x?.toFixed(1)}, ${objData.position?.z?.toFixed(1)})`);
+            } catch (error) {
+              console.error(`[FRONTEND] Error creating creative object:`, error, objData);
+            }
+          });
+          console.log(`✅ Added ${structuresRef.current.filter(obj => obj.userData.structureType === 'creative_object').length} creative objects`);
         }
 
         if (data.structures.street_lamps) {
@@ -2456,6 +2793,44 @@ const VoiceWorldBuilder = () => {
             
       }
 
+      // Handle creative objects
+      const oldCreativeObjectCount = structuresRef.current.filter(obj => obj.userData?.structureType === 'creative_object').length;
+      const newCreativeObjectCount = data.structures?.creative_objects?.length || 0;
+      
+      if (data.structures?.creative_objects && newCreativeObjectCount > oldCreativeObjectCount) {
+        const newCreativeObjects = data.structures.creative_objects.slice(oldCreativeObjectCount);
+        console.log(`[MODIFY] Adding ${newCreativeObjects.length} creative objects...`);
+        
+        newCreativeObjects.forEach(objData => {
+          try {
+            // Log the full AI output
+            console.log(`[MODIFY] AI Output for "${objData.name || 'unnamed'}":`, JSON.stringify(objData, null, 2));
+            console.log(`[MODIFY] Parts breakdown:`, objData.parts?.map((p, i) => 
+              `Part ${i+1}: ${p.shape} at y=${p.position?.y || 0}, color=${p.color || 'default'}`
+            ));
+            
+            const creativeObj = createCreativeObject(objData);
+            scene.add(creativeObj);
+            structuresRef.current.push(creativeObj);
+            console.log(`[MODIFY] ✓ Created creative object: ${objData.name || 'unnamed'} at (${objData.position?.x?.toFixed(1)}, ${objData.position?.z?.toFixed(1)})`);
+          } catch (error) {
+            console.error(`[MODIFY] Error creating creative object:`, error, objData);
+          }
+        });
+      }
+      
+      if (newCreativeObjectCount < oldCreativeObjectCount) {
+        const toRemove = oldCreativeObjectCount - newCreativeObjectCount;
+        console.log(`[MODIFY] Removing ${toRemove} creative objects...`);
+        for (let i = 0; i < toRemove; i++) {
+          const creativeObj = structuresRef.current.find(obj => obj.userData?.structureType === 'creative_object');
+          if (creativeObj) {
+            scene.remove(creativeObj);
+            structuresRef.current = structuresRef.current.filter(obj => obj !== creativeObj);
+          }
+        }
+      }
+
       if (data.structures?.peaks && newPeakCount > oldPeakCount) {
         const newPeaks = data.structures.peaks.slice(oldPeakCount);
         const currentBiome = data.world?.biome || data.world?.biome_name || biomeName;
@@ -2518,12 +2893,26 @@ const VoiceWorldBuilder = () => {
 
       setCurrentWorld(data);
       
-      // Add success message to chat history
-      setChatHistory(prev => [...prev, {
+      // Add success message to the last conversation session if it exists
+      setChatHistory(prev => {
+        const updated = [...prev];
+        const lastItem = updated[updated.length - 1];
+        if (lastItem && lastItem.type === 'conversation' && lastItem.session) {
+          // Add system message to the conversation session
+          lastItem.session.push({
+            role: 'system',
+            content: '✅ Command executed successfully'
+          });
+        } else {
+          // Fallback: add as separate system message
+          updated.push({
         command: `✅ Command executed successfully`,
         timestamp: new Date().toLocaleTimeString(),
         type: 'system'
-      }]);
+          });
+        }
+        return updated;
+      });
       
       setGameState(GameState.PLAYING);
       console.log("✅ Modification complete, returned to PLAYING state");
@@ -2535,12 +2924,26 @@ const VoiceWorldBuilder = () => {
       }
     } catch (err) {
       console.error("Modify-world error:", err);
-      // Add error message to chat history
-      setChatHistory(prev => [...prev, {
+      // Add error message to the last conversation session if it exists
+      setChatHistory(prev => {
+        const updated = [...prev];
+        const lastItem = updated[updated.length - 1];
+        if (lastItem && lastItem.type === 'conversation' && lastItem.session) {
+          // Add error message to the conversation session
+          lastItem.session.push({
+            role: 'system',
+            content: `❌ Error: ${err.message}`
+          });
+        } else {
+          // Fallback: add as separate error message
+          updated.push({
         command: `❌ Error: ${err.message}`,
         timestamp: new Date().toLocaleTimeString(),
         type: 'error'
-      }]);
+          });
+        }
+        return updated;
+      });
       setGameState(GameState.PLAYING);
     }
   };
@@ -2745,7 +3148,8 @@ const VoiceWorldBuilder = () => {
       setSubmittedPrompt(transcript);
 
       if (forceModify || gameState === GameState.PLAYING) {
-        modifyWorld(transcript);
+        setChatConversation([]); // Start fresh chat
+        sendChatMessageForModify(transcript);
       } else {
         generateWorld(transcript);
       }
@@ -2763,6 +3167,85 @@ const VoiceWorldBuilder = () => {
     setPhysicsSettings(newSettings);
   }, []);
 
+  const sendChatMessageForModify = async (userMessage) => {
+    // Add user message to conversation
+    const newMessages = [...chatConversation, { role: 'user', content: userMessage }];
+    setChatConversation(newMessages);
+    setIsWaitingForAI(true);
+    // Don't change gameState - keep it as PLAYING so world stays visible
+
+    try {
+      // Get player position and direction for context
+      const playerPos = playerRef.current ? {
+        x: playerRef.current.position.x,
+        y: playerRef.current.position.y,
+        z: playerRef.current.position.z
+      } : null;
+      
+      let playerDirection = null;
+      if (cameraRef.current && playerRef.current) {
+        const camDir = new THREE.Vector3();
+        cameraRef.current.getWorldDirection(camDir);
+        camDir.y = 0;
+        camDir.normalize();
+        playerDirection = {
+          x: camDir.x,
+          z: camDir.z
+        };
+      }
+
+      const res = await fetch(`${API_BASE}/chat-modify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          messages: newMessages,
+          current_world: currentWorld,
+          player_position: playerPos,
+          player_direction: playerDirection
+        }),
+      });
+
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+
+      const data = await res.json();
+      
+      // Add AI response to conversation
+      const updatedMessages = [...newMessages, { role: 'assistant', content: data.message }];
+      setChatConversation(updatedMessages);
+
+      setIsWaitingForAI(false);
+    } catch (error) {
+      console.error('Chat error:', error);
+      setIsWaitingForAI(false);
+      setChatConversation(prev => [...prev, { 
+        role: 'assistant', 
+        content: 'Sorry, I encountered an error. Please try again.' 
+      }]);
+    }
+  };
+
+  const confirmModification = async () => {
+    // Get the last user message from conversation (most recent intent)
+    const userMessages = chatConversation.filter(m => m.role === 'user');
+    const commandText = userMessages.length > 0 
+      ? userMessages[userMessages.length - 1].content 
+      : modifyPrompt;
+    
+    // Save the entire conversation session to chat history
+    if (chatConversation.length > 0) {
+      setChatHistory(prev => [...prev, {
+        session: [...chatConversation], // Store full conversation
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'conversation'
+      }]);
+    }
+    
+    setChatConversation([]);
+    setIsWaitingForAI(false);
+    setGameState(GameState.GENERATING);
+    await modifyWorld(commandText);
+  };
+
   const handleTextSubmit = () => {
     if (!prompt.trim()) return;
     setSubmittedPrompt(prompt);
@@ -2772,9 +3255,10 @@ const VoiceWorldBuilder = () => {
 
   const handleModifySubmit = () => {
     if (!modifyPrompt.trim()) return;
-    console.log("Modifying with text:", modifyPrompt);
-    modifyWorld(modifyPrompt);
+    const commandText = modifyPrompt.trim();
     setModifyPrompt('');
+    setChatConversation([]); // Start fresh chat
+    sendChatMessageForModify(commandText);
   };
 
 
@@ -2892,7 +3376,8 @@ const VoiceWorldBuilder = () => {
               backgroundColor: 'rgba(20, 20, 30, 0.95)',
               borderLeft: '2px solid rgba(150, 150, 255, 0.5)',
               zIndex: 100,
-              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
               boxShadow: '-4px 0 10px rgba(0,0,0,0.5)',
               transition: 'transform 0.3s ease'
             }}>
@@ -2918,13 +3403,166 @@ const VoiceWorldBuilder = () => {
                   ×
                 </button>
               </div>
-              <div style={{ padding: '20px' }}>
-                {chatHistory.length === 0 ? (
+              <div style={{ 
+                padding: '20px', 
+                flex: 1, 
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '20px'
+              }}>
+                {/* Show current active conversation if exists */}
+                {chatConversation.length > 0 && (
+                  <div style={{
+                    padding: '12px',
+                    backgroundColor: 'rgba(100, 150, 255, 0.3)',
+                    borderRadius: '8px',
+                    borderLeft: '3px solid rgba(150, 200, 255, 0.8)',
+                    marginBottom: '10px'
+                  }}>
+                    <div style={{
+                      color: '#88aaff',
+                      fontSize: '11px',
+                      marginBottom: '10px',
+                      fontFamily: 'monospace',
+                      borderBottom: '1px solid rgba(150, 200, 255, 0.3)',
+                      paddingBottom: '5px',
+                      fontWeight: 'bold'
+                    }}>
+                      Current Conversation
+                    </div>
+                    {chatConversation.map((msg, msgIndex) => (
+                      <div
+                        key={msgIndex}
+                        style={{
+                          marginBottom: '8px',
+                          padding: '6px 8px',
+                          backgroundColor: msg.role === 'user' 
+                            ? 'rgba(100, 150, 255, 0.15)' 
+                            : msg.role === 'system'
+                            ? (msg.content.includes('✅') 
+                                ? 'rgba(100, 200, 100, 0.15)' 
+                                : msg.content.includes('❌')
+                                ? 'rgba(200, 100, 100, 0.15)'
+                                : 'rgba(200, 200, 200, 0.1)')
+                            : 'rgba(200, 200, 200, 0.1)',
+                          borderRadius: '4px',
+                          marginLeft: msg.role === 'assistant' || msg.role === 'system' ? '0' : '20px',
+                          marginRight: msg.role === 'user' ? '0' : '20px'
+                        }}
+                      >
+                        <div style={{
+                          color: '#fff',
+                          fontSize: '13px',
+                          fontFamily: 'monospace',
+                          wordWrap: 'break-word'
+                        }}>
+                          <strong style={{ 
+                            color: msg.role === 'user' 
+                              ? '#88aaff' 
+                              : msg.role === 'system'
+                              ? (msg.content.includes('✅') ? '#88ff88' : msg.content.includes('❌') ? '#ff8888' : '#88ffaa')
+                              : '#88ffaa',
+                            marginRight: '8px'
+                          }}>
+                            {msg.role === 'user' ? 'You:' : msg.role === 'system' ? 'System:' : 'AI:'}
+                          </strong>
+                          {msg.content}
+                        </div>
+                      </div>
+                    ))}
+                    {isWaitingForAI && (
+                      <div style={{ textAlign: 'left', marginTop: '8px', padding: '6px 8px' }}>
+                        <div style={{
+                          display: 'inline-block',
+                          padding: '6px 8px',
+                          borderRadius: '4px',
+                          backgroundColor: 'rgba(200, 200, 200, 0.1)',
+                          color: '#666',
+                          fontSize: '13px'
+                        }}>
+                          AI is thinking...
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {chatHistory.length === 0 && chatConversation.length === 0 ? (
                   <div style={{ color: '#888', textAlign: 'center', marginTop: '40px' }}>
                     No chat history yet
                   </div>
                 ) : (
-                  chatHistory.map((item, index) => (
+                  chatHistory.map((item, index) => {
+                    // Handle full conversation sessions
+                    if (item.type === 'conversation' && item.session) {
+                      return (
+                        <div
+                          key={index}
+                          style={{
+                            marginBottom: '20px',
+                            padding: '12px',
+                            backgroundColor: 'rgba(100, 100, 200, 0.2)',
+                            borderRadius: '8px',
+                            borderLeft: '3px solid rgba(150, 150, 255, 0.8)'
+                          }}
+                        >
+                          <div style={{
+                            color: '#aaa',
+                            fontSize: '11px',
+                            marginBottom: '10px',
+                            fontFamily: 'monospace',
+                            borderBottom: '1px solid rgba(150, 150, 255, 0.3)',
+                            paddingBottom: '5px'
+                          }}>
+                            Conversation - {item.timestamp}
+                          </div>
+                          {item.session.map((msg, msgIndex) => (
+                            <div
+                              key={msgIndex}
+                              style={{
+                                marginBottom: '8px',
+                                padding: '6px 8px',
+                                backgroundColor: msg.role === 'user' 
+                                  ? 'rgba(100, 150, 255, 0.15)' 
+                                  : msg.role === 'system'
+                                  ? (msg.content.includes('✅') 
+                                      ? 'rgba(100, 200, 100, 0.15)' 
+                                      : msg.content.includes('❌')
+                                      ? 'rgba(200, 100, 100, 0.15)'
+                                      : 'rgba(200, 200, 200, 0.1)')
+                                  : 'rgba(200, 200, 200, 0.1)',
+                                borderRadius: '4px',
+                                marginLeft: msg.role === 'assistant' || msg.role === 'system' ? '0' : '20px',
+                                marginRight: msg.role === 'user' ? '0' : '20px'
+                              }}
+                            >
+                              <div style={{
+                                color: '#fff',
+                                fontSize: '13px',
+                                fontFamily: 'monospace',
+                                wordWrap: 'break-word'
+                              }}>
+                                <strong style={{ 
+                                  color: msg.role === 'user' 
+                                    ? '#88aaff' 
+                                    : msg.role === 'system'
+                                    ? (msg.content.includes('✅') ? '#88ff88' : msg.content.includes('❌') ? '#ff8888' : '#88ffaa')
+                                    : '#88ffaa',
+                                  marginRight: '8px'
+                                }}>
+                                  {msg.role === 'user' ? 'You:' : msg.role === 'system' ? 'System:' : 'AI:'}
+                                </strong>
+                                {msg.content}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
+                    
+                    // Handle legacy single command format (backward compatibility)
+                    return (
                     <div
                       key={index}
                       style={{
@@ -2968,7 +3606,92 @@ const VoiceWorldBuilder = () => {
                         )}
                       </div>
                     </div>
-                  ))
+                    );
+                  })
+                )}
+              </div>
+              
+              {/* Chat Input Area */}
+              <div style={{
+                padding: '15px',
+                borderTop: '1px solid rgba(150, 150, 255, 0.3)',
+                backgroundColor: 'rgba(20, 20, 30, 0.95)',
+                display: 'flex',
+                gap: '8px',
+                alignItems: 'center'
+              }}>
+                <input
+                  type="text"
+                  value={historyChatInput}
+                  onChange={e => setHistoryChatInput(e.target.value)}
+                  onKeyPress={e => {
+                    if (e.key === 'Enter' && !isWaitingForAI && historyChatInput.trim()) {
+                      const message = historyChatInput.trim();
+                      setHistoryChatInput('');
+                      sendChatMessageForModify(message);
+                    }
+                  }}
+                  placeholder={isWaitingForAI ? "AI is responding..." : "Type your message..."}
+                  disabled={isWaitingForAI || gameState !== GameState.PLAYING}
+                  style={{
+                    flex: 1,
+                    border: '1px solid rgba(150, 150, 255, 0.3)',
+                    borderRadius: '6px',
+                    padding: '8px 12px',
+                    fontSize: '14px',
+                    fontFamily: 'monospace',
+                    backgroundColor: 'rgba(30, 30, 40, 0.8)',
+                    color: '#fff',
+                    outline: 'none'
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    if (!isWaitingForAI && historyChatInput.trim() && gameState === GameState.PLAYING) {
+                      const message = historyChatInput.trim();
+                      setHistoryChatInput('');
+                      sendChatMessageForModify(message);
+                    }
+                  }}
+                  disabled={isWaitingForAI || !historyChatInput.trim() || gameState !== GameState.PLAYING}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: (isWaitingForAI || !historyChatInput.trim() || gameState !== GameState.PLAYING)
+                      ? 'rgba(100, 100, 100, 0.5)'
+                      : 'rgba(100, 150, 255, 0.8)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: (isWaitingForAI || !historyChatInput.trim() || gameState !== GameState.PLAYING)
+                      ? 'not-allowed'
+                      : 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    fontFamily: 'monospace',
+                    transition: 'background-color 0.2s'
+                  }}
+                >
+                  Send
+                </button>
+                {chatConversation.length > 0 && 
+                 chatConversation[chatConversation.length - 1].role === 'assistant' &&
+                 !isWaitingForAI && (
+                  <button
+                    onClick={confirmModification}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: '#4CAF50',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      fontFamily: 'monospace'
+                    }}
+                  >
+                    Apply
+                  </button>
                 )}
               </div>
             </div>
@@ -3164,14 +3887,6 @@ const VoiceWorldBuilder = () => {
                 background: rgba(220, 220, 220, 0.95);
               }
               
-              .speech-bubble-wrapper:hover .speech-bubble-blue-accent {
-                background: #0000ff;
-                top: 2px;
-                right: 2px;
-                bottom: -8px;
-                width: 2px;
-              }
-              
               .speech-bubble-wrapper:hover .speech-bubble-tail::after {
                 border-top-color: rgba(220, 220, 220, 0.95);
               }
@@ -3209,9 +3924,7 @@ const VoiceWorldBuilder = () => {
                 background: rgba(220, 220, 220, 0.95);
               }
               
-              .speech-bubble-button:hover::before {
-                background: #0000ff;
-              }
+
             `}</style>
           </div>
 
@@ -3255,45 +3968,265 @@ const VoiceWorldBuilder = () => {
       {gameState === GameState.IDLE && (
         <div style={{
           position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100,
-          display: 'flex', justifyContent: 'center', alignItems: 'center',
-          backgroundColor: 'rgba(0,0,0,0.95)', flexDirection: 'column', fontFamily: 'Arial',
-          textAlign: 'center', padding: '20px'
+          display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
+          flexDirection: 'column', fontFamily: 'sans-serif',
+          textAlign: 'center', padding: '20px', paddingBottom: '120px', overflow: 'hidden'
         }}>
-          <h1 style={{
-            fontSize: '3.5rem', fontWeight: 'bold', 
-            background: 'linear-gradient(90deg, #4444ff, #8888ff, #4444ff)',
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', 
-            marginBottom: '20px'
-          }}>Voice World Builder</h1>
-          
-          <p style={{ color: '#aaa', marginBottom: '30px', maxWidth: '600px' }}>
-            Try: "Arctic mountains with trees" or "City with trees at sunset"
-          </p>
-
-          <button onClick={startVoiceCapture} disabled={isListening} style={{
-            padding: '15px 40px', fontSize: '18px', fontWeight: 'bold',
-            background: isListening ? '#666' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            color: '#fff', border: 'none', borderRadius: '50px', cursor: isListening ? 'not-allowed' : 'pointer',
-            boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)', marginBottom: '20px'
+          <video
+            autoPlay
+            muted
+            playsInline
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              zIndex: -1
+            }}
+          >
+            <source src="/hot_yolk.mp4" type="video/mp4" />
+          </video>
+          <div style={{
+            position: 'relative', zIndex: 1,
+            width: '100%', maxWidth: '350px',
+            backgroundColor: '#fff',
+            borderRadius: '12px',
+            border: '2px solid #1e3a8a',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
           }}>
-            {isListening ? '🎤 Listening...' : '🎤 Speak to Create'}
-          </button>
+            {/* Search Bar */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '12px 16px',
+              gap: '12px'
+            }}>
+              <input
+                type="text"
+                value={prompt}
+                onChange={e => setPrompt(e.target.value)}
+                onKeyPress={e => e.key === 'Enter' && handleTextSubmit()}
+                placeholder="look for"
+                style={{
+                  flex: 1,
+                  border: 'none',
+                  outline: 'none',
+                  fontSize: '16px',
+                  color: '#666',
+                  fontFamily: 'sans-serif',
+                  background: 'transparent'
+                }}
+              />
+              <button
+                onClick={startVoiceCapture}
+                disabled={isListening}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: isListening ? 'not-allowed' : 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: isListening ? '#999' : '#4A90E2'
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                  <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                </svg>
+              </button>
+            </div>
 
-          <div style={{ display: 'flex', gap: '10px', width: '100%', maxWidth: '500px' }}>
-            <input type="text" value={prompt} onChange={e => setPrompt(e.target.value)}
-              onKeyPress={e => e.key === 'Enter' && handleTextSubmit()}
-              placeholder="Or type prompt..." style={{
-                flex: 1, padding: '12px 20px', fontSize: '16px',
-                background: 'rgba(255,255,255,0.1)', color: '#fff', border: '2px solid rgba(255,255,255,0.3)',
-                borderRadius: '25px', outline: 'none'
-              }}
-            />
-            <button onClick={handleTextSubmit} style={{
-              padding: '12px 30px', fontSize: '16px', fontWeight: 'bold',
-              background: '#4CAF50', color: '#fff', border: 'none', borderRadius: '25px', cursor: 'pointer'
-            }}>Generate</button>
+            {/* Separator */}
+            <div style={{
+              height: '1px',
+              backgroundColor: '#4A90E2',
+              margin: '0 16px'
+            }} />
+
+            {/* Suggestions */}
+            <div style={{ padding: '8px 0' }}>
+              {['look for a world', 'look for a friend', 'look for a new home'].map((suggestion, index) => (
+                <div
+                  key={index}
+                  onClick={() => {
+                    setPrompt(suggestion);
+                    setSubmittedPrompt(suggestion);
+                    generateWorld(suggestion);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '10px 16px',
+                    cursor: 'pointer',
+                    gap: '12px',
+                    transition: 'background-color 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  <svg width="15" height="18" viewBox="0 0 24 24" fill="#999">
+                    <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                  </svg>
+                  <span style={{
+                    color: '#999',
+                    fontSize: '16px',
+                    fontFamily: 'sans-serif'
+                  }}>
+                    {suggestion}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
-          {submittedPrompt && <p style={{ color: '#888', marginTop: '20px', fontSize: '14px' }}>Last: "{submittedPrompt}"</p>}
+        </div>
+      )}
+
+      {(gameState === GameState.CHATTING || (gameState === GameState.PLAYING && chatConversation.length > 0)) && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100,
+          display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
+          flexDirection: 'column', fontFamily: 'sans-serif',
+          textAlign: 'center', padding: '20px', paddingBottom: '120px', overflow: 'hidden',
+          pointerEvents: 'none' // Allow clicks to pass through to world
+        }}>
+          {/* Only show video background if NOT in PLAYING state (i.e., if in CHATTING state from homescreen) */}
+          {gameState === GameState.CHATTING && (
+            <video
+              autoPlay
+              muted
+              playsInline
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                zIndex: -1
+              }}
+            >
+              <source src="/hot_yolk.mp4" type="video/mp4" />
+            </video>
+          )}
+
+          {/* Chat Container */}
+          <div style={{
+            position: 'relative', zIndex: 1,
+            width: '100%', maxWidth: '500px',
+            backgroundColor: '#fff',
+            borderRadius: '12px',
+            border: '2px solid #1e3a8a',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            maxHeight: '60vh',
+            display: 'flex',
+            flexDirection: 'column',
+            pointerEvents: 'auto' // Re-enable pointer events for the chat container
+          }}>
+            {/* Chat Messages */}
+            <div style={{
+              padding: '16px',
+              overflowY: 'auto',
+              flex: 1,
+              minHeight: '200px',
+              maxHeight: '400px'
+            }}>
+              {chatConversation.map((msg, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    marginBottom: '12px',
+                    textAlign: msg.role === 'user' ? 'right' : 'left'
+                  }}
+                >
+                  <div style={{
+                    display: 'inline-block',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    backgroundColor: msg.role === 'user' ? '#4A90E2' : '#f0f0f0',
+                    color: msg.role === 'user' ? '#fff' : '#333',
+                    maxWidth: '80%',
+                    fontSize: '14px',
+                    fontFamily: 'sans-serif'
+                  }}>
+                    {msg.content}
+                  </div>
+                </div>
+              ))}
+              {isWaitingForAI && (
+                <div style={{ textAlign: 'left', marginTop: '12px' }}>
+                  <div style={{
+                    display: 'inline-block',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    backgroundColor: '#f0f0f0',
+                    color: '#666',
+                    fontSize: '14px'
+                  }}>
+                    Thinking...
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Input Area */}
+            <div style={{
+              borderTop: '1px solid #e0e0e0',
+              padding: '12px 16px',
+              display: 'flex',
+              gap: '8px'
+            }}>
+              <input
+                type="text"
+                value={modifyPrompt}
+                onChange={e => setModifyPrompt(e.target.value)}
+                onKeyPress={e => {
+                  if (e.key === 'Enter' && !isWaitingForAI) {
+                    const userMessage = modifyPrompt.trim();
+                    if (userMessage) {
+                      setModifyPrompt('');
+                      sendChatMessageForModify(userMessage);
+                    }
+                  }
+                }}
+                placeholder={isWaitingForAI ? "AI is responding..." : "Type your response..."}
+                disabled={isWaitingForAI}
+                style={{
+                  flex: 1,
+                  border: '1px solid #ddd',
+                  borderRadius: '6px',
+                  padding: '8px 12px',
+                  fontSize: '14px',
+                  fontFamily: 'sans-serif',
+                  outline: 'none'
+                }}
+              />
+              {chatConversation.length > 0 && 
+               chatConversation[chatConversation.length - 1].role === 'assistant' &&
+               !isWaitingForAI && (
+                <button
+                  onClick={confirmModification}
+                  disabled={isWaitingForAI}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#4CAF50',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: isWaitingForAI ? 'not-allowed' : 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    fontFamily: 'sans-serif'
+                  }}
+                >
+                  Apply
+                </button>
+              )}
+          </div>
+          </div>
         </div>
       )}
 
