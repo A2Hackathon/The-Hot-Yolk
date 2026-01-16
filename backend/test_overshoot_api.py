@@ -17,17 +17,25 @@ if not API_KEY:
 print(f"[OK] API Key found (length: {len(API_KEY)} characters)")
 print(f"[KEY] Key preview: {API_KEY[:10]}...{API_KEY[-5:]}\n")
 
-# Test endpoints to try
-ENDPOINTS_TO_TEST = [
-    "https://api.overshoot.ai/v1/analyze",
-    "https://api.overshoot.ai/v1/environment/scan",
-    "https://api.overshoot.ai/v1/vision/analyze",
-    "https://api.overshoot.ai/analyze",
-    "https://api.overshoot.ai/environment/scan",
-    "https://overshoot.ai/api/v1/analyze",
-    "https://overshoot.ai/api/analyze",
-    "https://overshoot.ai/api/v1/environment/scan",
-]
+API_URL = os.getenv("OVERSHOOT_API_URL")
+
+ENDPOINTS_TO_TEST = []
+if API_URL:
+    print(f"[INFO] Using OVERSHOOT_API_URL from environment: {API_URL}")
+    ENDPOINTS_TO_TEST.append(API_URL)
+
+ENDPOINTS_TO_TEST.extend(
+    [
+        "https://api.overshoot.ai/v1/analyze",
+        "https://api.overshoot.ai/v1/environment/scan",
+        "https://api.overshoot.ai/v1/vision/analyze",
+        "https://api.overshoot.ai/analyze",
+        "https://api.overshoot.ai/environment/scan",
+        "https://overshoot.ai/api/v1/analyze",
+        "https://overshoot.ai/api/analyze",
+        "https://overshoot.ai/api/v1/environment/scan",
+    ]
+)
 
 print("[TEST] Testing Overshoot AI endpoints...\n")
 print("=" * 70)

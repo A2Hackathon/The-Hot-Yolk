@@ -1,5 +1,8 @@
 from fastapi import APIRouter, HTTPException
+import os
+print("LOADING GENERATE.PY ------------------------------------")
 from typing import Dict, List, Optional
+
 from pydantic import BaseModel
 import random
 import math

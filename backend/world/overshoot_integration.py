@@ -395,19 +395,38 @@ def map_object_type(overshoot_type: str) -> Optional[str]:
         "spruce": "tree",
         "birch": "tree",
         "forest": "tree",
+        "woods": "tree",
+        "jungle": "tree",
+        "park": "tree",
+        "garden": "tree",
         "rock": "rock",
         "rocks": "rock",
         "boulder": "rock",
         "boulders": "rock",
         "stone": "rock",
         "stones": "rock",
+        "cliff": "peak",
+        "cliffs": "peak",
         "building": "building",
         "buildings": "building",
         "house": "building",
         "houses": "building",
         "skyscraper": "building",
         "skyscrapers": "building",
+        "tower": "building",
+        "towers": "building",
         "structure": "building",
+        "block": "building",
+        "blocks": "building",
+        "car": "building",
+        "cars": "building",
+        "vehicle": "building",
+        "vehicles": "building",
+        "truck": "building",
+        "trucks": "building",
+        "bus": "building",
+        "buses": "building",
+        "taxi": "building",
         "mountain": "peak",
         "mountains": "peak",
         "peak": "peak",
@@ -415,12 +434,23 @@ def map_object_type(overshoot_type: str) -> Optional[str]:
         "hill": "peak",
         "hills": "peak",
         "streetlight": "street_lamp",
+        "street_light": "street_lamp",
         "street_lamp": "street_lamp",
         "street_lights": "street_lamp",
         "lamp": "street_lamp",
         "lamps": "street_lamp",
+        "lamp_post": "street_lamp",
+        "lamppost": "street_lamp",
+        "traffic_light": "street_lamp",
+        "traffic_lights": "street_lamp",
         "light": "street_lamp",
-        "lights": "street_lamp"
+        "lights": "street_lamp",
+        "road": "street_lamp",
+        "roads": "street_lamp",
+        "street": "street_lamp",
+        "streets": "street_lamp",
+        "highway": "street_lamp",
+        "bridge": "street_lamp"
     }
     
     # Try direct match first
@@ -440,24 +470,49 @@ def map_object_type(overshoot_type: str) -> Optional[str]:
 def map_terrain_to_biome(terrain_type: Optional[str], weather: Optional[str]) -> str:
     """Map Overshoot terrain/weather to your biome system."""
     if not terrain_type:
+        if weather and "snow" in weather.lower():
+            return "arctic"
         return "city"
     
     terrain_lower = terrain_type.lower()
     weather_lower = (weather or "").lower()
     
-    # Arctic/winter conditions
     if "snow" in weather_lower or "winter" in terrain_lower or "arctic" in terrain_lower:
         return "arctic"
     
-    # Mountainous terrain
     if "mountain" in terrain_lower or "elevated" in terrain_lower:
-        return "arctic"  # Your system uses arctic for mountains
+        return "arctic"
     
-    # Urban/city
+    if "desert" in terrain_lower or "sand" in terrain_lower or "dune" in terrain_lower:
+        return "desert"
+    
+    if "forest" in terrain_lower or "jungle" in terrain_lower or "woods" in terrain_lower:
+        return "forest"
+    
+    if "beach" in terrain_lower or "coast" in terrain_lower or "island" in terrain_lower:
+        return "beach"
+    
+    if "ocean" in terrain_lower or "sea" in terrain_lower or "underwater" in terrain_lower:
+        return "underwater"
+    
+    if "gotham" in terrain_lower:
+        return "gotham"
+    
+    if "spiderman" in terrain_lower or "spider-man" in terrain_lower or "spider man" in terrain_lower:
+        return "spiderman_world"
+    
+    if "futuristic" in terrain_lower or "cyberpunk" in terrain_lower or "neon" in terrain_lower:
+        return "futuristic"
+    
+    if "venice" in terrain_lower or "italy" in terrain_lower:
+        return "venice"
+    
+    if "paris" in terrain_lower or "france" in terrain_lower:
+        return "paris"
+    
     if "urban" in terrain_lower or "city" in terrain_lower:
         return "city"
     
-    # Default
     return "city"
 
 

@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -6,7 +6,7 @@ import GameSettingsPanel from './GameSettingsPanel';
 import { RealtimeVision } from '@overshoot/sdk';
 
 
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = 'http://localhost:8001/api';
 
 const GameState = {
   IDLE: 'idle',
@@ -2427,8 +2427,7 @@ const VoiceWorldBuilder = () => {
       await startOvershootStreaming(overshootApiKey);
       
     } catch (error) {
-      console.error('[CAMERA] Error:', error);
-      alert('Failed to start camera streaming: ' + error.message);
+      console.error('[CAMERA] Error starting streaming or camera:', error);
     }
   };
 
@@ -2478,67 +2477,15 @@ const VoiceWorldBuilder = () => {
       // This suggests the service is still in development or requires special access
       console.log('[OVERSHOOT] Note: api.overshoot.ai endpoint may not be publicly available yet');
 
-      // Create Overshoot Vision instance
-      // Configuration matches the Overshoot API Playground
       const visionConfig = {
         apiUrl: 'https://api.overshoot.ai',
-        apiKey: apiKey, // Already cleaned, no need to trim
-        prompt: `Identify what you see in this real-world environment and return JSON with:
-{
-  "objects": [{"type": "tree", "count": 5}, {"type": "rock", "count": 3}],
-  "terrain": {"type": "arctic|forest|desert|city|mountainous"},
-  "weather": {"condition": "clear|cloudy|rainy|snowy|foggy"},
-  "colors": {"palette": ["#HEX", "#HEX"]},
-  "spatial_layout": [{"object": "tree", "position": "foreground|midground|background"}]
-}
-Detect objects: trees, rocks, buildings, mountains, street lamps.`,
-        backend: 'overshoot', // Match playground: "Overshoot"
-        model: 'Qwen/Qwen3-VL-30B-A3B-Instruct', // Match playground model
-        outputSchema: {
-          type: "object",
-          properties: {
-            objects: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  type: { type: "string" },
-                  count: { type: "number" }
-                }
-              }
-            },
-            terrain: {
-              type: "object",
-              properties: {
-                type: { type: "string" }
-              }
-            },
-            weather: {
-              type: "object",
-              properties: {
-                condition: { type: "string" }
-              }
-            },
-            colors: {
-              type: "object",
-              properties: {
-                palette: {
-                  type: "array",
-                  items: { type: "string" }
-                }
-              }
-            },
-            spatial_layout: {
-              type: "array",
-              items: { type: "object" }
-            }
-          }
-        },
-        source: { type: 'camera', cameraFacing: 'environment' }, // Environment-facing camera
+        apiKey: apiKey,
+        prompt: 'Read any visible text',
+        source: { type: 'camera', cameraFacing: 'environment' },
         processing: {
-          sampling_ratio: 0.1, // Process 10% of frames
+          sampling_ratio: 0.1,
           fps: 30,
-          clip_length_seconds: 2,
+          clip_length_seconds: 1,
           delay_seconds: 1
         },
         onResult: async (result) => {
@@ -2637,7 +2584,10 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
       
       errorMessage += 'Falling back to basic camera mode.';
       
-      alert(errorMessage);
+      console.warn(errorMessage);
+      console.log('[OVERSHOOT] Falling back to basic camera mode automatically.');
+      
+      // alert(errorMessage); // Disabled to prevent blocking user flow
       await startBasicCamera();
     }
   };
@@ -4893,6 +4843,33 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative', background: '#000' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute' }} />
+
+      <div
+        style={{
+          position: 'absolute',
+          top: '12px',
+          left: '16px',
+          zIndex: 20,
+          padding: '8px 14px',
+          borderRadius: '999px',
+          backgroundColor: streamingActive
+            ? 'rgba(34, 197, 94, 0.9)'
+            : scanMode
+            ? 'rgba(59, 130, 246, 0.9)'
+            : 'rgba(75, 85, 99, 0.9)',
+          color: '#fff',
+          fontFamily: 'monospace',
+          fontSize: '13px',
+          pointerEvents: 'none',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.35)',
+        }}
+      >
+        {streamingActive
+          ? 'Camera: Overshoot streaming'
+          : scanMode
+          ? 'Camera: basic mode'
+          : 'Camera: off'}
+      </div>
 
      {gameState === GameState.PLAYING && (
   <GameSettingsPanel 

@@ -25,6 +25,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def log_requests(request, call_next):
+    print(f"REQUEST: {request.method} {request.url.path}")
+    response = await call_next(request)
+    print(f"RESPONSE: {response.status_code}")
+    return response
+
+
 # Serve generated assets (heightmaps, skyboxes, enemy textures)
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 
@@ -44,18 +52,29 @@ async def root():
         "docs": "/docs"
     }
 
+@app.get("/test")
+async def test_endpoint():
+    return {"message": "Test working"}
+
 # Run server if executed directly
 if __name__ == "__main__":
     import uvicorn
     print("=" * 60)
     print("🌍 AI World Builder Backend Starting...")
+    
+    print("DEBUG: Listing all registered routes:")
+    for route in app.routes:
+        if hasattr(route, "path"):
+             print(f"  - {route.path} [{','.join(route.methods) if hasattr(route, 'methods') else 'mount'}]")
+    
     print(f"API Docs: http://localhost:8000/docs")
+
     print(f"Health Check: http://localhost:8000/api/health")
     print("=" * 60)
     
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=8001,
         reload=True  # Auto-reload on code changes
     )
