@@ -24,9 +24,9 @@
         "tree": 25
       }
     },
-    "timestamp": 1768526665.7539983,
+    "timestamp": 1768503305.3205974,
     "hit_count": 0,
-    "last_accessed": 1768526665.7539997,
+    "last_accessed": 1768503305.3205974,
     "prompt_preview": "arctic world"
   },
   "d8d271c2be86ead6": {
@@ -59,7 +59,7 @@
     "last_accessed": 1768504216.2950182,
     "prompt_preview": "arctic mountain"
   },
-  "486ea46224d1bb4f": {
+  "80044596f38d75bb": {
     "params": {
       "biome": "default",
       "time": "noon",
@@ -67,12 +67,12 @@
       "weapon": "dash",
       "structure": {}
     },
-    "timestamp": 1768527687.4612038,
+    "timestamp": 1768538752.9141862,
     "hit_count": 0,
-    "last_accessed": 1768527687.4612045,
-    "prompt_preview": "world"
+    "last_accessed": 1768538752.9141862,
+    "prompt_preview": "spiderman world"
   },
-  "5a5d0d07f6c9bdf5": {
+  "c781d4236b13cdb8": {
     "params": {
       "biome": "default",
       "time": "noon",
@@ -80,9 +80,25 @@
       "weapon": "dash",
       "structure": {}
     },
-    "timestamp": 1768527749.808372,
+    "timestamp": 1768538870.178046,
     "hit_count": 0,
-    "last_accessed": 1768527749.8083723,
-    "prompt_preview": "make me an empty terrain"
+    "last_accessed": 1768538870.178046,
+    "prompt_preview": "spider world"
+  },
+  "04ae10287f2a931b": {
+    "params": {
+      "biome": "city",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "building": 10,
+        "street_lamp": 20
+      }
+    },
+    "timestamp": 1768539103.9348776,
+    "hit_count": 0,
+    "last_accessed": 1768539103.9348776,
+    "prompt_preview": "make a spiderman world"
   }
 }

@@ -3625,12 +3625,16 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
           
           console.log(`[SKYSCRAPERS] Debug - biomeName: ${biomeName}, data.world?.biome: ${data?.world?.biome}, currentBiomeName: ${currentBiomeName}`);
           
-          // Check if biome is city or futuristic/cyberpunk (both should have skyscrapers)
+          // Check if biome is city or futuristic/cyberpunk/superhero (all should have skyscrapers)
           const isUrbanBiome = currentBiomeName && (
             currentBiomeName.toLowerCase() === 'city' ||
             currentBiomeName.toLowerCase().includes('futuristic') ||
             currentBiomeName.toLowerCase().includes('cyberpunk') ||
-            currentBiomeName.toLowerCase().includes('neon')
+            currentBiomeName.toLowerCase().includes('neon') ||
+            currentBiomeName.toLowerCase().includes('spiderman') ||
+            currentBiomeName.toLowerCase().includes('gotham') ||
+            currentBiomeName.toLowerCase().includes('metropolis') ||
+            currentBiomeName.toLowerCase().includes('superhero')
           );
           
           if (isUrbanBiome) {
@@ -3730,7 +3734,7 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
             }
             console.log(`[SKYSCRAPERS] Total skyscrapers created: ${structuresRef.current.filter(s => s.userData?.buildingType === 'skyscraper').length}`);
           } else {
-            console.log(`[SKYSCRAPERS] Biome is not city/futuristic (biomeName: ${biomeName}, data.world?.biome: ${data?.world?.biome}), skipping skyscraper creation`);
+            console.log(`[SKYSCRAPERS] Biome is not city/futuristic/superhero (biomeName: ${biomeName}, data.world?.biome: ${data?.world?.biome}), skipping skyscraper creation`);
           }
 
         }

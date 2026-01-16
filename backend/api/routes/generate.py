@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel
 import random
 import math
+import json
 from world.prompt_parser import parse_prompt, get_groq_client
 from world.terrain import generate_heightmap, get_walkable_points
 from world.enemy_placer import place_enemies
@@ -525,11 +526,13 @@ async def generate_world(prompt: Dict) -> Dict:
 
         print("\n" + "="*60)
         print("[Backend] Received prompt:", prompt_text)
+        print("[Backend] Prompt check - contains 'gotham':", "gotham" in prompt_text.lower())
         parsed_params = parse_prompt(prompt_text)
         print("[Backend] Parsed params:", parsed_params)
         
         biome = parsed_params.get("biome", "city")
         time_of_day = parsed_params.get("time", "noon")
+        print(f"[Backend] After parse_prompt: biome='{biome}', time='{time_of_day}'")
         enemy_count = parsed_params.get("enemy_count", 5)
         weapon = parsed_params.get("weapon", "both")
         structure_counts = parsed_params.get("structure", {})
@@ -542,6 +545,16 @@ async def generate_world(prompt: Dict) -> Dict:
             print(f"[Backend] AI suggested {len(creative_objects)} creative objects: {[obj.get('name', 'unknown') for obj in creative_objects]}")
 
         print(f"[Backend] Final biome: '{biome}' | time: '{time_of_day}' | colors: {color_palette}")
+        print(f"[Backend] Full parsed_params: {json.dumps(parsed_params, indent=2)}")
+        
+        # Safety check: If user wrote "gotham" but biome is "city", force correction
+        if "gotham" in prompt_text.lower() or "batman" in prompt_text.lower():
+            if biome.lower() != "gotham":
+                print(f"[Backend] 🚨 CRITICAL: User wrote '{prompt_text}' but biome is '{biome}' - FORCING to 'gotham'")
+                biome = "gotham"
+                time_of_day = "night"
+                color_palette = []  # Empty so lighting.py generates dark colors
+                print(f"[Backend] ✅ CRITICAL FIX: biome='gotham', time='night', colors=[]")
         if biome_description:
             print(f"[Backend] Biome description: {biome_description}")
 
@@ -661,22 +674,52 @@ async def generate_world(prompt: Dict) -> Dict:
             player_spawn=spawn_point
         )
 
+        # --- ABSOLUTE FINAL CHECK BEFORE lighting generation - CANNOT BE BYPASSED ---
+        prompt_check = prompt_text.lower()
+        original_biome = biome
+        original_time = time_of_day
+        
+        if "gotham" in prompt_check or "batman" in prompt_check:
+            if biome.lower() != "gotham":
+                print(f"[Backend] 🔴🔴🔴 FINAL CHECK: Prompt='{prompt_text}', biome was '{biome}' - FORCING TO 'gotham'")
+                biome = "gotham"
+                time_of_day = "night"
+                print(f"[Backend] ✅✅✅ FORCED: biome='{biome}', time='{time_of_day}'")
+        elif "metropolis" in prompt_check or "superman" in prompt_check:
+            if biome.lower() != "metropolis":
+                print(f"[Backend] 🚨 FINAL CHECK: Forcing biome to 'metropolis' (was '{biome}')")
+                biome = "metropolis"
+                time_of_day = "noon"
+        elif "tokyo" in prompt_check:
+            if biome.lower() != "tokyo":
+                print(f"[Backend] 🚨 FINAL CHECK: Forcing biome to 'tokyo' (was '{biome}')")
+                biome = "tokyo"
+        elif "spiderman" in prompt_check or "spider" in prompt_check:
+            if biome.lower() not in ["spiderman_world", "spiderman"]:
+                print(f"[Backend] 🚨 FINAL CHECK: Forcing biome to 'spiderman_world' (was '{biome}')")
+                biome = "spiderman_world"
+        
+        if biome != original_biome:
+            print(f"[Backend] ⚠️ BIOME WAS CHANGED: '{original_biome}' → '{biome}'")
+        
+        print(f"[Backend] ✅ FINAL VALUES BEFORE LIGHTING: biome='{biome}', time='{time_of_day}'")
+        
         # --- Physics + combat config ---
         configs = get_combined_config(weapon)
 
-        # --- Lighting and sky (now biome-aware) ---
+        # --- Lighting and sky (now biome-aware) - uses CORRECTED biome/time ---
         lighting_config = get_lighting_preset(time_of_day, biome)
         sky_colour = get_sky_color(time_of_day, biome)
         
         print(f"[Backend] Lighting config: {lighting_config}")
         print(f"[Backend] Sky color: {sky_colour}")
         print("="*60 + "\n")
-
+        
         # --- Build response ---
         response = {
             "world": {
-                "biome": biome,
-                "time": time_of_day,
+                "biome": biome,  # Use corrected biome
+                "time": time_of_day,  # Use corrected time
                 "heightmap_raw": heightmap_raw,
                 "heightmap_url": terrain_data.get("heightmap_url"),
                 "texture_url": terrain_data.get("texture_url"),

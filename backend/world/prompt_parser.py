@@ -126,18 +126,47 @@ def cleanup_cache():
 def get_from_cache(prompt: str) -> dict:
     """
     Get parsed parameters from cache if available.
-    Returns None if not cached or expired.
+    Returns None if not cached or expired, OR if cached result is wrong.
     """
     cache = load_cache()
     cache_key = get_cache_key(prompt)
     
     if cache_key in cache:
         entry = cache[cache_key]
+        cached_params = entry.get("params", {})
+        cached_biome = cached_params.get("biome", "").lower() if cached_params else ""
+        prompt_lower = prompt.lower() if prompt else ""
+        
+        # Check if cached biome is wrong for specific locations
+        force_mappings = {
+            "gotham": ["gotham", "batman"],
+            "metropolis": ["metropolis", "superman"],
+            "tokyo": ["tokyo", "japan"],
+            "venice": ["venice", "italy"],
+            "paris": ["paris", "france"],
+            "spiderman_world": ["spider", "spiderman"]
+        }
+        
+        for target_biome, keywords in force_mappings.items():
+            if any(keyword in prompt_lower for keyword in keywords):
+                if cached_biome != target_biome:
+                    print(f"[CACHE] 🚫 Cache REJECTED: Prompt '{prompt}' expects '{target_biome}' but cache has '{cached_biome}' - DELETING")
+                    # Delete bad cache entry from both in-memory and disk
+                    try:
+                        load_cache()  # Reload to get latest _prompt_cache
+                        if cache_key in _prompt_cache:
+                            del _prompt_cache[cache_key]
+                            save_cache()  # Persist deletion
+                            print(f"[CACHE] ✅ Deleted bad cache entry from disk")
+                    except Exception as e:
+                        print(f"[CACHE] Error deleting: {e}")
+                    return None  # Don't return bad cache
+        
+        # Cache is valid, return it
         entry["hit_count"] = entry.get("hit_count", 0) + 1
         entry["last_accessed"] = time.time()
-        
-        print(f"[CACHE] ✓ Cache HIT for prompt: '{prompt[:50]}...'")
-        return entry.get("params")
+        print(f"[CACHE] ✓ Cache HIT for prompt: '{prompt[:50]}...' (biome: '{cached_biome}')")
+        return cached_params
     
     print(f"[CACHE] ✗ Cache MISS for prompt: '{prompt[:50]}...'")
     return None
@@ -174,7 +203,123 @@ def parse_prompt(prompt: str) -> dict:
     
     Uses file-based cache to avoid repeated LLM calls for the same prompt.
     """
+    # Check cache first
+    cached = get_from_cache(prompt)
+    if cached:
+        # ALWAYS post-process cached results to fix bad biomes
+        prompt_lower = prompt.lower() if prompt else ""
+        cached_biome = cached.get("biome", "").lower()
+        
+        # Force correct biome if cached has wrong one
+        force_mappings = {
+            "gotham": ["gotham", "batman"],
+            "metropolis": ["metropolis", "superman"],
+            "tokyo": ["tokyo", "japan"],
+            "venice": ["venice", "italy"],
+            "paris": ["paris", "france"],
+            "spiderman_world": ["spider", "spiderman"]
+        }
+        
+        corrected = False
+        for target_biome, keywords in force_mappings.items():
+            if any(keyword in prompt_lower for keyword in keywords):
+                if cached_biome != target_biome:
+                    print(f"[PARSER] ⚠️ BAD CACHE DETECTED: User wrote '{prompt}' but cache has '{cached_biome}' (should be '{target_biome}') - DELETING CACHE AND RE-PARSING")
+                    corrected = True
+                    # Delete bad cache entry from disk
+                    try:
+                        cache_key = get_cache_key(prompt)
+                        # Reload cache from disk to ensure we have latest
+                        load_cache()
+                        if cache_key in _prompt_cache:
+                            del _prompt_cache[cache_key]
+                            save_cache()
+                            print(f"[PARSER] ✅ Deleted bad cache entry '{cache_key}' from disk")
+                    except Exception as e:
+                        print(f"[PARSER] Error deleting cache: {e}")
+                    # DON'T use cached - re-parse with AI
+                    break
+        
+        # If cache was bad, re-parse with AI
+        if corrected:
+            print(f"[PARSER] Re-parsing with AI since cache had wrong biome...")
+            cached = None  # Clear cached so we don't accidentally use it
+        else:
+            # Even if cached biome looks OK, still check if it matches prompt
+            final_prompt_check = prompt.lower() if prompt else ""
+            cached_biome_final = cached.get("biome", "").lower()
+            
+            final_force_map = {
+                "gotham": ["gotham", "batman"],
+                "metropolis": ["metropolis", "superman"],
+                "tokyo": ["tokyo", "japan"],
+                "venice": ["venice", "italy"],
+                "paris": ["paris", "france"],
+                "spiderman_world": ["spider", "spiderman"]
+            }
+            
+            for target_biome, keywords in final_force_map.items():
+                if any(keyword in final_prompt_check for keyword in keywords):
+                    if cached_biome_final != target_biome:
+                        print(f"[PARSER] 🔴 CACHED RESULT WRONG: User wrote '{prompt}' (expecting '{target_biome}') but cache has '{cached_biome_final}' - FORCING CORRECTION")
+                        cached["biome"] = target_biome
+                        if target_biome == "gotham":
+                            cached["time"] = "night"
+                            cached["color_palette"] = []
+                            print(f"[PARSER] ✅ CORRECTED CACHED: biome='gotham', time='night', colors=[]")
+                        # Delete bad cache and re-parse
+                        try:
+                            cache_key = get_cache_key(prompt)
+                            # Delete from both in-memory cache and disk
+                            load_cache()  # Reload to get latest from disk
+                            if cache_key in _prompt_cache:
+                                del _prompt_cache[cache_key]
+                                save_cache()  # Save deletion to disk
+                                print(f"[PARSER] ✅ Deleted bad cache entry from disk")
+                        except Exception as e:
+                            print(f"[PARSER] Warning: Could not delete cache: {e}")
+                        # DON'T return cached - continue to re-parse below
+                        break
+                    else:
+                        # Cache is correct - use it
+                        print(f"[PARSER] ✅ Cache is correct: biome='{cached_biome_final}' matches prompt '{prompt}'")
+                        return cached
+            
+            # If we didn't find a match in force_mappings, check one more time before returning
+            if cached:
+                # Final safety check - if cached biome is "city" or "default" and prompt contains specific location, don't use cache
+                final_biome_check = cached.get("biome", "").lower()
+                if final_biome_check in ["default", "city"]:
+                    for target_biome, keywords in force_mappings.items():
+                        if any(keyword in prompt_lower for keyword in keywords):
+                            print(f"[PARSER] 🔴 FINAL SAFETY: Cached has '{final_biome_check}' for prompt '{prompt}' - NOT USING CACHE")
+                            cached = None  # Don't use cache
+                            break
+                
+                if cached:  # Only return if cache is valid
+                    return cached
+            
+            # If we get here, cache was bad or didn't exist - continue to AI parsing below
+    
     try:
+        # PRE-CHECK: If user wrote a specific location, add explicit instruction to AI
+        prompt_lower = prompt.lower() if prompt else ""
+        force_mappings = {
+            "gotham": ["gotham", "batman"],
+            "metropolis": ["metropolis", "superman"],
+            "tokyo": ["tokyo", "japan"],
+            "venice": ["venice", "italy"],
+            "paris": ["paris", "france"],
+            "spiderman_world": ["spider", "spiderman"]
+        }
+        
+        target_biome = None
+        for biome_name, keywords in force_mappings.items():
+            if any(keyword in prompt_lower for keyword in keywords):
+                target_biome = biome_name
+                print(f"[PARSER] 🎯 PRE-CHECK: User wrote '{prompt}' → forcing AI to use biome '{target_biome}'")
+                break
+        
         client = get_groq_client()
         
         completion = client.chat.completions.create(
@@ -182,14 +327,70 @@ def parse_prompt(prompt: str) -> dict:
             messages=[
                 {
                     "role": "system",
-                    "content": """You are a UNIVERSAL WORLD CREATOR. Your job is to turn ANYTHING into a 3D world.
+                    "content": """You are a UNIVERSAL WORLD CREATOR. Your job is to turn ANYTHING into a 3D world that MATCHES THE EXACT PROMPT the user wrote.
 
 CRITICAL RULES:
 1. NEVER say you can't create something - ALWAYS generate valid world parameters
-2. If the input is unclear/gibberish/random → Be CREATIVE and imaginative
-3. If input is just one word → Interpret it creatively as a world theme
-4. If input makes no sense → Create a surreal/abstract world based on the vibe
-5. ALWAYS return valid JSON, no matter what the input is
+2. Use the USER'S EXACT WORDS - if they say "gotham", use biome: "gotham" (NOT "city")
+3. Generate colors based on WHAT THE USER WROTE, not generic biomes
+4. If the input references a REAL LOCATION, CHARACTER, MOVIE, GAME, or THEME → Research and use its ACTUAL visual characteristics
+5. DON'T convert specific locations to generic biomes - "gotham" stays "gotham", not "city"
+6. If the input is unclear/gibberish/random → Be CREATIVE and imaginative
+7. ALWAYS return valid JSON, no matter what the input is
+
+IMPORTANT: 
+- User wrote: "gotham" → biome: "gotham" (NOT "city"), generate DARK colors based on Gotham's visual identity
+- User wrote: "tokyo" → biome: "tokyo" (NOT "city"), generate NEON colors based on Tokyo's visual identity  
+- User wrote: "metropolis" → biome: "metropolis" (NOT "city"), generate BRIGHT colors based on Metropolis's visual identity
+- Use the EXACT location/character name from the user's prompt as the biome name!
+
+THEME RESEARCH & CONTEXTUAL AWARENESS:
+When user mentions a location/character/theme, USE YOUR KNOWLEDGE to generate authentic settings:
+
+EXAMPLES OF THEME-AWARE GENERATION:
+- "gotham" → 
+  * Colors: Dark (#000000, #1a1a1a, #2d2d2d, #4a0e4e purple accents) - DARK and gothic
+  * Lighting: NIGHT with fog, dim ambient, dramatic shadows
+  * Buildings: Gothic architecture (tall, angular, dark stone), many street lamps
+  * Time: "night" (always dark in Gotham)
+  * NOT just "city" biome!
+
+- "metropolis" / "superman" →
+  * Colors: Bright (#FFFFFF, #87CEEB sky blue, #FFD700 gold accents) - BRIGHT and hopeful
+  * Lighting: NOON with bright, optimistic feel
+  * Buildings: Modern skyscrapers (glass, chrome, futuristic)
+  * Time: "noon" (bright and optimistic)
+
+- "spiderman" / "spider-man" →
+  * Colors: Red (#DC143C), Blue (#0000FF), White (#FFFFFF), Gray (#808080) - Classic NYC/Spiderman palette
+  * Lighting: SUNSET or NOON (NYC street level)
+  * Buildings: NYC-style skyscrapers (many, tall, varied heights)
+  * Creative objects: Webs, web-shooters
+  * Time: "sunset" or "noon"
+
+- "tokyo" →
+  * Colors: Neon (#FF00FF, #00FFFF), White, Gray, Red accents - NEON and vibrant
+  * Lighting: NIGHT with neon glow, or NOON bright
+  * Buildings: Dense urban, many small buildings, neon signs
+  * Time: "night" for neon effect
+
+- "venice" →
+  * Colors: Blue (#4169E1 water), Beige (#F5F5DC buildings), Orange (#FF8C00 sunset) - WATER and canals
+  * Lighting: SUNSET romantic, or NOON bright
+  * Buildings: Historic, colorful, along canals (creative_objects: gondolas, bridges)
+  * Time: "sunset" for romantic feel
+
+- "paris" →
+  * Colors: Cream (#FFFDD0), Blue (#4169E1), Gray (#808080) - Classic European
+  * Lighting: SUNSET (golden hour), or NOON
+  * Buildings: Classic architecture, Eiffel Tower (creative_objects)
+  * Time: "sunset" for romantic Paris
+
+KEY PRINCIPLE: When you see a location/theme name, THINK:
+1. What are the VISUAL CHARACTERISTICS? (colors, architecture, time of day)
+2. What is the MOOD/ATMOSPHERE? (dark/moody, bright/cheerful, futuristic, historic)
+3. What STRUCTURES fit the theme? (Gotham = gothic buildings, Tokyo = dense urban, Venice = canals)
+4. What TIME OF DAY matches? (Gotham = night, Metropolis = noon, Paris = sunset)
 
 UNIVERSAL INTERPRETATION EXAMPLES:
 - "asdfgh" → Create abstract/glitch world with random colors
@@ -199,6 +400,9 @@ UNIVERSAL INTERPRETATION EXAMPLES:
 - "123" → Create numerical/matrix world with grid patterns
 - "rainbow" → Create colorful world with rainbow gradients
 - "dream" → Create dreamy/surreal world with pastel colors
+- "spiderman" / "spider-man" → Create superhero city (NYC-style) with tall buildings, webs, creative_objects
+- "batman" → Create dark Gotham city with gothic buildings, street lamps
+- "superman" → Create bright Metropolis with skyscrapers, futuristic buildings
 - "" (empty) → Create random surprise world
 - "zzzzz" → Create sleepy/dreamlike world with soft colors
 - "hello" → Create friendly/welcoming world with warm colors
@@ -206,8 +410,15 @@ UNIVERSAL INTERPRETATION EXAMPLES:
 BIOME EXTRACTION STRATEGY:
 1. Look for ANY keywords that suggest a theme/environment
 2. If no clear theme → Use the TEXT ITSELF as inspiration for biome name
-3. Get creative: colors, emotions, objects, sounds can ALL become biomes
-4. Examples of creative biome naming:
+3. Get creative: colors, emotions, objects, sounds, CHARACTERS, MOVIES, GAMES can ALL become biomes
+4. Character/Media examples:
+  * "spiderman" / "spider-man" → biome: "spiderman_world" or "superhero_city"
+  * "batman" → biome: "gotham" or "dark_city"
+  * "superman" → biome: "metropolis" or "hero_city"
+  * "minecraft" → biome: "blocky"
+  * "pokemon" → biome: "pokemon_world"
+  * ANY character name → biome: "{character}_world"
+5. Examples of creative biome naming:
   * "lava world" → biome: "lava"
   * "futuristic city" → biome: "futuristic"
   * "underwater ocean" → biome: "underwater"
@@ -227,24 +438,38 @@ BIOME EXTRACTION STRATEGY:
   * "chaos" → biome: "chaotic"
   * "matrix" → biome: "matrix"
   * "retro" → biome: "retro_80s"
-  * "minecraft" → biome: "blocky"
   * "steampunk" → biome: "steampunk"
 
-COLOR PALETTE GENERATION:
-- ALWAYS include a color_palette (3-5 hex colors)
-- Base colors on the biome theme
-- Be CREATIVE with color choices
-- Examples:
-  * "lava" → ["#FF4500", "#FF6347", "#8B0000"]
-  * "rainbow" → ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF"]
-  * "pizza" → ["#FFD700", "#FF6347", "#FFFACD"]
-  * "dream" → ["#FFB6C1", "#E6E6FA", "#F0E68C"]
-  * "glitch" → ["#00FF00", "#FF00FF", "#00FFFF"]
+COLOR PALETTE GENERATION (AI-GENERATED BASED ON USER'S EXACT WORDS):
+- YOU must generate color_palette (3-5 hex colors) based on WHAT THE USER WROTE in their prompt
+- Read the user's prompt carefully - if they wrote "gotham", think about Gotham's actual visual characteristics
+- Use your knowledge to determine appropriate colors:
+  * What are the characteristic colors associated with what the user wrote?
+  * What colors appear in source material (comics, movies, real locations) for that specific name?
+  * What colors match the mood/atmosphere of that specific location/character?
+- Decision process:
+  1. Read the user's prompt: "gotham"
+  2. Think: What does "gotham" actually look like visually? (Dark, gothic, moody, always night)
+  3. Generate: Dark colors that match Gotham's actual appearance (blacks, dark grays, dark purples/blues)
+  4. Output: color_palette: ["#000000", "#1a1a1a", "#2d2d2d", "#1a1a3a"] (example - you generate based on your knowledge)
+- If user wrote "gotham" → Generate DARK, GOTHIC colors (NOT bright city colors)
+- If user wrote "tokyo" → Generate NEON, VIBRANT colors (NOT generic city colors)
+- If user wrote "metropolis" → Generate BRIGHT, OPTIMISTIC colors (NOT generic city colors)
+- For ANY prompt: Generate colors that match the VISUAL IDENTITY of what the user wrote
+- ALWAYS include 3-5 hex colors in color_palette
+- Be creative but authentic to the theme's visual identity from your knowledge
 
-TIME DETECTION:
-- Extract: "sunset", "dusk", "evening", "night", "midnight", "dawn", "noon"
-- If no time mentioned → "noon"
+TIME DETECTION (THEME-AWARE):
+- Extract explicit mentions: "sunset", "dusk", "evening", "night", "midnight", "dawn", "noon"
+- If NO time mentioned, use THEME-APPROPRIATE default based on the location/character:
+  * "gotham" → ALWAYS "night" (Gotham is always dark/moody)
+  * "metropolis" → "noon" (bright and optimistic)
+  * "tokyo" → "night" (neon city, best at night) OR "noon" (busy daytime)
+  * "venice" / "paris" → "sunset" (romantic golden hour)
+  * "spiderman" → "sunset" (NYC street level, dramatic lighting)
+  * Generic themes → "noon" (default)
 - Creative: "twilight", "golden hour", "witching hour" are valid too
+- MATCH THE MOOD: Dark themes = night, Bright themes = noon, Romantic = sunset
 
 STRUCTURE DETECTION - CONTEXT-AWARE INTELLIGENCE:
 Your job is to interpret the prompt and suggest RELEVANT structures that make sense for the world described.
@@ -253,7 +478,11 @@ CRITICAL: Support for CUSTOM OBJECTS (creative_objects):
 - If the user asks for ANY object NOT in basic structures (trees, rocks, buildings, peaks, street_lamps, enemies), 
   you MUST use "creative_objects" to create it from basic shapes (box, cylinder, sphere, cone, torus)
 - Examples: "cars", "chairs", "statues", "vehicles", "furniture", "controllers", "gadgets", "robots", "monuments", "neon signs", "flying cars"
-- If user says "with cars", "with flying cars", "with neon signs", "with statues" → CREATE them as creative_objects!
+- Character/Theme-specific objects:
+  * "spiderman" → Create webs (cylinders/tori), skyscrapers, city buildings, web-shooters (creative_objects)
+  * "batman" → Create gothic architecture, bat-signals, dark buildings
+  * "superman" → Create tall buildings, futuristic structures, hero monuments
+- If user says "with cars", "with flying cars", "with neon signs", "with statues", "with webs" → CREATE them as creative_objects!
 - Format creative_objects as an array of objects, each with: name, position {x, y, z}, parts [{shape, position, dimensions/radius, color}]
 - For generation, place creative_objects at appropriate positions on the terrain (use random positions between -100 to 100 for x/z, y=0 for ground level)
 - Generate 3-5 instances of each creative object type for variety
@@ -285,7 +514,7 @@ CRITICAL: Support for CUSTOM OBJECTS (creative_objects):
    - Format: {"tree": 25, "rock": 20, "mountain": 5, "building": 15, "street_lamp": 3}
    - If a structure doesn't fit the theme, set it to 0 or omit it
 
-4. INTERPRET USER INTENT:
+4. INTERPRET USER INTENT (THEME-AWARE):
    - "underwater world" → rocks: 30, mountain: 5, tree: 0, building: 0
    - "space station" → rocks: 20, mountain: 3, tree: 0, building: 15
    - "futuristic city" → building: 25, street_lamp: 8, rock: 10, tree: 5, mountain: 0
@@ -293,13 +522,32 @@ CRITICAL: Support for CUSTOM OBJECTS (creative_objects):
    - "jungle adventure" → tree: 50, rock: 15, mountain: 3, building: 0
    - "arctic tundra" → tree: 30 (leafless), rock: 20, mountain: 5, building: 0
    - "rainbow paradise" → tree: 30, rock: 25, mountain: 3, building: 0
+   - "gotham" → building: 30 (GOTHIC tall/dark), street_lamp: 20 (many), tree: 0, rock: 5, time: "night", colors: YOU generate DARK colors (think: what colors represent Gotham's dark, gothic atmosphere?)
+   - "metropolis" → building: 35 (MODERN skyscrapers), street_lamp: 8, tree: 10, rock: 5, time: "noon", colors: YOU generate BRIGHT colors (think: what colors represent Metropolis's bright, optimistic feel?)
+   - "tokyo" → building: 40 (DENSE urban), street_lamp: 15, tree: 3, rock: 5, time: "night", colors: YOU generate NEON colors (think: what colors represent Tokyo's neon-lit nightlife?)
+   - "venice" → building: 20 (HISTORIC colorful), street_lamp: 0, tree: 5, rock: 0, time: "sunset", colors: YOU generate WATER/ROMANTIC colors (think: water, canals, warm sunset), creative_objects: [gondolas, bridges]
+   - "paris" → building: 25 (CLASSIC architecture), street_lamp: 10, tree: 15, rock: 0, time: "sunset", colors: YOU generate ROMANTIC colors (think: elegant European, romantic atmosphere)
 
-5. EXAMPLES OF SMART INTERPRETATION:
+5. EXAMPLES OF THEME-AWARE SMART INTERPRETATION:
    - "I want to explore an underwater reef" → biome: "underwater", structure: {"rock": 40, "mountain": 8, "tree": 0, "building": 0}
-   - "Build me a cyberpunk city" → biome: "futuristic", structure: {"building": 30, "street_lamp": 10, "rock": 15, "tree": 3, "mountain": 0}
+   - "Build me a cyberpunk city" → biome: "futuristic", structure: {"building": 30, "street_lamp": 10, "rock": 15, "tree": 3, "mountain": 0}, time: "night", colors: NEON cyberpunk palette
    - "Take me to a lava planet" → biome: "lava", structure: {"rock": 45, "mountain": 12, "tree": 0, "building": 0}
    - "I want a peaceful forest" → biome: "jungle", structure: {"tree": 40, "rock": 10, "mountain": 2, "building": 0}
    - "Show me the arctic" → biome: "arctic", structure: {"tree": 30, "rock": 25, "mountain": 5, "building": 0}
+   - "spiderman world" → biome: "spiderman_world", structure: {"building": 30, "street_lamp": 10, "tree": 5, "rock": 10}, time: "sunset", colors: YOU generate (think: Spiderman's red/blue costume colors, NYC urban colors), creative_objects: [webs, web-shooters]
+   - "gotham" → biome: "gotham", structure: {"building": 30, "street_lamp": 20, "tree": 0, "rock": 5}, time: "night" (ALWAYS), colors: YOU generate DARK GOTHIC colors (think: what colors represent Gotham's dark, moody, gothic atmosphere from comics/movies?)
+   - "metropolis" → biome: "metropolis", structure: {"building": 35, "street_lamp": 8, "tree": 10, "rock": 5}, time: "noon" (BRIGHT), colors: YOU generate BRIGHT/HOPEFUL colors (think: what colors represent Metropolis's optimistic, bright, heroic atmosphere?)
+   - "tokyo" → biome: "tokyo", structure: {"building": 40, "street_lamp": 15, "tree": 3, "rock": 5}, time: "night", colors: YOU generate NEON VIBRANT colors (think: what colors represent Tokyo's neon-lit streets, vibrant nightlife?)
+   - "venice" → biome: "venice", structure: {"building": 20, "street_lamp": 0, "tree": 5, "rock": 0}, time: "sunset", colors: YOU generate WATER/ROMANTIC colors (think: canals, water, warm sunset, historic buildings), creative_objects: [gondolas, bridges, canals]
+   - "paris" → biome: "paris", structure: {"building": 25, "street_lamp": 10, "tree": 15, "rock": 0}, time: "sunset", colors: YOU generate ROMANTIC/ELEGANT colors (think: what colors represent Paris's romantic, elegant atmosphere?), creative_objects: [Eiffel Tower]
+
+CRITICAL RULE - USE USER'S EXACT WORDS:
+- If user writes "gotham" → biome: "gotham" (NOT "city"), time: "night", colors: YOU generate DARK colors based on Gotham
+- If user writes "tokyo" → biome: "tokyo" (NOT "city"), time: "night", colors: YOU generate NEON colors based on Tokyo
+- If user writes "metropolis" → biome: "metropolis" (NOT "city"), time: "noon", colors: YOU generate BRIGHT colors based on Metropolis
+- If user writes "spiderman" → biome: "spiderman_world" (NOT "city"), colors: YOU generate based on Spiderman/NYC
+- NEVER convert specific locations/characters to generic "city" - use the EXACT word the user wrote as the biome name!
+- Generate colors based on WHAT THE USER WROTE, not based on a generic "city" interpretation
 
 REMEMBER: Your structure suggestions should make the world feel authentic and relevant to what the user asked for!
 
@@ -312,9 +560,15 @@ CREATIVE FALLBACKS:
 ENEMY COUNT: 0-10 (default: 5)
 WEAPON: "double_jump", "dash", "none" (default: "dash")
 
+IMPORTANT: Look at what the user ACTUALLY wrote in their prompt and use that EXACT word as the biome name.
+- User wrote "gotham" → biome: "gotham" (NOT "city")
+- User wrote "tokyo" → biome: "tokyo" (NOT "city")  
+- User wrote "metropolis" → biome: "metropolis" (NOT "city")
+- Generate colors based on the SPECIFIC location/character the user mentioned, not generic defaults!
+
 Return ONLY this JSON structure (NO markdown, NO backticks):
 {
-  "biome": "ANY_THEME",
+  "biome": "EXACT_WORD_FROM_USER_PROMPT",  // Use what user wrote, not generic "city"
   "biome_description": "Creative description of this world",
   "time": "noon"|"sunset"|"night",
   "enemy_count": 0-10,
@@ -349,9 +603,33 @@ Return ONLY this JSON structure (NO markdown, NO backticks):
 REMEMBER: 
 - NEVER refuse to create a world. Turn ANYTHING into valid parameters!
 - If user asks for custom objects (cars, chairs, statues, vehicles, furniture, robots, etc.), use "creative_objects" to build them from shapes!
+- COLORS ARE YOUR RESPONSIBILITY: 
+  * Read what the user ACTUALLY wrote (e.g., "gotham")
+  * Think about what colors that specific thing actually looks like visually
+  * Generate colors that match that specific visual identity
+  * Don't default to generic colors - if user wrote "gotham", generate DARK colors, not bright city colors!
+- BIOME NAMING: Use the EXACT word/phrase the user wrote, don't convert to generic biomes
 """
                 },
-                {"role": "user", "content": prompt if prompt and prompt.strip() else "surprise me with a random world"}
+                {"role": "user", "content": f"""The user wrote this EXACT prompt: "{prompt if prompt and prompt.strip() else 'surprise me with a random world'}"
+
+{"⚠️ CRITICAL: User wrote a specific location/character. You MUST use the EXACT word as the biome name!" + f" User wrote '{prompt}' → biome MUST be '{target_biome}' (NOT 'city', NOT 'default')" + " Generate DARK colors for Gotham, NEON colors for Tokyo, BRIGHT colors for Metropolis." if target_biome else ""}
+
+CRITICAL INSTRUCTIONS:
+1. Use the EXACT word/phrase the user wrote as the biome name
+   - If user wrote "gotham" → biome: "gotham" (NOT "city", NOT "default")
+   - If user wrote "tokyo" → biome: "tokyo" (NOT "city", NOT "default")
+   - NEVER convert specific locations to generic "city" biome!
+   
+2. Generate colors based on WHAT THE USER WROTE
+   - If user wrote "gotham" → Generate DARK, GOTHIC colors (think: Gotham is always dark, moody, gothic) - colors like #000000, #1a1a1a, #2d2d2d
+   - If user wrote "tokyo" → Generate NEON colors (think: Tokyo's vibrant neon nightlife) - colors like #FF00FF, #00FFFF
+   - Research the visual characteristics of what the user wrote and generate appropriate colors
+   
+3. Match the visual identity of what the user mentioned
+   - Colors, lighting, structures should all match the theme's authentic visual characteristics
+
+Create a world that matches the EXACT prompt the user wrote above."""}
             ],
             temperature=0.5,  # Increased for better context understanding
             max_tokens=800  # More tokens for detailed structure suggestions
@@ -360,12 +638,18 @@ REMEMBER:
         result = completion.choices[0].message.content.strip()
         
         print(f"[PARSER DEBUG] Raw LLM response: {result}")
+        print(f"[PARSER DEBUG] User prompt was: '{prompt}'")
         
         # Clean markdown code blocks
         if "```" in result:
             result = result.split("```")[1].replace("json", "").strip()
         
         params = json.loads(result)
+        
+        print(f"[PARSER DEBUG] AI returned biome: '{params.get('biome', 'MISSING')}'")
+        print(f"[PARSER DEBUG] AI returned time: '{params.get('time', 'MISSING')}'")
+        print(f"[PARSER DEBUG] AI returned color_palette: {params.get('color_palette', [])}")
+        print(f"[PARSER DEBUG] AI returned structure: {params.get('structure', {})}")
         
         # Validate and set defaults
         params.setdefault("biome", "default")
@@ -378,19 +662,22 @@ REMEMBER:
         params.setdefault("special_effects", [])
         params.setdefault("biome_description", "")
         
-        # If color_palette is empty or missing, use default palette for known biomes
+        # If color_palette is empty, only provide fallback for abstract/theoretical biomes that AI might not know
+        # For real locations/characters, let AI generate colors based on knowledge
         if not params.get("color_palette") or len(params.get("color_palette", [])) == 0:
-            default_palettes = {
-                "futuristic": ["#1a1a2e", "#16213e", "#0f3460", "#00d4ff", "#ff00ff"],  # Dark cyberpunk
+            # Only use fallbacks for abstract/theoretical biomes where AI might not have visual references
+            # Real locations/characters should have been generated by AI based on knowledge
+            abstract_palettes = {
                 "rainbow": ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#4B0082", "#9400D3"],
-                "space": ["#000033", "#1a1a3a", "#2d2d5a", "#000080"],
-                "lava": ["#FF4500", "#FF6347", "#FF0000", "#8B0000"],
-                "solar": ["#FFD700", "#FFA500", "#FF6347", "#FF0000"],
+                # Note: Removed hardcoded palettes for gotham, metropolis, tokyo, etc. - AI should generate these
             }
             biome_lower = params["biome"].lower()
-            if biome_lower in default_palettes:
-                params["color_palette"] = default_palettes[biome_lower]
-                print(f"[PARSER] Applied default color palette for '{params['biome']}': {params['color_palette']}")
+            if biome_lower in abstract_palettes:
+                params["color_palette"] = abstract_palettes[biome_lower]
+                print(f"[PARSER] Applied abstract fallback color palette for '{params['biome']}': {params['color_palette']}")
+            else:
+                # For real locations/themes, log that AI should have provided colors
+                print(f"[PARSER] WARNING: No color_palette from AI for '{params['biome']}' - AI should have generated theme-appropriate colors")
         
         # Clamp enemy count (no biome restriction - accept ANY biome name)
         params["enemy_count"] = max(0, min(10, params["enemy_count"]))
@@ -404,10 +691,78 @@ REMEMBER:
             params["weapon"] = "dash"
         
         print(f"[PARSER] Detected biome: '{params['biome']}' with colors: {params.get('color_palette', [])}")
+        print(f"[PARSER] User prompt was: '{prompt}'")
+        
+        # AGGRESSIVE POST-PROCESSING: Force correct biome based on user prompt
+        prompt_lower = prompt.lower() if prompt else ""
+        ai_biome = params.get("biome", "").lower()
+        
+        # DIRECT MAPPING: If user wrote a specific location/character, force that biome
+        force_mappings = {
+            "gotham": ["gotham", "batman"],
+            "metropolis": ["metropolis", "superman"],
+            "tokyo": ["tokyo", "japan"],
+            "venice": ["venice", "italy"],
+            "paris": ["paris", "france"],
+            "spiderman_world": ["spider", "spiderman"]
+        }
+        
+        for target_biome, keywords in force_mappings.items():
+            if any(keyword in prompt_lower for keyword in keywords):
+                # ALWAYS force correct biome regardless of what AI returned
+                if ai_biome != target_biome:
+                    print(f"[PARSER] ⚠️ FORCING: User wrote '{prompt}' but AI returned '{ai_biome}' - FORCING biome to '{target_biome}'")
+                    params["biome"] = target_biome
+                    
+                    # Use fallback parser to get correct structure defaults
+                    fallback_result = fallback_parse(prompt)
+                    if fallback_result.get("structure") and (not params.get("structure") or len(params.get("structure", {})) == 0):
+                        params["structure"] = fallback_result.get("structure", {})
+                    
+                    # Force dark colors for Gotham (empty palette so lighting.py generates dark)
+                    if target_biome == "gotham":
+                        print(f"[PARSER] 🎨 FORCING: Clearing bright colors for Gotham, leaving empty for lighting.py to generate dark colors")
+                        params["color_palette"] = []  # Empty so lighting.py generates dark colors
+                        params["time"] = "night"  # Force night for Gotham
+                    
+                    # Force bright colors for Metropolis
+                    elif target_biome == "metropolis":
+                        params["color_palette"] = []  # Let lighting.py generate bright colors
+                        params["time"] = "noon"  # Force noon for Metropolis
+                    
+                    print(f"[PARSER] ✅ FORCED: biome='{params['biome']}', time='{params['time']}', colors={params.get('color_palette', [])}")
+                    break
+        
+        # FINAL CHECK: One more pass to ensure correct biome (in case post-processing didn't catch it)
+        final_prompt_lower = prompt.lower() if prompt else ""
+        final_biome = params.get("biome", "").lower()
+        for target_biome, keywords in force_mappings.items():
+            if any(keyword in final_prompt_lower for keyword in keywords):
+                if final_biome != target_biome:
+                    print(f"[PARSER] 🔴 FINAL FIX: Forcing biome '{target_biome}' (was '{final_biome}')")
+                    params["biome"] = target_biome
+                    if target_biome == "gotham":
+                        params["time"] = "night"
+                        params["color_palette"] = []
+                    break
         
         # Save to cache
         try:
-            save_to_cache(prompt, params)
+            # Don't cache bad results (e.g., "city" for "gotham")
+            prompt_lower = prompt.lower() if prompt else ""
+            final_biome = params.get("biome", "").lower()
+            
+            # Don't cache if AI returned generic biome for specific location
+            should_cache = True
+            if final_biome in ["default", "city"]:
+                specific_locations = ["gotham", "batman", "metropolis", "superman", "tokyo", "venice", "paris", "spider", "spiderman"]
+                if any(loc in prompt_lower for loc in specific_locations):
+                    print(f"[CACHE] ⚠️ Not caching bad result: biome '{final_biome}' for prompt '{prompt}' (should be specific)")
+                    should_cache = False
+            
+            # Try to save to cache only if it's a good result
+            if should_cache:
+                save_to_cache(prompt, params)
         except Exception as cache_error:
             print(f"[CACHE] Warning: Failed to save to cache: {cache_error}")
         
@@ -439,27 +794,68 @@ def fallback_parse(prompt: str) -> dict:
         "apocalyptic": ["apocalyptic", "post-apocalyptic", "wasteland", "ruins"],
         "crystal": ["crystal", "gem", "crystalline", "mineral"],
         "arctic": ["arctic", "snow", "winter", "cold"],
-        "city": ["city", "urban", "town", "street"]
+        "city": ["city", "urban", "town", "street"],
+        "spiderman": ["spiderman", "spider-man", "spider man", "spider", "peter parker"],
+        "batman": ["batman", "gotham", "bruce wayne"],
+        "superhero": ["superhero", "super hero", "marvel", "dc", "comics"]
     }
     
-    # Find matching biome
+    # Find matching biome - prioritize exact matches first
     biome = "default"
-    for biome_type, keywords in biome_keywords.items():
-        if any(keyword in prompt_lower for keyword in keywords):
-            biome = biome_type
+    
+    # First check for exact matches (gotham, metropolis, tokyo, etc.)
+    exact_matches = {
+        "gotham": "gotham",
+        "batman": "gotham",
+        "metropolis": "metropolis",
+        "superman": "metropolis",
+        "tokyo": "tokyo",
+        "venice": "venice",
+        "paris": "paris",
+        "spiderman": "spiderman_world",
+        "spider-man": "spiderman_world"
+    }
+    
+    for exact_term, target_biome in exact_matches.items():
+        if exact_term in prompt_lower:
+            biome = target_biome
+            print(f"[FALLBACK] Exact match: '{exact_term}' → biome: '{biome}'")
             break
     
-    # Generate default color palette based on detected biome
-    default_palettes = {
+    # If no exact match, use keyword matching
+    if biome == "default":
+        for biome_type, keywords in biome_keywords.items():
+            if any(keyword in prompt_lower for keyword in keywords):
+                biome = biome_type
+                # Special handling: convert to specific biome names
+                if biome_type == "spiderman":
+                    biome = "spiderman_world"
+                elif biome_type == "batman":
+                    biome = "gotham"
+                elif biome_type == "metropolis":
+                    biome = "metropolis"
+                elif biome_type == "tokyo":
+                    biome = "tokyo"
+                elif biome_type == "venice":
+                    biome = "venice"
+                elif biome_type == "paris":
+                    biome = "paris"
+                print(f"[FALLBACK] Keyword match: '{keywords[0]}' → biome: '{biome}'")
+                break
+    
+    # Generate color palette - REMOVED all hardcoded colors for real locations
+    # Only provide fallback for truly abstract biomes where AI might not know visual characteristics
+    abstract_palettes = {
         "rainbow": ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#4B0082", "#9400D3"],
-        "space": ["#000033", "#1a1a3a", "#2d2d5a", "#000080"],
-        "lava": ["#FF4500", "#FF6347", "#FF0000", "#8B0000"],
-        "futuristic": ["#1a1a2e", "#16213e", "#0f3460", "#00d4ff", "#ff00ff"],  # Dark cyberpunk: dark blue/black base with cyan/pink neon
-        "solar": ["#FFD700", "#FFA500", "#FF6347", "#FF0000"],
-        "sun": ["#FFD700", "#FFA500", "#FFFF00", "#FF8C00"]
+        # Note: NO hardcoded colors for gotham, metropolis, tokyo, paris, etc.
+        # AI must generate colors based on knowledge of these locations/characters
     }
     
-    color_palette = default_palettes.get(biome, [])
+    # Start with empty - AI should have generated colors for ALL real locations/themes
+    color_palette = abstract_palettes.get(biome, [])
+    
+    # If no palette, leave empty - AI should have provided colors based on theme knowledge
+    # Don't fall back to hardcoded colors for real locations
     
     # If no match and prompt exists, use first word or "mystery"
     if biome == "default" and prompt and prompt.strip():
@@ -468,8 +864,26 @@ def fallback_parse(prompt: str) -> dict:
         if words:
             # Use first word as biome inspiration (lowercase, alphanumeric only)
             first_word = re.sub(r'[^a-z0-9]', '', words[0].lower())
-            if first_word and len(first_word) > 2:
+            # Also check if prompt contains character names or themes (check ALL words, not just first)
+            prompt_lower_no_spaces = re.sub(r'[^a-z0-9]', '', prompt_lower)
+            
+            # Check for character/superhero themes (more flexible matching)
+            if "spiderman" in prompt_lower_no_spaces or "spiderman" in prompt_lower or "spider" in prompt_lower:
+                biome = "spiderman_world"
+                structure = {"building": 30, "street_lamp": 10, "tree": 5, "rock": 10, "mountain": 0}
+            elif "batman" in prompt_lower_no_spaces or "batman" in prompt_lower:
+                biome = "gotham"
+                structure = {"building": 25, "street_lamp": 15, "tree": 0, "rock": 5, "mountain": 0}
+            elif "superman" in prompt_lower or "metropolis" in prompt_lower:
+                biome = "metropolis"
+                structure = {"building": 30, "street_lamp": 8, "tree": 5, "rock": 5, "mountain": 0}
+            elif first_word and len(first_word) > 2:
+                # Use first word as biome name
                 biome = f"{first_word}_world"
+                # For "spider", override to "spiderman_world" with city structures
+                if first_word == "spider":
+                    biome = "spiderman_world"
+                    structure = {"building": 30, "street_lamp": 10, "tree": 5, "rock": 10, "mountain": 0}
                 # Generate color palette for unknown biomes
                 if not color_palette:
                     color_palette = []
@@ -538,26 +952,17 @@ def fallback_parse(prompt: str) -> dict:
     if lamp_match:
         structure["street_lamp"] = int(lamp_match.group(1))
     
-    # Get default color palette for this biome
-    default_palettes = {
+    # REMOVED hardcoded color palettes - AI should generate colors
+    # Only provide fallback for truly abstract/theoretical biomes
+    abstract_palettes = {
         "rainbow": ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#4B0082", "#9400D3"],
-        "space": ["#000033", "#1a1a3a", "#2d2d5a", "#000080"],
-        "sun": ["#000033", "#1a1a3a", "#2d2d5a"],
-        "lava": ["#FF4500", "#FF6347", "#FF0000", "#8B0000"],
-        "futuristic": ["#1a1a2e", "#16213e", "#0f3460", "#00d4ff", "#ff00ff"],  # Dark cyberpunk: dark blue/black base with cyan/pink neon
-        "solar": ["#FFD700", "#FFA500", "#FF6347", "#FF0000"],
-        "sun_world": ["#FFD700", "#FFA500", "#FFFF00", "#FF8C00"],
-        "make_world": ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF"]  # Rainbow for make_world
+        # Note: No hardcoded colors for gotham, metropolis, tokyo, etc. - AI must generate these
     }
     
-    # Use palette if biome matches, otherwise empty (will use hash-based colors)
-    color_palette = default_palettes.get(biome, [])
+    # Use palette only for abstract biomes, otherwise empty (AI should have provided colors)
+    color_palette = abstract_palettes.get(biome, [])
     
-    # Special case: if biome ends with "_world" and we have a matching base biome, use its palette
-    if not color_palette and biome.endswith("_world"):
-        base_biome = biome.replace("_world", "")
-        if base_biome in default_palettes:
-            color_palette = default_palettes[base_biome]
+    # Don't provide fallback colors for real locations - leave empty so AI generates them
     
     # Add context-aware structure defaults if structure dict is empty or incomplete
     biome_structure_defaults = {
@@ -568,6 +973,15 @@ def fallback_parse(prompt: str) -> dict:
         "futuristic": {"building": 25, "street_lamp": 8, "rock": 10, "tree": 5, "mountain": 0},
         "cyberpunk": {"building": 30, "street_lamp": 10, "rock": 15, "tree": 3, "mountain": 0},
         "city": {"building": 20, "street_lamp": 5, "rock": 8, "tree": 8, "mountain": 0},
+        "spiderman": {"building": 30, "street_lamp": 10, "rock": 10, "tree": 5, "mountain": 0},
+        "spiderman_world": {"building": 30, "street_lamp": 10, "rock": 10, "tree": 5, "mountain": 0},
+        "spiderman": {"building": 30, "street_lamp": 10, "rock": 10, "tree": 5, "mountain": 0},
+        "gotham": {"building": 30, "street_lamp": 20, "rock": 5, "tree": 0, "mountain": 0},
+        "batman": {"building": 30, "street_lamp": 20, "rock": 5, "tree": 0, "mountain": 0},
+        "metropolis": {"building": 35, "street_lamp": 8, "rock": 5, "tree": 10, "mountain": 0},
+        "tokyo": {"building": 40, "street_lamp": 15, "rock": 5, "tree": 3, "mountain": 0},
+        "venice": {"building": 20, "street_lamp": 0, "rock": 0, "tree": 5, "mountain": 0},
+        "paris": {"building": 25, "street_lamp": 10, "rock": 0, "tree": 15, "mountain": 0},
         "lava": {"rock": 45, "mountain": 12, "tree": 0, "building": 0, "street_lamp": 0},
         "volcanic": {"rock": 45, "mountain": 12, "tree": 0, "building": 0, "street_lamp": 0},
         "jungle": {"tree": 50, "rock": 15, "mountain": 3, "building": 0, "street_lamp": 0},

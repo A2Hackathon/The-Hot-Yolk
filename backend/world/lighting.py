@@ -85,6 +85,72 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
         config["ambient"]["intensity"] = 0.85  # Bright ambient light
         config["directional"]["intensity"] = 0.85  # Bright directional light
     
+    # Theme-specific lighting modifications (Gotham, Metropolis, etc.)
+    is_gotham = biome.lower() in ["gotham", "batman"]
+    if is_gotham:
+        # Gotham is ALWAYS dark and moody
+        config["background"] = "#0a0a0a"  # Almost black
+        config["ambient"]["color"] = "#1a1a1a"  # Dark gray
+        config["ambient"]["intensity"] = 0.2  # Very dim
+        config["directional"]["color"] = "#2a2a3a"  # Dark blue-gray
+        config["directional"]["intensity"] = 0.3  # Dim directional
+        config["directional"]["position"] = {"x": 50, "y": 80, "z": 50}
+        config["fog"] = {
+            "color": "#1a1a2a",  # Dark fog
+            "near": 30,
+            "far": 150
+        }
+        # Force night time for Gotham
+        time = "night"
+    
+    is_metropolis = biome.lower() in ["metropolis", "superman"]
+    if is_metropolis:
+        # Metropolis is bright and optimistic
+        config["background"] = "#E8F4F8"  # Bright sky blue
+        config["ambient"]["color"] = "#FFFFFF"  # Pure white
+        config["ambient"]["intensity"] = 0.9  # Very bright
+        config["directional"]["color"] = "#FFD700"  # Golden sunlight
+        config["directional"]["intensity"] = 1.0  # Bright directional
+        config["directional"]["position"] = {"x": 50, "y": 100, "z": 50}
+        config["fog"] = None  # Clear skies
+        # Force noon for Metropolis
+        time = "noon"
+    
+    is_tokyo = biome.lower() in ["tokyo", "japan", "tokyo_world"]
+    if is_tokyo and time == "night":
+        # Tokyo at night: neon glow
+        config["background"] = "#1a0a2e"  # Dark purple
+        config["ambient"]["color"] = "#2d1b3d"  # Purple ambient
+        config["ambient"]["intensity"] = 0.5
+        config["directional"]["color"] = "#FF00FF"  # Magenta neon
+        config["directional"]["intensity"] = 0.7
+        config["fog"] = {
+            "color": "#1a0a2e",
+            "near": 40,
+            "far": 180
+        }
+    
+    is_venice = biome.lower() in ["venice", "italy", "venice_world"]
+    if is_venice:
+        # Venice: romantic golden hour
+        config["background"] = "#FFB347"  # Warm sunset
+        config["ambient"]["color"] = "#FFD700"  # Golden
+        config["ambient"]["intensity"] = 0.6
+        config["directional"]["color"] = "#FF8C00"  # Orange sunset
+        config["directional"]["intensity"] = 0.8
+        config["directional"]["position"] = {"x": 100, "y": 20, "z": 50}
+        config["fog"] = None
+    
+    is_paris = biome.lower() in ["paris", "france", "paris_world"]
+    if is_paris:
+        # Paris: romantic sunset
+        config["background"] = "#FFB6C1"  # Soft pink
+        config["ambient"]["color"] = "#FFE4E1"  # Misty rose
+        config["ambient"]["intensity"] = 0.7
+        config["directional"]["color"] = "#FFD700"  # Golden hour
+        config["directional"]["intensity"] = 0.8
+        config["fog"] = None
+    
     # Futuristic/Cyberpunk biome modifications
     is_futuristic = biome.lower() in ["futuristic", "cyberpunk", "neon", "tech"]
     if is_futuristic:
