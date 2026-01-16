@@ -1,5 +1,6 @@
 ﻿import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import GameSettingsPanel from './GameSettingsPanel';
 import { RealtimeVision } from '@overshoot/sdk';
@@ -51,6 +52,7 @@ const VoiceWorldBuilder = () => {
   const [imagePreview, setImagePreview] = useState(null);
   const [scanMode, setScanMode] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const videoRef = useRef(null);
   const overshootVisionRef = useRef(null);
   const [streamingActive, setStreamingActive] = useState(false);
@@ -4652,6 +4654,201 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
     sendChatMessageForModify(commandText);
   };
 
+  // Export function for glTF/GLB
+  const exportWorldAsGLTF = (format = 'glb') => {
+    if (!sceneRef.current) {
+      alert('No world to export!');
+      return;
+    }
+
+    const exporter = new GLTFExporter();
+    
+    // Collect all exportable objects (exclude sky, lights, camera, player, enemies)
+    const exportableObjects = [];
+    
+    // Add terrain
+    if (terrainMeshRef.current) {
+      exportableObjects.push(terrainMeshRef.current);
+    }
+    
+    // Add all structures (trees, rocks, peaks, buildings, street lamps, creative objects)
+    structuresRef.current.forEach(struct => {
+      if (struct && struct.parent === sceneRef.current) {
+        exportableObjects.push(struct);
+      }
+    });
+    
+    if (exportableObjects.length === 0) {
+      alert('No objects to export!');
+      return;
+    }
+    
+    // Create a temporary scene with only exportable objects
+    const exportScene = new THREE.Scene();
+    exportableObjects.forEach(obj => {
+      const cloned = obj.clone(true); // Deep clone to preserve geometry/materials
+      exportScene.add(cloned);
+    });
+    
+    // Export options
+    const options = {
+      binary: format === 'glb', // true for GLB, false for glTF
+      trs: false, // Use matrix instead of position/rotation/scale
+      onlyVisible: true,
+      includeCustomExtensions: false
+    };
+    
+    exporter.parse(
+      exportScene,
+      (result) => {
+        // Download the file
+        const output = format === 'glb' ? result : JSON.stringify(result, null, 2);
+        const blob = format === 'glb' 
+          ? new Blob([result], { type: 'application/octet-stream' })
+          : new Blob([output], { type: 'application/json' });
+        
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `world_export.${format}`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+        
+        console.log(`✅ World exported as ${format.toUpperCase()}`);
+      },
+      (error) => {
+        console.error('Export error:', error);
+        alert('Failed to export world: ' + error.message);
+      }
+    );
+  };
+
+  // Export metadata JSON for procedural regeneration
+  const exportWorldMetadata = () => {
+    if (!currentWorld || !heightmapRef.current || !colorMapRef.current) {
+      alert('No world data to export!');
+      return;
+    }
+
+    const metadata = {
+      version: '1.0.0',
+      exportDate: new Date().toISOString(),
+      world: {
+        heightmap_raw: heightmapRef.current,
+        colour_map_array: colorMapRef.current,
+        terrain_size: 256,
+        biome: currentWorld?.world?.biome || currentWorld?.world?.biome_name || 'unknown'
+      },
+      structures: {
+        trees: [],
+        rocks: [],
+        peaks: [],
+        buildings: [],
+        street_lamps: [],
+        creative_objects: []
+      },
+      player: playerRef.current ? {
+        position: {
+          x: playerRef.current.position.x,
+          y: playerRef.current.position.y,
+          z: playerRef.current.position.z
+        }
+      } : null
+    };
+
+    // Extract structure data from scene objects
+    structuresRef.current.forEach(struct => {
+      if (!struct.userData) return;
+      
+      const structType = struct.userData.structureType;
+      const position = struct.position;
+      const scale = struct.scale.x; // Assuming uniform scale
+      
+      const structData = {
+        position: {
+          x: position.x,
+          y: position.y,
+          z: position.z
+        },
+        scale: scale || 1.0
+      };
+
+      switch (structType) {
+        case 'tree':
+          structData.leafless = struct.userData.leafless || false;
+          metadata.structures.trees.push(structData);
+          break;
+        case 'rock':
+          metadata.structures.rocks.push(structData);
+          break;
+        case 'peak':
+          metadata.structures.peaks.push(structData);
+          break;
+        case 'building':
+          // Try to extract building type and dimensions if available
+          if (struct.userData.buildingType) {
+            structData.type = struct.userData.buildingType;
+          }
+          if (struct.userData.buildingWidth) {
+            structData.width = struct.userData.buildingWidth;
+            structData.depth = struct.userData.buildingDepth;
+            structData.height = struct.userData.buildingHeight;
+          }
+          metadata.structures.buildings.push(structData);
+          break;
+        case 'street_lamp':
+          metadata.structures.street_lamps.push(structData);
+          break;
+        case 'creative_object':
+          // Use the originalData stored in userData for full reconstruction
+          if (struct.userData.originalData) {
+            // Include the full original data including parts array
+            metadata.structures.creative_objects.push({
+              ...struct.userData.originalData,
+              position: {
+                x: position.x,
+                y: position.y,
+                z: position.z
+              }
+            });
+          } else {
+            // Fallback if originalData is missing
+            metadata.structures.creative_objects.push(structData);
+          }
+          break;
+      }
+    });
+
+    // Download metadata JSON
+    const blob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'world_metadata.json';
+    link.click();
+    URL.revokeObjectURL(link.href);
+    
+    console.log('✅ World metadata exported');
+  };
+
+  // Combined export function
+  const exportWorld = async (format = 'all') => {
+    if (!sceneRef.current) {
+      alert('No world to export!');
+      return;
+    }
+
+    if (format === 'all' || format === 'glb') {
+      exportWorldAsGLTF('glb');
+    }
+    
+    if (format === 'all' || format === 'gltf') {
+      // Delay to avoid download conflicts
+      setTimeout(() => exportWorldAsGLTF('gltf'), 500);
+    }
+    
+    if (format === 'all' || format === 'metadata') {
+      setTimeout(() => exportWorldMetadata(), 1000);
+    }
+  };
 
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative', background: '#000' }}>
@@ -4690,8 +4887,8 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
             }}
             style={{
               position: 'absolute',
-              top: 90,
-              right: 40,
+              top: '90px',
+              right: '27px',
               zIndex: 10,
               width: '56px',
               height: '56px',
@@ -4725,8 +4922,8 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
             onClick={() => setShowChatHistory(!showChatHistory)}
             style={{
               position: 'absolute',
-              top: 90,
-              right: 120,
+              top: '90px',
+              right: '135px',
               zIndex: 10,
               width: '56px',
               height: '56px',
@@ -4755,6 +4952,136 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
           >
             C
           </button>
+
+          {/* Export World Button */}
+          <div style={{
+            position: 'absolute',
+            top: '90px',
+            right: '200px',
+            zIndex: 10
+          }}>
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(76, 175, 80, 0.9)',
+                color: '#fff',
+                border: '2px solid rgba(129, 199, 132, 0.9)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontFamily: 'monospace',
+                fontSize: '22px',
+                fontWeight: 'bold',
+                transition: 'all 0.3s ease',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(96, 185, 100, 0.95)';
+                e.currentTarget.style.transform = 'scale(1.05)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(76, 175, 80, 0.9)';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              📥
+            </button>
+            
+            {showExportMenu && (
+              <div style={{
+                position: 'absolute',
+                top: '70px',
+                right: '0',
+                backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                border: '2px solid rgba(76, 175, 80, 0.9)',
+                borderRadius: '8px',
+                padding: '10px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                minWidth: '200px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                zIndex: 11
+              }}>
+                <button 
+                  onClick={() => { exportWorld('glb'); setShowExportMenu(false); }}
+                  style={{
+                    padding: '10px 15px',
+                    backgroundColor: '#4CAF50',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '5px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    transition: 'background-color 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#45a049'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#4CAF50'}
+                >
+                  Export as GLB
+                </button>
+                <button 
+                  onClick={() => { exportWorld('gltf'); setShowExportMenu(false); }}
+                  style={{
+                    padding: '10px 15px',
+                    backgroundColor: '#4CAF50',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '5px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    transition: 'background-color 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#45a049'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#4CAF50'}
+                >
+                  Export as glTF
+                </button>
+                <button 
+                  onClick={() => { exportWorld('metadata'); setShowExportMenu(false); }}
+                  style={{
+                    padding: '10px 15px',
+                    backgroundColor: '#4CAF50',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '5px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    transition: 'background-color 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#45a049'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#4CAF50'}
+                >
+                  Export Metadata JSON
+                </button>
+                <button 
+                  onClick={() => { exportWorld('all'); setShowExportMenu(false); }}
+                  style={{
+                    padding: '10px 15px',
+                    backgroundColor: '#2196F3',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '5px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    transition: 'background-color 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1976D2'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2196F3'}
+                >
+                  Export All
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Chat History Side Panel */}
           {showChatHistory && (
@@ -5320,7 +5647,7 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
           </div>
 
           <div style={{
-            position: 'fixed', top: 80, right: 80, zIndex: 20
+            position: 'fixed', top: '140px', right: '80px', zIndex: 20
           }}>
             <button
               onClick={() => startVoiceCapture(true)}
@@ -5343,7 +5670,7 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
               onMouseEnter={e => e.currentTarget.style.opacity = '1'}
               onMouseLeave={e => e.currentTarget.style.opacity = '0.9'}
             >
-              {isListening ? '🎤' : '🎮'}
+              {isListening ? '🎤' : '🎤'}
             </button>
             <style>{`
               @keyframes pulse {
@@ -5504,7 +5831,7 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
                   <path d="M12 12.5c1.38 0 2.5-1.12 2.5-2.5S13.38 7.5 12 7.5 9.5 8.62 9.5 10s1.12 2.5 2.5 2.5zm0-7c2.49 0 4.5 2.01 4.5 4.5S14.49 14.5 12 14.5 7.5 12.49 7.5 10 9.51 5.5 12 5.5zM12 19c-7 0-11-4.03-11-9V6h2v4c0 4.97 3.51 7 9 7s9-2.03 9-7V6h2v4c0 4.97-4 9-11 9z"/>
                 </svg>
                 {scanMode ? (streamingActive ? '🛑 Stop Streaming' : 'Cancel Scan') : '📹 Start Video Streaming'}
-              </button>
+          </button>
             </div>
           </div>
         </div>

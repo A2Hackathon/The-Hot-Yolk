@@ -55,7 +55,7 @@ const GameSettingsPanel = ({ onSettingsChange, initialSettings }) => {
   return (
     <div style={{
       position: 'fixed',
-      top: '20px',
+      top: '40px',
       right: '80px',
       zIndex: 200,
       pointerEvents: 'none',
