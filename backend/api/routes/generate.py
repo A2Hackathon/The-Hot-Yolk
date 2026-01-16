@@ -533,28 +533,90 @@ async def generate_world(prompt: Dict) -> Dict:
         enemy_count = parsed_params.get("enemy_count", 5)
         weapon = parsed_params.get("weapon", "both")
         structure_counts = parsed_params.get("structure", {})
+        creative_objects = parsed_params.get("creative_objects", [])  # Get custom objects from AI
+        color_palette = parsed_params.get("color_palette", [])
+        special_effects = parsed_params.get("special_effects", [])
+        biome_description = parsed_params.get("biome_description", "")
+        
+        if creative_objects:
+            print(f"[Backend] AI suggested {len(creative_objects)} creative objects: {[obj.get('name', 'unknown') for obj in creative_objects]}")
 
-        print(f"[Backend] Final biome: '{biome}' | time: '{time_of_day}'")
+        print(f"[Backend] Final biome: '{biome}' | time: '{time_of_day}' | colors: {color_palette}")
+        if biome_description:
+            print(f"[Backend] Biome description: {biome_description}")
 
         # --- Generate terrain ---
-        terrain_data = generate_heightmap(biome, structure_counts)
+        # Pass color_palette to terrain generator for dynamic biome support
+        terrain_data = generate_heightmap(biome, structure_counts, color_palette=color_palette)
         heightmap_raw = terrain_data["heightmap_raw"]
         placement_mask = terrain_data["placement_mask"]
 
         # --- Generate 3D structures ---
-        # Default tree count: 25 for arctic, 10 for others
-        base_tree_count = 25 if biome.lower() in ["arctic", "winter", "icy"] else 10
-        tree_count = structure_counts.get("tree", base_tree_count)
-
-        base_rock_count = 15 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
-        rock_count = structure_counts.get("rock", base_rock_count)
-        mountain_count = structure_counts.get("mountain", 3 if biome.lower() in ["arctic", "winter", "icy"] else 0)
+        # Use AI-suggested structure counts if provided, otherwise use intelligent defaults
+        # The AI parser now suggests context-aware counts, so prioritize those
         
-        # Building count for city biome
-        building_count = structure_counts.get("building", 15 if biome.lower() == "city" else 0)
+        # Initialize all count variables to None first
+        tree_count = None
+        rock_count = None
+        mountain_count = None
+        building_count = None
+        street_lamp_count = None
         
-        # Street lamp count for city biome (limited to 3 to avoid texture unit limits)
-        street_lamp_count = structure_counts.get("street_lamp", 3 if biome.lower() == "city" else 0)
+        # Ensure structure_counts is a dict (default to empty if None or falsy)
+        if not structure_counts:
+            structure_counts = {}
+        
+        # Extract AI-suggested counts if structure_counts has values
+        if structure_counts:
+            tree_count = structure_counts.get("tree", None)
+            rock_count = structure_counts.get("rock", None)
+            mountain_count = structure_counts.get("mountain", None)
+            building_count = structure_counts.get("building", None)
+            street_lamp_count = structure_counts.get("street_lamp", None)
+            
+            print(f"[Backend] Using AI-suggested structure counts: trees={tree_count}, rocks={rock_count}, mountains={mountain_count}, buildings={building_count}, street_lamps={street_lamp_count}")
+        
+        # Apply intelligent defaults only if AI didn't suggest a count
+        if tree_count is None:
+            base_tree_count = 25 if biome.lower() in ["arctic", "winter", "icy"] else 10
+            tree_count = base_tree_count
+        if rock_count is None:
+            base_rock_count = 15 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
+            rock_count = base_rock_count
+        if mountain_count is None:
+            mountain_count = 3 if biome.lower() in ["arctic", "winter", "icy"] else 0
+        if building_count is None:
+            # Generate buildings for city and futuristic/cyberpunk biomes
+            if biome.lower() == "city":
+                building_count = 15
+            elif biome.lower() in ["futuristic", "cyberpunk", "neon"]:
+                building_count = 25  # More buildings for futuristic cities
+            else:
+                building_count = 0
+        if street_lamp_count is None:
+            # Limited to avoid texture unit limits
+            # Generate street lamps for city and futuristic/cyberpunk biomes
+            if biome.lower() == "city":
+                street_lamp_count = 3
+            elif biome.lower() in ["futuristic", "cyberpunk", "neon"]:
+                street_lamp_count = 8  # More street lamps for futuristic cities
+            else:
+                street_lamp_count = 0
+        
+        # Ensure non-negative counts
+        tree_count = max(0, int(tree_count)) if tree_count is not None else 0
+        rock_count = max(0, int(rock_count)) if rock_count is not None else 0
+        mountain_count = max(0, int(mountain_count)) if mountain_count is not None else 0
+        building_count = max(0, int(building_count)) if building_count is not None else 0
+        street_lamp_count = max(0, int(street_lamp_count)) if street_lamp_count is not None else 0
+        
+        print(f"[Backend] Final structure counts: trees={tree_count}, rocks={rock_count}, mountains={mountain_count}, buildings={building_count}, street_lamps={street_lamp_count}")
+        if creative_objects:
+            print(f"[Backend] Creative objects from AI: {len(creative_objects)} objects")
+            for obj in creative_objects:
+                print(f"  - {obj.get('name', 'unknown')} at ({obj.get('position', {}).get('x', 0):.1f}, {obj.get('position', {}).get('z', 0):.1f})")
+        else:
+            print(f"[Backend] No creative objects from AI parser")
 
         terrain_size = 256
 
@@ -573,7 +635,8 @@ async def generate_world(prompt: Dict) -> Dict:
             "rocks": generate_rocks(heightmap_raw, biome, rock_count, terrain_size),
             "peaks": peaks,
             "buildings": generate_buildings(heightmap_raw, placement_mask, biome, building_count, terrain_size),
-            "street_lamps": generate_street_lamps(heightmap_raw, placement_mask, biome, street_lamp_count, terrain_size)
+            "street_lamps": generate_street_lamps(heightmap_raw, placement_mask, biome, street_lamp_count, terrain_size),
+            "creative_objects": creative_objects  # Include custom objects from AI parser
         }
 
         # --- Determine player spawn on a walkable point ---
@@ -841,7 +904,9 @@ async def scan_world(request: ScanRequest) -> Dict:
         print(f"[SCAN] World params: biome={biome}, time={time_of_day}, structures={structure_counts}")
         
         # Use existing world generation pipeline
-        terrain_data = generate_heightmap(biome, structure_counts)
+        # Support dynamic biomes from scan data
+        scan_color_palette = scan_data.get("colors", [])
+        terrain_data = generate_heightmap(biome, structure_counts, color_palette=scan_color_palette)
         heightmap_raw = terrain_data["heightmap_raw"]
         placement_mask = terrain_data["placement_mask"]
         

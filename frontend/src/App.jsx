@@ -3625,9 +3625,18 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
           
           console.log(`[SKYSCRAPERS] Debug - biomeName: ${biomeName}, data.world?.biome: ${data?.world?.biome}, currentBiomeName: ${currentBiomeName}`);
           
-          if (currentBiomeName && currentBiomeName.toLowerCase() === 'city') {
-            console.log('[SKYSCRAPERS] Creating 3 random skyscrapers for city biome');
-            const skyscraperCount = 3;
+          // Check if biome is city or futuristic/cyberpunk (both should have skyscrapers)
+          const isUrbanBiome = currentBiomeName && (
+            currentBiomeName.toLowerCase() === 'city' ||
+            currentBiomeName.toLowerCase().includes('futuristic') ||
+            currentBiomeName.toLowerCase().includes('cyberpunk') ||
+            currentBiomeName.toLowerCase().includes('neon')
+          );
+          
+          if (isUrbanBiome) {
+            const biomeType = (currentBiomeName.toLowerCase().includes('futuristic') || 
+                             currentBiomeName.toLowerCase().includes('cyberpunk')) ? 'futuristic' : 'city';
+            const skyscraperCount = biomeType === 'futuristic' ? 5 : 3; // More skyscrapers for futuristic
             const terrainSize = 256;
             const minDistance = 30; // Minimum distance from grid buildings and other skyscrapers
             
@@ -3721,18 +3730,24 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
             }
             console.log(`[SKYSCRAPERS] Total skyscrapers created: ${structuresRef.current.filter(s => s.userData?.buildingType === 'skyscraper').length}`);
           } else {
-            console.log(`[SKYSCRAPERS] Biome is not city (biomeName: ${biomeName}, data.world?.biome_name: ${data.world?.biome_name}), skipping skyscraper creation`);
+            console.log(`[SKYSCRAPERS] Biome is not city/futuristic (biomeName: ${biomeName}, data.world?.biome: ${data?.world?.biome}), skipping skyscraper creation`);
           }
 
         }
       }
 
-      // Determine spawn location - on top of building if city biome
+      // Determine spawn location - on top of building if city/futuristic biome
       let spawn = data.spawn_point || { x: 0, z: 0 };
       let spawnY = null;
       
       const spawnBiomeName = data.world?.biome || data.world?.biome_name;
-      if (spawnBiomeName && spawnBiomeName.toLowerCase() === 'city') {
+      const isUrbanSpawnBiome = spawnBiomeName && (
+        spawnBiomeName.toLowerCase() === 'city' ||
+        spawnBiomeName.toLowerCase().includes('futuristic') ||
+        spawnBiomeName.toLowerCase().includes('cyberpunk') ||
+        spawnBiomeName.toLowerCase().includes('neon')
+      );
+      if (isUrbanSpawnBiome) {
         // Find a building to spawn on top of
         const buildings = structuresRef.current.filter(
           s => s.userData?.structureType === 'building'
@@ -4432,8 +4447,29 @@ Detect objects: trees, rocks, buildings, mountains, street lamps.`,
       const timeOfDay = currentWorld?.world?.time;
       const isCityNoon = biomeName?.toLowerCase() === 'city' && 
                         (timeOfDay === 'noon' || hsl.l > 0.6);
+      const isFuturistic = biomeName && (biomeName.toLowerCase().includes('futuristic') || 
+                                         biomeName.toLowerCase().includes('cyberpunk') || 
+                                         biomeName.toLowerCase().includes('neon'));
       
-      if (isCityNoon) {
+      if (isFuturistic) {
+        // FUTURISTIC/CYBERPUNK - Dark cyberpunk aesthetic
+        if (isNight || timeOfDay === 'night') {
+          // Night: Very dark with neon cyan accents
+          horizonColor = new THREE.Color(0x1a1a3a); // Dark blue-grey horizon
+          middleColor = new THREE.Color(0x0a0a1a); // Almost black middle
+          topColor = new THREE.Color(0x000011); // Pure black top
+        } else if (timeOfDay === 'sunset') {
+          // Sunset: Dark purple with magenta neon
+          horizonColor = new THREE.Color(0x2d1b3d); // Dark purple horizon
+          middleColor = new THREE.Color(0x1a0a2e); // Darker purple middle
+          topColor = new THREE.Color(0x0a0515); // Very dark purple top
+        } else {
+          // Day: Dark blue-grey with cyan highlights
+          horizonColor = new THREE.Color(0x1a1a2e); // Dark blue-grey horizon
+          middleColor = new THREE.Color(0x0f1419); // Darker middle
+          topColor = new THREE.Color(0x050a0f); // Almost black top
+        }
+      } else if (isCityNoon) {
         // CITY NOON - #D7AFF5 transitioning to pastel pale butter cream yellow
         topColor = new THREE.Color(0xD7AFF5); // Purple-pink at top
         middleColor = new THREE.Color(0xD7AFF5).lerp(new THREE.Color(0xFFF8DC), 0.5); // Blend between purple and butter cream

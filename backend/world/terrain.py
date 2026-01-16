@@ -4,6 +4,9 @@ from PIL import Image
 import random
 import os
 import uuid
+import json
+import hashlib
+import colorsys
 
 # Biome settings 
 BIOME_SETTINGS = {
@@ -40,13 +43,76 @@ PLACEMENT_RULES = {
 }
 
 # ---------------- Helpers ----------------
-def get_biome_settings(biome_name, structure_count_dict=None):
-    settings = BIOME_SETTINGS.get(biome_name, BIOME_SETTINGS["default"])
+def get_biome_settings(biome_name, structure_count_dict=None, color_palette=None):
+    """
+    Get biome settings with dynamic support for ANY biome.
+    Falls back to default if biome not found, and can use custom color palette.
+    """
+    # Safety: ensure biome is a string
+    if not biome_name or not isinstance(biome_name, str):
+        biome_name = "default"
+    
+    biome_lower = biome_name.lower()
+    
+    # If we have a custom color palette, use it
+    if color_palette and len(color_palette) > 0:
+        try:
+            # Convert hex to RGB
+            rgb_colors = []
+            for hex_color in color_palette:
+                hex_color = hex_color.lstrip('#')
+                rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                rgb_colors.append(rgb)
+            
+            # Use first color as ground color
+            ground_rgb = rgb_colors[0]
+            height_multiplier = 1.0
+            
+            if structure_count_dict is None:
+                structure_count_dict = {}
+            
+            print(f"[TERRAIN] Using custom color palette for '{biome_name}': {color_palette}")
+            return height_multiplier, ground_rgb, structure_count_dict
+        except Exception as e:
+            print(f"[TERRAIN] Error parsing color palette: {e}, using defaults")
+    
+    # Check predefined biomes
+    settings = BIOME_SETTINGS.get(biome_lower, BIOME_SETTINGS["default"])
     height_multiplier = settings["height_multiplier"]
-    ground_rgb = GROUND_COLORS[settings["ground_color"]]
+    ground_color_key = settings["ground_color"]
+    
+    # If biome not in predefined, generate dynamic ground color
+    if biome_lower not in BIOME_SETTINGS:
+        print(f"[TERRAIN] Unknown biome '{biome_name}', generating dynamic color...")
+        ground_rgb = _generate_dynamic_biome_color(biome_name)
+    else:
+        ground_rgb = GROUND_COLORS.get(ground_color_key, GROUND_COLORS["grass"])
+    
     if structure_count_dict is None:
         structure_count_dict = {}
     return height_multiplier, ground_rgb, structure_count_dict
+
+
+def _generate_dynamic_biome_color(biome_name: str) -> tuple:
+    """
+    Generate a deterministic color based on biome name hash.
+    Ensures same biome name always gets same color.
+    """
+    # Use hash for consistent color generation
+    seed = int(hashlib.md5(biome_name.encode()).hexdigest(), 16) % 10000
+    random.seed(seed)
+    
+    # Generate a coherent color based on biome name
+    # Use HSV to create pleasing colors
+    base_hue = (seed % 360) / 360.0
+    saturation = 0.5 + (seed % 50) / 100.0  # 0.5-1.0
+    value = 0.4 + (seed % 40) / 100.0  # 0.4-0.8
+    
+    rgb = colorsys.hsv_to_rgb(base_hue, saturation, value)
+    color = tuple(int(c * 255) for c in rgb)
+    
+    print(f"[TERRAIN] Generated color for '{biome_name}': RGB{color}")
+    return color
 
 def get_colour(ground_rgb):
     r, g, b = ground_rgb
@@ -85,8 +151,20 @@ def generate_placement_mask(heightmap, biome_name):
     return mask
 
 # ---------------- Core Generation ----------------
-def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, height=256, scale=0.3):
-    height_multiplier, ground_rgb, structure_count_dict = get_biome_settings(biome_name, structure_count_dict)
+def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, height=256, scale=0.3, color_palette=None):
+    """
+    Generate heightmap with dynamic biome support.
+    UNIVERSAL: Works for ANY biome type, NEVER fails.
+    
+    Args:
+        biome_name: Any biome name
+        structure_count_dict: Structure counts
+        width: Heightmap width
+        height: Heightmap height
+        scale: Terrain scale
+        color_palette: Optional list of hex colors for custom biomes
+    """
+    height_multiplier, ground_rgb, structure_count_dict = get_biome_settings(biome_name, structure_count_dict, color_palette)
     heightmap = np.zeros((height, width))
 
     # Base Simplex noise
@@ -165,6 +243,21 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
 
     # Colour map
     colour_map_array = np.zeros((height, width, 3), dtype=np.uint8)
+    
+    # If we have a custom color palette, prepare RGB colors
+    palette_rgb = None
+    if color_palette and len(color_palette) > 0:
+        try:
+            palette_rgb = []
+            for hex_color in color_palette:
+                hex_color = hex_color.lstrip('#')
+                rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                palette_rgb.append(rgb)
+            print(f"[TERRAIN] ✅ Using color palette for terrain: {len(palette_rgb)} colors - {color_palette}")
+        except Exception as e:
+            print(f"[TERRAIN] Error parsing color palette: {e}, using ground_rgb")
+            palette_rgb = None
+    
     for y in range(height):
         for x in range(width):
             if river_mask[y, x]:
@@ -177,6 +270,34 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
                 )
             elif mountain_mask[y, x]:
                 colour_map_array[y, x] = (120, 120, 120)
+            elif palette_rgb and len(palette_rgb) > 0:
+                # Use palette colors (even if just 1 color, use it)
+                if len(palette_rgb) == 1:
+                    # Single color - use it directly
+                    final_color = np.array(palette_rgb[0])
+                    variation = np.random.randint(-3, 3, 3)
+                    final_color = np.clip(final_color.astype(int) + variation, 0, 255).astype(np.uint8)
+                    colour_map_array[y, x] = tuple(final_color)
+                else:
+                    # Multiple colors - interpolate between palette colors based on height
+                    h = heightmap[y, x] / max(0.001, heightmap.max())
+                    h = max(0, min(1, h))  # Clamp to [0, 1]
+                    
+                    # Map height to color index
+                    color_idx = h * (len(palette_rgb) - 1)
+                    idx1 = int(color_idx)
+                    idx2 = min(idx1 + 1, len(palette_rgb) - 1)
+                    t = color_idx - idx1
+                    
+                    # Interpolate between two colors
+                    c1 = np.array(palette_rgb[idx1])
+                    c2 = np.array(palette_rgb[idx2])
+                    final_color = (c1 * (1 - t) + c2 * t).astype(np.uint8)
+                    
+                    # Add slight variation
+                    variation = np.random.randint(-5, 5, 3)
+                    final_color = np.clip(final_color.astype(int) + variation, 0, 255).astype(np.uint8)
+                    colour_map_array[y, x] = tuple(final_color)
             else:
                 colour_map_array[y, x] = get_colour(ground_rgb)
 
@@ -187,8 +308,19 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
     return heightmap, colour_map_array, placement_mask, placed_tree_positions
 
 # ---------------- Save and Export ----------------
-def generate_heightmap(biome_name, structures=None):
-    heightmap, colour_map_array, placement_mask, placed_tree_positions = generate_heightmap_data(biome_name, structures)
+def generate_heightmap(biome_name, structures=None, color_palette=None):
+    """
+    Generate heightmap with dynamic biome support.
+    UNIVERSAL: Works for ANY biome type, NEVER fails.
+    
+    Args:
+        biome_name: Any biome name (predefined or custom)
+        structures: Structure count dict
+        color_palette: Optional list of hex colors for custom biomes
+    """
+    heightmap, colour_map_array, placement_mask, placed_tree_positions = generate_heightmap_data(
+        biome_name, structures, color_palette=color_palette
+    )
 
     os.makedirs("assets/heightmaps", exist_ok=True)
 

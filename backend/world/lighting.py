@@ -85,8 +85,51 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
         config["ambient"]["intensity"] = 0.85  # Bright ambient light
         config["directional"]["intensity"] = 0.85  # Bright directional light
     
-    # Remove fog for non-arctic biomes (cities, default, etc.)
-    if not is_winter:
+    # Futuristic/Cyberpunk biome modifications
+    is_futuristic = biome.lower() in ["futuristic", "cyberpunk", "neon", "tech"]
+    if is_futuristic:
+        if time == "night":
+            # Dark cyberpunk night: very dark with neon accents
+            config["background"] = "#0a0a1a"  # Almost black with slight blue
+            config["ambient"]["color"] = "#1a1a3a"  # Dark blue ambient
+            config["ambient"]["intensity"] = 0.3
+            config["directional"]["color"] = "#00d4ff"  # Cyan neon light
+            config["directional"]["intensity"] = 0.6
+            config["directional"]["position"] = {"x": 50, "y": 80, "z": 50}
+            config["fog"] = {
+                "color": "#0a0a1a",
+                "near": 30,
+                "far": 150
+            }
+        elif time == "sunset":
+            # Cyberpunk sunset: dark with purple/pink neon
+            config["background"] = "#1a0a2e"  # Dark purple
+            config["ambient"]["color"] = "#2d1b3d"  # Purple ambient
+            config["ambient"]["intensity"] = 0.4
+            config["directional"]["color"] = "#ff00ff"  # Magenta neon
+            config["directional"]["intensity"] = 0.7
+            config["directional"]["position"] = {"x": 100, "y": 20, "z": 50}
+            config["fog"] = {
+                "color": "#1a0a2e",
+                "near": 40,
+                "far": 180
+            }
+        else:  # noon
+            # Cyberpunk day: dark with bright neon highlights
+            config["background"] = "#0f1419"  # Dark blue-grey
+            config["ambient"]["color"] = "#1a1a2e"  # Dark blue ambient
+            config["ambient"]["intensity"] = 0.5
+            config["directional"]["color"] = "#00d4ff"  # Bright cyan
+            config["directional"]["intensity"] = 0.8
+            config["directional"]["position"] = {"x": 50, "y": 100, "z": 50}
+            config["fog"] = {
+                "color": "#0f1419",
+                "near": 50,
+                "far": 200
+            }
+    
+    # Remove fog for non-arctic, non-futuristic biomes
+    if not is_winter and not is_futuristic:
         config["fog"] = None
     
     if is_winter:

@@ -169,7 +169,8 @@ def save_to_cache(prompt: str, params: dict):
 def parse_prompt(prompt: str) -> dict:
     """
     Parse user prompt to extract world parameters.
-    Returns: dict with biome, time, structure, enemy_count, weapon (mechanic)
+    UNIVERSAL WORLD CREATOR: Converts ANY text into a valid world.
+    If user writes gibberish, nonsense, or anything - still create a world.
     
     Uses file-based cache to avoid repeated LLM calls for the same prompt.
     """
@@ -181,61 +182,179 @@ def parse_prompt(prompt: str) -> dict:
             messages=[
                 {
                     "role": "system",
-                    "content": """Extract world parameters from the user's prompt and return ONLY a JSON object.
+                    "content": """You are a UNIVERSAL WORLD CREATOR. Your job is to turn ANYTHING into a 3D world.
 
-IMPORTANT RULES:
-1. Biome detection:
-   - If prompt contains: "arctic", "ice", "icy", "snow", "frozen", "winter", "cold" → biome: "arctic"
-   - If prompt contains: "city", "urban", "town", "street" → biome: "city"
-   - Otherwise → biome: "default"
+CRITICAL RULES:
+1. NEVER say you can't create something - ALWAYS generate valid world parameters
+2. If the input is unclear/gibberish/random → Be CREATIVE and imaginative
+3. If input is just one word → Interpret it creatively as a world theme
+4. If input makes no sense → Create a surreal/abstract world based on the vibe
+5. ALWAYS return valid JSON, no matter what the input is
 
-2. Time detection:
-   - If prompt contains: "sunset", "dusk", "evening", "orange sky" → time: "sunset"
-   - If prompt contains: "night", "dark", "midnight" → time: "night"
-   - Otherwise → time: "noon"
+UNIVERSAL INTERPRETATION EXAMPLES:
+- "asdfgh" → Create abstract/glitch world with random colors
+- "pizza" → Create food-themed world with pizza terrain/buildings
+- "!@#$%" → Create chaotic/abstract world with wild colors
+- "meow" → Create cat-themed world with cat structures
+- "123" → Create numerical/matrix world with grid patterns
+- "rainbow" → Create colorful world with rainbow gradients
+- "dream" → Create dreamy/surreal world with pastel colors
+- "" (empty) → Create random surprise world
+- "zzzzz" → Create sleepy/dreamlike world with soft colors
+- "hello" → Create friendly/welcoming world with warm colors
 
-3. Enemy count:
-   - Extract number before "enemies" or "enemy"
-   - If not mentioned → 5
-   - Range: 0-10
+BIOME EXTRACTION STRATEGY:
+1. Look for ANY keywords that suggest a theme/environment
+2. If no clear theme → Use the TEXT ITSELF as inspiration for biome name
+3. Get creative: colors, emotions, objects, sounds can ALL become biomes
+4. Examples of creative biome naming:
+  * "lava world" → biome: "lava"
+  * "futuristic city" → biome: "futuristic"
+  * "underwater ocean" → biome: "underwater"
+  * "space station" → biome: "space"
+  * "candy land" → biome: "candy"
+  * "cyberpunk city" → biome: "cyberpunk"
+  * "desert wasteland" → biome: "desert"
+  * "jungle rainforest" → biome: "jungle"
+  * "volcanic island" → biome: "volcanic"
+  * "ice cave" → biome: "ice_cave"
+  * "neon city" → biome: "neon"
+  * "post-apocalyptic" → biome: "apocalyptic"
+  * "pizza" → biome: "pizza_world"
+  * "rainbow" → biome: "rainbow"
+  * "glitch" → biome: "glitch"
+  * "dream" → biome: "dreamscape"
+  * "chaos" → biome: "chaotic"
+  * "matrix" → biome: "matrix"
+  * "retro" → biome: "retro_80s"
+  * "minecraft" → biome: "blocky"
+  * "steampunk" → biome: "steampunk"
 
-4. Weapon/mechanic:
-   - If mentions "jump", "stomp", "bounce", "double jump" → weapon: "double_jump"
-   - If mentions "dash", "rush", "charge" → weapon: "dash"
-   - If mentions "no combat", "no attack", "peaceful" → weapon: "none"
-   - Otherwise → weapon: "dash"
+COLOR PALETTE GENERATION:
+- ALWAYS include a color_palette (3-5 hex colors)
+- Base colors on the biome theme
+- Be CREATIVE with color choices
+- Examples:
+  * "lava" → ["#FF4500", "#FF6347", "#8B0000"]
+  * "rainbow" → ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF"]
+  * "pizza" → ["#FFD700", "#FF6347", "#FFFACD"]
+  * "dream" → ["#FFB6C1", "#E6E6FA", "#F0E68C"]
+  * "glitch" → ["#00FF00", "#FF00FF", "#00FFFF"]
 
-5. Structures (optional):
-   - Extract counts for: trees, rocks, buildings, mountains, hills, rivers, street_lamps
-   - Look for patterns like "3 trees", "5 rocks", "10 buildings", etc.
-   - IMPORTANT: If user says "trees" (plural) without a number, use biome-specific default:
-     * Arctic biome: 25 trees (default)
-     * Other biomes (city, default): 10 trees (default)
-   - If structure type is NOT mentioned at all, don't include that key (will use defaults)
-   - Examples:
-     * "give me 3 trees" → structure: {"tree": 3}
-     * "trees" or "with trees" → structure: {"tree": 25} for arctic, {"tree": 10} for others
-     * "5 trees and 2 rocks" → structure: {"tree": 5, "rock": 2}
-     * "city with 10 buildings" → structure: {"building": 10}
-     * "arctic with trees" → structure: {"tree": 25}  // Arctic default
-     * "city with trees" → structure: {"tree": 10}  // City default
+TIME DETECTION:
+- Extract: "sunset", "dusk", "evening", "night", "midnight", "dawn", "noon"
+- If no time mentioned → "noon"
+- Creative: "twilight", "golden hour", "witching hour" are valid too
 
-Return ONLY this JSON structure (no markdown, no backticks, no explanation):
+STRUCTURE DETECTION - CONTEXT-AWARE INTELLIGENCE:
+Your job is to interpret the prompt and suggest RELEVANT structures that make sense for the world described.
+
+CRITICAL: Support for CUSTOM OBJECTS (creative_objects):
+- If the user asks for ANY object NOT in basic structures (trees, rocks, buildings, peaks, street_lamps, enemies), 
+  you MUST use "creative_objects" to create it from basic shapes (box, cylinder, sphere, cone, torus)
+- Examples: "cars", "chairs", "statues", "vehicles", "furniture", "controllers", "gadgets", "robots", "monuments", "neon signs", "flying cars"
+- If user says "with cars", "with flying cars", "with neon signs", "with statues" → CREATE them as creative_objects!
+- Format creative_objects as an array of objects, each with: name, position {x, y, z}, parts [{shape, position, dimensions/radius, color}]
+- For generation, place creative_objects at appropriate positions on the terrain (use random positions between -100 to 100 for x/z, y=0 for ground level)
+- Generate 3-5 instances of each creative object type for variety
+- DO NOT say you can't create something - use creative_objects instead!
+
+1. ANALYZE THE PROMPT CONTEXT:
+   - What kind of world is being described?
+   - What structures would naturally exist in this world?
+   - What fits the theme and makes the world feel authentic?
+
+2. SUGGEST RELEVANT STRUCTURES based on biome/theme:
+   - UNDERWATER/OCEAN: Suggest rocks (coral formations), mountains (sea mounts), but NO trees or buildings
+   - SPACE/GALAXY: Suggest rocks (asteroids), mountains (planetary features), but NO trees or buildings
+   - DESERT: Suggest rocks, mountains (dunes), but FEW trees (maybe 3-5 cacti-like)
+   - JUNGLE/FOREST: Suggest MANY trees (30-50), rocks, mountains
+   - ARCTIC/ICE: Suggest trees (leafless pines, 25-30), rocks, mountains (ice peaks)
+   - CITY/URBAN: Suggest buildings (15-20), street_lamps (3-5), FEW trees (5-10), FEW rocks
+   - FUTURISTIC/CYBERPUNK: Suggest buildings (20+), street_lamps (5-8), rocks (tech debris), mountains (tech structures)
+   - LAVA/VOLCANIC: Suggest rocks (lava rocks, 20-30), mountains (volcano peaks, 5-10), NO trees
+   - CANDY/FOOD: Suggest creative structures (food-themed), rocks (candy rocks), but interpret creatively
+   - APOCALYPTIC: Suggest rocks (debris, 30+), mountains (ruins), FEW buildings (5-10 broken), NO trees or street_lamps
+   - RAINBOW/COLORFUL: Suggest trees (colorful, 20-30), rocks (colorful, 15-25), mountains (colorful peaks)
+   - DREAM/FANTASY: Suggest trees (dreamy, 15-25), rocks (magical crystals), mountains (floating islands)
+
+3. STRUCTURE COUNT GUIDELINES:
+   - Be generous with structures that fit the theme
+   - Be sparse with structures that don't fit
+   - Always provide specific counts in the "structure" field
+   - Format: {"tree": 25, "rock": 20, "mountain": 5, "building": 15, "street_lamp": 3}
+   - If a structure doesn't fit the theme, set it to 0 or omit it
+
+4. INTERPRET USER INTENT:
+   - "underwater world" → rocks: 30, mountain: 5, tree: 0, building: 0
+   - "space station" → rocks: 20, mountain: 3, tree: 0, building: 15
+   - "futuristic city" → building: 25, street_lamp: 8, rock: 10, tree: 5, mountain: 0
+   - "lava world" → rock: 35, mountain: 8, tree: 0, building: 0
+   - "jungle adventure" → tree: 50, rock: 15, mountain: 3, building: 0
+   - "arctic tundra" → tree: 30 (leafless), rock: 20, mountain: 5, building: 0
+   - "rainbow paradise" → tree: 30, rock: 25, mountain: 3, building: 0
+
+5. EXAMPLES OF SMART INTERPRETATION:
+   - "I want to explore an underwater reef" → biome: "underwater", structure: {"rock": 40, "mountain": 8, "tree": 0, "building": 0}
+   - "Build me a cyberpunk city" → biome: "futuristic", structure: {"building": 30, "street_lamp": 10, "rock": 15, "tree": 3, "mountain": 0}
+   - "Take me to a lava planet" → biome: "lava", structure: {"rock": 45, "mountain": 12, "tree": 0, "building": 0}
+   - "I want a peaceful forest" → biome: "jungle", structure: {"tree": 40, "rock": 10, "mountain": 2, "building": 0}
+   - "Show me the arctic" → biome: "arctic", structure: {"tree": 30, "rock": 25, "mountain": 5, "building": 0}
+
+REMEMBER: Your structure suggestions should make the world feel authentic and relevant to what the user asked for!
+
+CREATIVE FALLBACKS:
+- If input is gibberish → Create "abstract" or "glitch" world
+- If input is emoji → Create world based on emoji meaning
+- If input is empty → Create "surprise" random world
+- If input is very short → Use it as biome name directly
+
+ENEMY COUNT: 0-10 (default: 5)
+WEAPON: "double_jump", "dash", "none" (default: "dash")
+
+Return ONLY this JSON structure (NO markdown, NO backticks):
 {
-  "biome": "arctic"|"city"|"default",
+  "biome": "ANY_THEME",
+  "biome_description": "Creative description of this world",
   "time": "noon"|"sunset"|"night",
-  "enemy_count": 3-8,
+  "enemy_count": 0-10,
   "weapon": "double_jump"|"dash"|"none",
-  "structure": {}
+  "structure": {
+    "tree": <number>,
+    "rock": <number>,
+    "mountain": <number>,
+    "building": <number>,
+    "street_lamp": <number>
+  },
+  "creative_objects": [     // OPTIONAL: Custom objects built from shapes (cars, chairs, statues, etc.)
+    {
+      "name": "car",
+      "position": {"x": 10.0, "y": 0.0, "z": 20.0},
+      "rotation": {"x": 0, "y": 0, "z": 0},
+      "scale": 1.0,
+      "parts": [
+        {
+          "shape": "box",
+          "position": {"x": 0, "y": 0.5, "z": 0},
+          "dimensions": {"width": 2.0, "height": 0.8, "depth": 4.0},
+          "color": "#FF0000"
+        }
+      ]
+    }
+  ],
+  "color_palette": ["#HEX", "#HEX", ...],
+  "special_effects": ["effect1", "effect2"]
 }
 
-IMPORTANT: Only include structure keys that are explicitly mentioned with numbers OR when plural form is used (e.g., "trees" = 25).
-If a structure type is not mentioned at all, omit it from the structure object entirely."""
+REMEMBER: 
+- NEVER refuse to create a world. Turn ANYTHING into valid parameters!
+- If user asks for custom objects (cars, chairs, statues, vehicles, furniture, robots, etc.), use "creative_objects" to build them from shapes!
+"""
                 },
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt if prompt and prompt.strip() else "surprise me with a random world"}
             ],
-            temperature=0.1,
-            max_tokens=300
+            temperature=0.5,  # Increased for better context understanding
+            max_tokens=800  # More tokens for detailed structure suggestions
         )
         
         result = completion.choices[0].message.content.strip()
@@ -249,17 +368,34 @@ If a structure type is not mentioned at all, omit it from the structure object e
         params = json.loads(result)
         
         # Validate and set defaults
-        params.setdefault("biome", "city")
+        params.setdefault("biome", "default")
         params.setdefault("time", "noon")
         params.setdefault("enemy_count", 5)
         params.setdefault("weapon", "dash")
         params.setdefault("structure", {})
+        params.setdefault("creative_objects", [])  # Support custom objects during generation
+        params.setdefault("color_palette", [])
+        params.setdefault("special_effects", [])
+        params.setdefault("biome_description", "")
         
-        # Normalize biome
-        if params["biome"] not in ["arctic", "city", "default"]:
-            params["biome"] = "city"
+        # If color_palette is empty or missing, use default palette for known biomes
+        if not params.get("color_palette") or len(params.get("color_palette", [])) == 0:
+            default_palettes = {
+                "futuristic": ["#1a1a2e", "#16213e", "#0f3460", "#00d4ff", "#ff00ff"],  # Dark cyberpunk
+                "rainbow": ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#4B0082", "#9400D3"],
+                "space": ["#000033", "#1a1a3a", "#2d2d5a", "#000080"],
+                "lava": ["#FF4500", "#FF6347", "#FF0000", "#8B0000"],
+                "solar": ["#FFD700", "#FFA500", "#FF6347", "#FF0000"],
+            }
+            biome_lower = params["biome"].lower()
+            if biome_lower in default_palettes:
+                params["color_palette"] = default_palettes[biome_lower]
+                print(f"[PARSER] Applied default color palette for '{params['biome']}': {params['color_palette']}")
         
-        # Normalize time
+        # Clamp enemy count (no biome restriction - accept ANY biome name)
+        params["enemy_count"] = max(0, min(10, params["enemy_count"]))
+        
+        # Normalize time (still validate)
         if params["time"] not in ["noon", "sunset", "night"]:
             params["time"] = "noon"
         
@@ -267,10 +403,7 @@ If a structure type is not mentioned at all, omit it from the structure object e
         if params["weapon"] not in ["double_jump", "dash", "none"]:
             params["weapon"] = "dash"
         
-        # Clamp enemy count
-        params["enemy_count"] =  min(10, params["enemy_count"])
-        
-        print(f"[PARSER DEBUG] Final params: {params}")
+        print(f"[PARSER] Detected biome: '{params['biome']}' with colors: {params.get('color_palette', [])}")
         
         # Save to cache
         try:
@@ -287,17 +420,63 @@ If a structure type is not mentioned at all, omit it from the structure object e
 
 def fallback_parse(prompt: str) -> dict:
     """
-    Simple keyword-based parser as fallback
+    Enhanced fallback parser with keyword detection for ANY biome.
     """
-    prompt_lower = prompt.lower()
+    import re
+    prompt_lower = prompt.lower() if prompt else ""
     
-    # Detect biome
-    if any(word in prompt_lower for word in ["arctic", "ice", "icy", "snow", "frozen", "winter", "cold"]):
-        biome = "arctic"
-    elif any(word in prompt_lower for word in ["city", "urban", "town", "street"]):
-        biome = "city"
-    else:
-        biome = "default"
+    # Dynamic biome detection based on keywords (expanded list)
+    biome_keywords = {
+        "rainbow": ["rainbow", "colorful", "multicolor", "prismatic"],
+        "lava": ["lava", "magma", "volcanic", "volcano", "molten"],
+        "futuristic": ["futuristic", "future", "sci-fi", "tech", "cyberpunk", "neon"],
+        "underwater": ["underwater", "ocean", "sea", "aquatic", "coral", "reef"],
+        "space": ["space", "galaxy", "cosmos", "stellar", "planetary", "sun", "solar"],
+        "desert": ["desert", "sand", "dunes", "wasteland", "arid"],
+        "jungle": ["jungle", "rainforest", "tropical", "dense forest"],
+        "ice": ["ice", "frozen", "glacial", "tundra"],
+        "candy": ["candy", "sweet", "chocolate", "sugar"],
+        "apocalyptic": ["apocalyptic", "post-apocalyptic", "wasteland", "ruins"],
+        "crystal": ["crystal", "gem", "crystalline", "mineral"],
+        "arctic": ["arctic", "snow", "winter", "cold"],
+        "city": ["city", "urban", "town", "street"]
+    }
+    
+    # Find matching biome
+    biome = "default"
+    for biome_type, keywords in biome_keywords.items():
+        if any(keyword in prompt_lower for keyword in keywords):
+            biome = biome_type
+            break
+    
+    # Generate default color palette based on detected biome
+    default_palettes = {
+        "rainbow": ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#4B0082", "#9400D3"],
+        "space": ["#000033", "#1a1a3a", "#2d2d5a", "#000080"],
+        "lava": ["#FF4500", "#FF6347", "#FF0000", "#8B0000"],
+        "futuristic": ["#1a1a2e", "#16213e", "#0f3460", "#00d4ff", "#ff00ff"],  # Dark cyberpunk: dark blue/black base with cyan/pink neon
+        "solar": ["#FFD700", "#FFA500", "#FF6347", "#FF0000"],
+        "sun": ["#FFD700", "#FFA500", "#FFFF00", "#FF8C00"]
+    }
+    
+    color_palette = default_palettes.get(biome, [])
+    
+    # If no match and prompt exists, use first word or "mystery"
+    if biome == "default" and prompt and prompt.strip():
+        # Try to extract meaningful word
+        words = prompt.strip().split()
+        if words:
+            # Use first word as biome inspiration (lowercase, alphanumeric only)
+            first_word = re.sub(r'[^a-z0-9]', '', words[0].lower())
+            if first_word and len(first_word) > 2:
+                biome = f"{first_word}_world"
+                # Generate color palette for unknown biomes
+                if not color_palette:
+                    color_palette = []
+            else:
+                biome = "mystery_world"
+        else:
+            biome = "mystery_world"
     
     # Detect time
     if any(word in prompt_lower for word in ["sunset", "dusk", "evening", "orange"]):
@@ -359,12 +538,74 @@ def fallback_parse(prompt: str) -> dict:
     if lamp_match:
         structure["street_lamp"] = int(lamp_match.group(1))
     
+    # Get default color palette for this biome
+    default_palettes = {
+        "rainbow": ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#4B0082", "#9400D3"],
+        "space": ["#000033", "#1a1a3a", "#2d2d5a", "#000080"],
+        "sun": ["#000033", "#1a1a3a", "#2d2d5a"],
+        "lava": ["#FF4500", "#FF6347", "#FF0000", "#8B0000"],
+        "futuristic": ["#1a1a2e", "#16213e", "#0f3460", "#00d4ff", "#ff00ff"],  # Dark cyberpunk: dark blue/black base with cyan/pink neon
+        "solar": ["#FFD700", "#FFA500", "#FF6347", "#FF0000"],
+        "sun_world": ["#FFD700", "#FFA500", "#FFFF00", "#FF8C00"],
+        "make_world": ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF"]  # Rainbow for make_world
+    }
+    
+    # Use palette if biome matches, otherwise empty (will use hash-based colors)
+    color_palette = default_palettes.get(biome, [])
+    
+    # Special case: if biome ends with "_world" and we have a matching base biome, use its palette
+    if not color_palette and biome.endswith("_world"):
+        base_biome = biome.replace("_world", "")
+        if base_biome in default_palettes:
+            color_palette = default_palettes[base_biome]
+    
+    # Add context-aware structure defaults if structure dict is empty or incomplete
+    biome_structure_defaults = {
+        "underwater": {"rock": 40, "mountain": 8, "tree": 0, "building": 0, "street_lamp": 0},
+        "ocean": {"rock": 40, "mountain": 8, "tree": 0, "building": 0, "street_lamp": 0},
+        "space": {"rock": 20, "mountain": 3, "tree": 0, "building": 15, "street_lamp": 0},
+        "galaxy": {"rock": 20, "mountain": 3, "tree": 0, "building": 15, "street_lamp": 0},
+        "futuristic": {"building": 25, "street_lamp": 8, "rock": 10, "tree": 5, "mountain": 0},
+        "cyberpunk": {"building": 30, "street_lamp": 10, "rock": 15, "tree": 3, "mountain": 0},
+        "city": {"building": 20, "street_lamp": 5, "rock": 8, "tree": 8, "mountain": 0},
+        "lava": {"rock": 45, "mountain": 12, "tree": 0, "building": 0, "street_lamp": 0},
+        "volcanic": {"rock": 45, "mountain": 12, "tree": 0, "building": 0, "street_lamp": 0},
+        "jungle": {"tree": 50, "rock": 15, "mountain": 3, "building": 0, "street_lamp": 0},
+        "rainforest": {"tree": 50, "rock": 15, "mountain": 3, "building": 0, "street_lamp": 0},
+        "arctic": {"tree": 30, "rock": 25, "mountain": 5, "building": 0, "street_lamp": 0},
+        "winter": {"tree": 30, "rock": 25, "mountain": 5, "building": 0, "street_lamp": 0},
+        "ice": {"tree": 30, "rock": 25, "mountain": 5, "building": 0, "street_lamp": 0},
+        "desert": {"rock": 25, "mountain": 5, "tree": 3, "building": 0, "street_lamp": 0},
+        "apocalyptic": {"rock": 35, "mountain": 5, "tree": 0, "building": 8, "street_lamp": 0},
+        "rainbow": {"tree": 30, "rock": 25, "mountain": 3, "building": 0, "street_lamp": 0},
+        "candy": {"tree": 20, "rock": 20, "mountain": 2, "building": 0, "street_lamp": 0},
+    }
+    
+    # Apply biome-specific defaults if structure dict is empty or missing keys
+    if not structure or len(structure) == 0:
+        structure = biome_structure_defaults.get(biome.lower(), {
+            "tree": 15,
+            "rock": 20,
+            "mountain": 3,
+            "building": 0,
+            "street_lamp": 0
+        })
+    else:
+        # Merge defaults with extracted values
+        defaults = biome_structure_defaults.get(biome.lower(), {})
+        for key, default_value in defaults.items():
+            if key not in structure:
+                structure[key] = default_value
+    
     result = {
         "biome": biome,
         "time": time,
         "enemy_count": min(10, enemy_count),
         "weapon": weapon,
-        "structure": structure
+        "structure": structure,
+        "color_palette": color_palette,
+        "special_effects": [],
+        "biome_description": f"A {biome} world with contextually appropriate structures"
     }
     
     print(f"[FALLBACK PARSER] Result: {result}")
