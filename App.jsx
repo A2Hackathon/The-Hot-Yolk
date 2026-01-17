@@ -35,6 +35,8 @@ const VoiceWorldBuilder = () => {
 
   const [gameState, setGameState] = useState(GameState.IDLE);
   const [isListening, setIsListening] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const audioStreamRef = useRef(null);
   const [prompt, setPrompt] = useState('');
   const [modifyPrompt, setModifyPrompt] = useState('');
   const [submittedPrompt, setSubmittedPrompt] = useState('');
@@ -2476,34 +2478,106 @@ const VoiceWorldBuilder = () => {
       console.log(`  Horizon: #${horizonColor.getHexString()}, Middle: #${middleColor.getHexString()}, Top: #${topColor.getHexString()}`);
     }
   };
-  const startVoiceCapture = (forceModify = false) => {
-    if (!('webkitSpeechRecognition' in window)) {
-      return alert('Speech recognition not supported. Use Chrome or Edge.');
+  const stopVoiceCapture = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      console.log("[VOICE] Recording stopped manually");
+    }
+    // Stop audio stream
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach(track => track.stop());
+      audioStreamRef.current = null;
+    }
+  };
+
+  const startVoiceCapture = async (forceModify = false) => {
+    // If already recording, stop first
+    if (isListening) {
+      stopVoiceCapture();
+      return;
     }
 
-    const recognition = new window.webkitSpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
+    // Check for MediaRecorder API (more widely supported than webkitSpeechRecognition)
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return alert('Microphone access not supported. Please use a modern browser.');
+    }
 
-    recognition.onstart = () => setIsListening(true);
-    recognition.onerror = () => setIsListening(false);
-    recognition.onend = () => setIsListening(false);
+    try {
+      setIsListening(true);
+      console.log("[VOICE] Starting audio capture...");
 
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      console.log("Voice:", transcript);
+      // Get audio stream
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm' // Chrome/Edge support webm, fallback handled below
+      });
+      mediaRecorderRef.current = mediaRecorder;
+
+      const audioChunks = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        // Stop all tracks to release microphone
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach(track => track.stop());
+          audioStreamRef.current = null;
+        }
+        mediaRecorderRef.current = null;
+
+        // Create audio blob
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        console.log("[VOICE] Audio captured, sending to ElevenLabs API...");
+
+        // Send to backend for transcription using ElevenLabs Speech-to-Text
+        try {
+          const formData = new FormData();
+          formData.append('audio_file', audioBlob, 'recording.webm');
+
+          const response = await fetch(`${API_BASE}/transcribe-audio`, {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Transcription failed: ${response.status} - ${errorText}`);
+          }
+
+          const result = await response.json();
+          const transcript = result.text;
+
+          console.log("[VOICE] Transcription result:", transcript);
+          setIsListening(false);
+          setSubmittedPrompt(transcript);
+
+          if (forceModify || gameState === GameState.PLAYING) {
+            modifyWorld(transcript);
+          } else {
+            generateWorld(transcript);
+          }
+        } catch (error) {
+          console.error("[VOICE] Transcription error:", error);
+          setIsListening(false);
+          alert(`Failed to transcribe audio: ${error.message}`);
+        }
+      };
+
+      // Start recording
+      mediaRecorder.start(100); // Collect data every 100ms
+      console.log("[VOICE] Recording started... Click again to stop.");
+      
+    } catch (error) {
+      console.error("[VOICE] Error accessing microphone:", error);
       setIsListening(false);
-      setSubmittedPrompt(transcript);
-
-      if (forceModify || gameState === GameState.PLAYING) {
-        modifyWorld(transcript);
-      } else {
-        generateWorld(transcript);
-      }
-    };
-
-    recognition.start();
+      alert(`Failed to access microphone: ${error.message}`);
+    }
   };
  
   const handlePhysicsChange = useCallback((newSettings) => {
@@ -2963,7 +3037,7 @@ const VoiceWorldBuilder = () => {
                 background: isListening ? '#FF5555' : 'rgba(255, 85, 85, 0.6)',
                 color: '#fff',
                 border: 'none',
-                cursor: isListening ? 'not-allowed' : 'pointer',
+                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -3005,13 +3079,14 @@ const VoiceWorldBuilder = () => {
             Try: "Arctic mountains with trees" or "City with trees at sunset"
           </p>
 
-          <button onClick={startVoiceCapture} disabled={isListening} style={{
+          <button onClick={startVoiceCapture} style={{
             padding: '15px 40px', fontSize: '18px', fontWeight: 'bold',
-            background: isListening ? '#666' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            color: '#fff', border: 'none', borderRadius: '50px', cursor: isListening ? 'not-allowed' : 'pointer',
-            boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)', marginBottom: '20px'
+            background: isListening ? '#FF5555' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: '#fff', border: 'none', borderRadius: '50px', cursor: 'pointer',
+            boxShadow: isListening ? '0 4px 15px rgba(255, 85, 85, 0.4)' : '0 4px 15px rgba(102, 126, 234, 0.4)', 
+            marginBottom: '20px'
           }}>
-            {isListening ? '🎤 Listening...' : '🎤 Speak to Create'}
+            {isListening ? '⏹️ Stop Recording' : '🎤 Start Recording'}
           </button>
 
           <div style={{ display: 'flex', gap: '10px', width: '100%', maxWidth: '500px' }}>

@@ -125,7 +125,7 @@ const ColorPicker = ({ onColorPaletteChange, initialPalette = null, disabled = f
   return (
     <div style={{
       position: 'fixed',
-      top: '140px',
+      top: '180px',  // Closer to mic button (110px + 60px button = 170px, so 180px gives 10px gap)
       right: '80px',
       zIndex: 200,
       pointerEvents: 'none',

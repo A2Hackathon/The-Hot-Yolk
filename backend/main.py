@@ -7,6 +7,7 @@ from api.routes.generate import router as generate_router
 from api.routes.update import router as update_router
 from api.routes.health import router as health_router
 from api.routes.models import router as models_router
+from api.routes.voice import router as voice_router
 
 
 # Create FastAPI app
@@ -41,6 +42,7 @@ app.include_router(generate_router, prefix="/api")
 app.include_router(update_router, prefix="/api")
 app.include_router(health_router, prefix="/api")
 app.include_router(models_router, prefix="/api")
+app.include_router(voice_router, prefix="/api")
 
 @app.get("/")
 async def root():

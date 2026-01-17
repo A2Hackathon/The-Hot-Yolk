@@ -101,97 +101,17 @@
     "last_accessed": 1768539103.9348776,
     "prompt_preview": "make a spiderman world"
   },
-  "2e58eed570f248e0": {
+  "e5af78f00ddc515a": {
     "params": {
-      "biome": "icy world",
-      "biome_description": "A frozen, icy landscape with snow-covered mountains and glaciers",
-      "time": "noon",
-      "enemy_count": 5,
-      "weapon": "double_jump",
-      "structure": {
-        "tree": 10,
-        "rock": 20,
-        "mountain": 15,
-        "building": 0,
-        "street_lamp": 0
-      },
-      "creative_objects": [],
-      "color_palette": [
-        "#FFFFFF",
-        "#ADD8E6",
-        "#87CEEB",
-        "#4567B7"
-      ],
-      "special_effects": [
-        "snowfall",
-        "frost"
-      ]
-    },
-    "timestamp": 1768610835.7506251,
-    "hit_count": 0,
-    "last_accessed": 1768610835.7506263,
-    "prompt_preview": "icy world"
-  },
-  "c51293107c1c9d46": {
-    "params": {
-      "biome": "arctic generation",
-      "biome_description": "A frozen, icy world with snow-covered mountains and limited vegetation",
+      "biome": "city",
       "time": "noon",
       "enemy_count": 5,
       "weapon": "dash",
-      "structure": {
-        "tree": 30,
-        "rock": 25,
-        "mountain": 5,
-        "building": 0,
-        "street_lamp": 0
-      },
-      "creative_objects": [],
-      "color_palette": [
-        "#87CEEB",
-        "#ADD8E6",
-        "#FFFFFF",
-        "#C9E4CA"
-      ],
-      "special_effects": [
-        "snowfall",
-        "aurora borealis"
-      ]
+      "structure": {}
     },
-    "timestamp": 1768613518.5462236,
+    "timestamp": 1768541216.6741977,
     "hit_count": 0,
-    "last_accessed": 1768613518.5462248,
-    "prompt_preview": "arctic generation"
-  },
-  "806a7e7b173c799e": {
-    "params": {
-      "biome": "arctic",
-      "biome_description": "A frozen, icy landscape with snow-covered mountains and limited vegetation",
-      "time": "noon",
-      "enemy_count": 5,
-      "weapon": "dash",
-      "structure": {
-        "tree": 30,
-        "rock": 20,
-        "mountain": 5,
-        "building": 0,
-        "street_lamp": 0
-      },
-      "creative_objects": [],
-      "color_palette": [
-        "#FFFFFF",
-        "#87CEEB",
-        "#ADD8E6",
-        "#6495ED"
-      ],
-      "special_effects": [
-        "snowfall",
-        "frost"
-      ]
-    },
-    "timestamp": 1768613824.4171093,
-    "hit_count": 0,
-    "last_accessed": 1768613824.4171107,
-    "prompt_preview": "arctic "
+    "last_accessed": 1768541216.6741977,
+    "prompt_preview": "gotham"
   }
 }

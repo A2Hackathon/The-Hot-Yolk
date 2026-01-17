@@ -78,6 +78,7 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
     # Apply biome-specific modifications for arctic/icy/winter environments
     is_winter = biome.lower() in ["arctic", "winter", "icy"]
     is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen"]
+    is_lava = biome.lower() in ["lava", "volcanic", "volcano", "magma"]
     
     # Arctic cave: bright light from above (simulating cave opening)
     if is_arctic:
@@ -95,6 +96,24 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
         }
         # Ensure northern lights are enabled for arctic
         config["northern_lights"] = True
+    
+    if is_lava:
+        if time == "night":
+            config["background"] = "#1a0500"
+        elif time == "sunset":
+            config["background"] = "#4a0c06"
+        else:
+            config["background"] = "#7a1b0c"
+        config["ambient"]["color"] = "#ff5c1c"
+        config["ambient"]["intensity"] = 0.6
+        config["directional"]["color"] = "#ffb347"
+        config["directional"]["intensity"] = 1.0
+        config["directional"]["position"] = {"x": 30, "y": 80, "z": 30}
+        config["fog"] = {
+            "color": "#2a0500",
+            "near": 30,
+            "far": 120
+        }
     
     # City-specific modifications for noon
     if biome.lower() == "city" and time == "noon":
@@ -211,8 +230,8 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
                 "far": 200
             }
     
-    # Remove fog for non-arctic, non-futuristic biomes
-    if not is_winter and not is_futuristic:
+    # Remove fog for non-arctic, non-futuristic, non-lava biomes
+    if not is_winter and not is_futuristic and not is_lava:
         config["fog"] = None
     
     if is_winter:

@@ -72,7 +72,8 @@ def assign_palette_to_elements(color_palette: List[str]) -> Dict[str, str]:
     Returns:
         Dict mapping element names to hex colors (with variations)
     """
-    if not color_palette or len(color_palette) == 0:
+    # Ensure color_palette is a list before checking length
+    if not color_palette or not isinstance(color_palette, list) or len(color_palette) == 0:
         return {}
     
     assignments = {}

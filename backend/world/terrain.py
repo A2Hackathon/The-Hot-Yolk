@@ -13,12 +13,16 @@ from typing import Optional, Dict
 BIOME_SETTINGS = {
     "arctic": {"height_multiplier": 1.0, "ground_color": "snow"},
     "city": {"height_multiplier": 1.0, "ground_color": "street"},
+    "lava": {"height_multiplier": 1.2, "ground_color": "lava"},
+    "volcanic": {"height_multiplier": 1.2, "ground_color": "lava"},
+    "volcano": {"height_multiplier": 1.2, "ground_color": "lava"},
     "default": {"height_multiplier": 1.0, "ground_color": "grass"}
 }
 
 GROUND_COLORS = {
     "snow": (245, 245, 245),
     "street": (220, 200, 230),  # Light purple-grey for city terrain
+    "lava": (139, 0, 0),  # Dark red for lava terrain
     "grass": (34, 177, 76)
 }
 
@@ -40,6 +44,9 @@ STRUCTURE_KEYWORDS = {
 PLACEMENT_RULES = {
     "arctic": {"min_height": 0.2, "max_height": 1.0, "max_slope": 0.3},  # Standard terrain (cave features removed)
     "city": {"min_height": 0.2, "max_height": 0.8, "max_slope": 0.4},
+    "lava": {"min_height": 0.3, "max_height": 1.5, "max_slope": 0.5},  # Lava can have more extreme terrain
+    "volcanic": {"min_height": 0.3, "max_height": 1.5, "max_slope": 0.5},
+    "volcano": {"min_height": 0.3, "max_height": 1.5, "max_slope": 0.5},
     "default": {"min_height": 0.2, "max_height": 1.0, "max_slope": 0.3}
 }
 
@@ -56,7 +63,8 @@ def get_biome_settings(biome_name, structure_count_dict=None, color_palette=None
     biome_lower = biome_name.lower()
     
     # If we have a custom color palette, use it
-    if color_palette and len(color_palette) > 0:
+    # Ensure color_palette is a list before checking length
+    if color_palette and isinstance(color_palette, list) and len(color_palette) > 0:
         try:
             # Convert hex to RGB
             rgb_colors = []
@@ -167,6 +175,10 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
     """
     height_multiplier, ground_rgb, structure_count_dict = get_biome_settings(biome_name, structure_count_dict, color_palette)
     heightmap = np.zeros((height, width))
+    
+    # Check biome type for special handling
+    biome_lower = biome_name.lower() if biome_name else ""
+    is_arctic = biome_lower in ["arctic", "winter", "icy", "snow", "frozen"]
 
     # Standard terrain generation for all biomes (removed cave features for arctic)
     # Base Simplex noise
@@ -324,7 +336,8 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
     
     # If we have a custom color palette, prepare RGB colors
     palette_rgb = None
-    if color_palette and len(color_palette) > 0:
+    # Ensure color_palette is a list before checking length
+    if color_palette and isinstance(color_palette, list) and len(color_palette) > 0:
         try:
             palette_rgb = []
             for hex_color in color_palette:

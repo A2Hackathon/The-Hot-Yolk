@@ -7,7 +7,7 @@ import ColorPicker from './ColorPicker';
 import { RealtimeVision } from '@overshoot/sdk';
 
 
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = '/api';
 
 const GameState = {
   IDLE: 'idle',
@@ -39,7 +39,15 @@ const VoiceWorldBuilder = () => {
 
 
   const [gameState, setGameState] = useState(GameState.IDLE);
+  const gameStateRef = useRef(GameState.IDLE);
+  
+  // Keep ref in sync with gameState
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
   const [isListening, setIsListening] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const audioStreamRef = useRef(null);
   const [prompt, setPrompt] = useState('');
   const [modifyPrompt, setModifyPrompt] = useState('');
   const [submittedPrompt, setSubmittedPrompt] = useState('');
@@ -58,6 +66,9 @@ const VoiceWorldBuilder = () => {
   const overshootVisionRef = useRef(null);
   const [streamingActive, setStreamingActive] = useState(false);
   const [lastScanResult, setLastScanResult] = useState(null);
+  const lastScanResultRef = useRef(null);
+  const openRouterIntervalRef = useRef(null);
+  const openRouterResultsRef = useRef([]); // Store all OpenRouter analysis results
   const [physicsSettings, setPhysicsSettings] = useState({
   speed: 5.0,
   gravity: -20.0,  // Fixed: Should be negative to match backend (-20.0)
@@ -2026,7 +2037,8 @@ const VoiceWorldBuilder = () => {
     try {
       // Check if model exists in cache
       const cacheKey = objData.name?.toLowerCase().replace(/\s+/g, '_') || 'unknown';
-      const modelUrl = `http://localhost:8000/assets/models_cache/${cacheKey}.glb`;
+      // Use relative path for assets (served by backend)
+      const modelUrl = `/assets/models_cache/${cacheKey}.glb`;
       
       // Try to load from cache first
       const loader = new GLTFLoader();
@@ -2123,7 +2135,7 @@ const VoiceWorldBuilder = () => {
      * This happens in the background - basic shapes remain visible.
      */
     try {
-      const response = await fetch('http://localhost:8000/api/generate-model', {
+      const response = await fetch(`${API_BASE}/generate-model`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2190,7 +2202,7 @@ const VoiceWorldBuilder = () => {
     
     const poll = async () => {
       try {
-        const response = await fetch(`http://localhost:8000/api/model-status/${cacheKey}`);
+        const response = await fetch(`${API_BASE}/model-status/${cacheKey}`);
         const status = await response.json();
         
         if (status.status === 'ready' && status.model_url) {
@@ -2545,24 +2557,32 @@ const VoiceWorldBuilder = () => {
         console.warn('[CAMERA] Attempting camera access from non-secure context:', hostname);
       }
 
-      // Check for Overshoot API key
-      // Use window.prompt to avoid conflict with state variable 'prompt'
-      const overshootApiKeyRaw = window.prompt(
-        'Enter your Overshoot AI API Key:\n\n' +
-        'Get your key from: https://overshoot.ai\n\n' +
-        '(Leave empty to use camera only without streaming)'
-      );
+      // Try to get Overshoot API key from backend .env file
+      let overshootApiKey = null;
+      try {
+        const response = await fetch(`${API_BASE}/overshoot-api-key`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.available && data.api_key) {
+            overshootApiKey = data.api_key.trim();
+            console.log('[CAMERA] Using Overshoot API key from backend .env file');
+          }
+        }
+      } catch (error) {
+        console.warn('[CAMERA] Could not fetch API key from backend:', error);
+      }
       
-      if (!overshootApiKeyRaw || overshootApiKeyRaw.trim() === '') {
+      if (!overshootApiKey) {
         // Fallback to basic camera without streaming
-        console.log('[CAMERA] No Overshoot API key provided, using basic camera');
+        console.log('[CAMERA] No Overshoot API key found in backend .env file, using basic camera');
+        console.log('[CAMERA] To enable Overshoot streaming, add OVERSHOOT_API_KEY to backend/.env file');
         await startBasicCamera();
         return;
       }
 
       // Clean the API key: remove all whitespace, newlines, carriage returns, and non-printable characters
       // This fixes the "String contains non ISO-8859-1 code point" error
-      const overshootApiKey = overshootApiKeyRaw
+      overshootApiKey = overshootApiKey
         .replace(/\r\n/g, '')  // Remove Windows line breaks
         .replace(/\r/g, '')     // Remove carriage returns
         .replace(/\n/g, '')     // Remove newlines
@@ -2570,7 +2590,7 @@ const VoiceWorldBuilder = () => {
         .trim();
 
       if (!overshootApiKey || overshootApiKey.length < 10) {
-        alert('Invalid API key format. Please paste only the API key without any extra characters or spaces.');
+        console.warn('[CAMERA] Invalid API key format in backend .env file');
         await startBasicCamera();
         return;
       }
@@ -2627,37 +2647,111 @@ const VoiceWorldBuilder = () => {
 
 
       const visionConfig = {
-        apiUrl: 'https://api.overshoot.ai',
+        apiUrl: 'https://cluster1.overshoot.ai/api/v0.2',
         apiKey: apiKey,
-        prompt: 'Read any visible text',
+        prompt: 'Analyze the video feed and provide a detailed description of what you see. Describe the environment type (indoor room, outdoor scene, nature, urban area, etc.), visible objects (furniture, people, structures, natural elements), dominant colors and lighting conditions, and the overall atmosphere. Be specific and detailed - this description will be used to generate a 3D game world that matches the scene.',
         source: { type: 'camera', cameraFacing: 'environment' },
         processing: {
           sampling_ratio: 0.1,
           fps: 30,
-          clip_length_seconds: 1,
-          delay_seconds: 1
+          clip_length_seconds: 2,  // Increased: Need more video for analysis
+          delay_seconds: 0.5  // Reduced: Analyze faster
         },
         onResult: async (result) => {
-          console.log('[OVERSHOOT] Received analysis:', result);
+          console.log('[OVERSHOOT] ✅ Received analysis from Overshoot AI');
+          console.log('[OVERSHOOT] Analysis ID:', result.id);
+          console.log('[OVERSHOOT] Stream ID:', result.stream_id);
+          console.log('[OVERSHOOT] Full result:', result);
+          
+          // DEBUG: Log all fields to see what's actually available
+          console.log('[OVERSHOOT] DEBUG - All result fields:', Object.keys(result));
+          console.log('[OVERSHOOT] DEBUG - result.result:', result.result);
+          console.log('[OVERSHOOT] DEBUG - result.result type:', typeof result.result);
+          console.log('[OVERSHOOT] DEBUG - result.description:', result.description);
+          console.log('[OVERSHOOT] DEBUG - result.text:', result.text);
+          console.log('[OVERSHOOT] DEBUG - result.content:', result.content);
+          console.log('[OVERSHOOT] DEBUG - result.message:', result.message);
+          console.log('[OVERSHOOT] DEBUG - Full result object:', JSON.stringify(result, null, 2));
           
           try {
-            // Result might already be parsed if outputSchema is used
+            // Extract description from result - check multiple possible fields
+            let descriptionText = '';
+            
+            // Check result.result first (most common)
+            if (typeof result.result === 'string') {
+              descriptionText = result.result.trim();
+            } else if (result.result && typeof result.result === 'object') {
+              descriptionText = (result.result.description || result.result.text || result.result.content || '').trim();
+            }
+            
+            // If result.result is empty, check other fields
+            if (!descriptionText) {
+              descriptionText = (result.description || result.text || result.content || result.message || '').trim();
+            }
+            
+            // Skip empty descriptions - Overshoot sometimes sends empty intermediate results
+            if (!descriptionText || descriptionText.length === 0) {
+              console.log('[OVERSHOOT] Skipping empty description (this is normal for streaming)');
+              return; // Don't process empty results
+            }
+            
+            // Handle both JSON and plain text responses
             let analysis;
             if (typeof result.result === 'string') {
-              analysis = JSON.parse(result.result);
+              // Try to parse as JSON first
+              try {
+                analysis = JSON.parse(result.result);
+                // If parsed JSON doesn't have description, use the string
+                if (!analysis.description && !analysis.text) {
+                  analysis = {
+                    description: descriptionText,
+                    type: 'text_description'
+                  };
+                }
+              } catch (e) {
+                // If not JSON, treat as plain text description
+                analysis = {
+                  description: descriptionText,
+                  type: 'text_description'
+                };
+                console.log('[OVERSHOOT] Received text description (not JSON):', descriptionText.substring(0, 100) + '...');
+              }
             } else {
               analysis = result.result; // Already an object
+              // Ensure it has description
+              if (!analysis.description && descriptionText) {
+                analysis.description = descriptionText;
+              }
             }
             
             console.log('[OVERSHOOT] Parsed analysis:', analysis);
             setLastScanResult(analysis);
+            lastScanResultRef.current = analysis; // Keep ref in sync
             
-            // Send to backend for world generation
-            await processStreamingResult(analysis);
+            // Only send to backend if description is non-empty
+            if (analysis.description && analysis.description.trim().length > 0) {
+              // Send to backend for world generation
+              await processStreamingResult(analysis);
+            } else {
+              console.log('[OVERSHOOT] Skipping - analysis has no description');
+            }
           } catch (parseError) {
             console.error('[OVERSHOOT] Error parsing result:', parseError);
             console.log('[OVERSHOOT] Raw result:', result.result);
             console.log('[OVERSHOOT] Result type:', typeof result.result);
+            
+            // Even if parsing fails, try to use the raw result as description
+            if (result.result && typeof result.result === 'string' && result.result.trim().length > 0) {
+              const fallbackAnalysis = {
+                description: result.result.trim(),
+                type: 'text_description'
+              };
+              setLastScanResult(fallbackAnalysis);
+              lastScanResultRef.current = fallbackAnalysis; // Keep ref in sync
+              await processStreamingResult(fallbackAnalysis);
+            } else {
+              console.log('[OVERSHOOT] Parse error and no valid description in result.result');
+            }
           }
         },
         onError: (error) => {
@@ -2691,15 +2785,41 @@ const VoiceWorldBuilder = () => {
       
       console.log('[OVERSHOOT] ✅ Video streaming started successfully');
       
-      // Show video preview if available
+      // Connect video element to Overshoot stream FIRST, before starting interval
+      // This ensures video is ready when OpenRouter interval starts
       if (videoRef.current) {
         // Try to get video element from vision instance
         if (vision.videoElement) {
           videoRef.current.srcObject = vision.videoElement.srcObject;
+          console.log('[OVERSHOOT] Connected video to vision.videoElement');
         } else if (vision.source) {
           // Alternative way to access video stream
           videoRef.current.srcObject = vision.source;
+          console.log('[OVERSHOOT] Connected video to vision.source');
         }
+        
+        // Wait for video metadata to load before starting OpenRouter interval
+        videoRef.current.onloadedmetadata = () => {
+          console.log('[OVERSHOOT] Video metadata loaded:', videoRef.current.videoWidth, 'x', videoRef.current.videoHeight);
+          // Start OpenRouter Vision interval after video is ready
+          startOpenRouterInterval();
+        };
+        
+        // Also try to start interval after a short delay as fallback
+        setTimeout(() => {
+          if (videoRef.current && videoRef.current.videoWidth > 0) {
+            if (!openRouterIntervalRef.current) {
+              console.log('[OVERSHOOT] Starting OpenRouter interval after delay (video ready)');
+              startOpenRouterInterval();
+            }
+          } else {
+            console.log('[OVERSHOOT] Video not ready after delay, will retry when metadata loads');
+          }
+        }, 1000);
+      } else {
+        // No videoRef, start interval anyway (might work if we find another video element)
+        console.warn('[OVERSHOOT] No videoRef available, starting OpenRouter interval anyway');
+        startOpenRouterInterval();
       }
       
     } catch (error) {
@@ -2743,6 +2863,13 @@ const VoiceWorldBuilder = () => {
 
   const processStreamingResult = async (analysis) => {
     try {
+      // Validate analysis has a non-empty description
+      const description = analysis?.description || analysis?.text || '';
+      if (!description || !description.trim()) {
+        console.log('[OVERSHOOT] Skipping processStreamingResult - empty description');
+        return;
+      }
+      
       console.log('[OVERSHOOT] Processing streaming result:', analysis);
       
       // Send to backend to generate world from streaming analysis
@@ -3081,6 +3208,28 @@ const VoiceWorldBuilder = () => {
   };
 
   const stopCameraCapture = async () => {
+    // When stopping, capture the image and analyze with Overshoot
+    if (streamingActive || scanMode) {
+      console.log('[RECORD] Stopping recording and analyzing...');
+      
+      // Capture image before stopping stream
+      if (videoRef.current && videoRef.current.videoWidth > 0) {
+        // Use captureAndScanWorld logic to capture and analyze
+        await captureAndScanWorld();
+      } else {
+        // If no video, just stop
+        await stopCameraStreamOnly();
+      }
+    } else {
+      // Nothing active, just ensure everything is stopped
+      await stopCameraStreamOnly();
+    }
+  };
+
+  const stopCameraStreamOnly = async () => {
+    // Stop OpenRouter interval
+    stopOpenRouterInterval();
+    
     // Stop Overshoot streaming if active
     if (overshootVisionRef.current && streamingActive) {
       try {
@@ -3102,43 +3251,216 @@ const VoiceWorldBuilder = () => {
     setScanMode(false);
   };
 
-  const captureAndScanWorld = async () => {
-    if (!videoRef.current) return;
-    
-    // Capture current video frame
+  // Capture image from video stream
+  const captureImageFromVideo = () => {
+    if (!videoRef.current || videoRef.current.videoWidth === 0) {
+      console.warn('[OPENROUTER] Video not ready for capture');
+      return null;
+    }
+
     const canvas = document.createElement('canvas');
     const videoWidth = videoRef.current.videoWidth || 640;
     const videoHeight = videoRef.current.videoHeight || 480;
     
-    if (videoWidth === 0 || videoHeight === 0) {
-      alert('Video not ready yet. Please wait for the camera to initialize.');
-      return;
-    }
-    
-    canvas.width = videoWidth;
-    canvas.height = videoHeight;
+    // Use higher resolution for better quality
+    const scaleFactor = Math.max(1, Math.ceil(1920 / Math.max(videoWidth, videoHeight)));
+    canvas.width = videoWidth * scaleFactor;
+    canvas.height = videoHeight * scaleFactor;
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(videoRef.current, 0, 0, videoWidth, videoHeight);
     
-    // Convert to base64
-    const imageData = canvas.toDataURL('image/jpeg', 0.8);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
     
-    console.log('[SCAN] Captured image, sending to backend...');
-    console.log('[SCAN] Image data length:', imageData.length, 'characters');
-    console.log('[SCAN] Video dimensions:', videoWidth, 'x', videoHeight);
-    
-    if (!imageData || imageData.length < 100) {
-      alert('Failed to capture image. Please try again.');
-      return;
-    }
-    setGameState(GameState.GENERATING);
-    stopCameraCapture();
-    
+    return canvas.toDataURL('image/jpeg', 1.0);
+  };
+
+  // Send image to OpenRouter Vision API via backend
+  const analyzeImageWithOpenRouter = async (imageData) => {
     try {
-      const res = await fetch(`${API_BASE}/scan-world`, {
+      console.log('[OPENROUTER] Sending image for analysis...');
+      const res = await fetch(`${API_BASE}/analyze-image-openrouter`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image_data: imageData }),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('[OPENROUTER] Analysis error:', errorText);
+        return null;
+      }
+
+      const data = await res.json();
+      console.log('[OPENROUTER] Analysis result:', data);
+      
+      // Store result
+      if (data && data.description) {
+        openRouterResultsRef.current.push({
+          description: data.description,
+          timestamp: Date.now(),
+          type: 'openrouter_vision'
+        });
+        console.log(`[OPENROUTER] Stored analysis (total: ${openRouterResultsRef.current.length})`);
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('[OPENROUTER] Error analyzing image:', error);
+      return null;
+    }
+  };
+
+  // Start interval to capture images every 3 seconds
+  const startOpenRouterInterval = () => {
+    // Clear any existing interval
+    if (openRouterIntervalRef.current) {
+      clearInterval(openRouterIntervalRef.current);
+    }
+
+    console.log('[OPENROUTER] Starting 3-second interval for image capture...');
+    
+    // Wait for video to be ready before starting (max 10 seconds)
+    let waitAttempts = 0;
+    const maxWaitAttempts = 20; // 20 * 500ms = 10 seconds max wait
+    const waitForVideoAndStart = () => {
+      waitAttempts++;
+      if (waitAttempts > maxWaitAttempts) {
+        console.warn('[OPENROUTER] Video not ready after 10 seconds, giving up on interval');
+        return;
+      }
+      
+      if (!videoRef.current || videoRef.current.videoWidth === 0) {
+        // Video not ready yet, try again in 500ms
+        console.log(`[OPENROUTER] Waiting for video to be ready... (attempt ${waitAttempts}/${maxWaitAttempts})`);
+        setTimeout(waitForVideoAndStart, 500);
+        return;
+      }
+      
+      console.log('[OPENROUTER] Video ready, starting interval');
+      
+      // Capture immediately, then every 3 seconds
+      const captureAndAnalyze = async () => {
+        const imageData = captureImageFromVideo();
+        if (imageData && imageData.length > 10000) {
+          await analyzeImageWithOpenRouter(imageData);
+        } else {
+          console.warn('[OPENROUTER] Image capture failed or too small');
+        }
+      };
+
+      // First capture immediately
+      captureAndAnalyze();
+      
+      // Then every 3 seconds
+      openRouterIntervalRef.current = setInterval(captureAndAnalyze, 3000);
+    };
+    
+    // Start waiting for video
+    waitForVideoAndStart();
+  };
+
+  // Stop the interval
+  const stopOpenRouterInterval = () => {
+    if (openRouterIntervalRef.current) {
+      clearInterval(openRouterIntervalRef.current);
+      openRouterIntervalRef.current = null;
+      console.log('[OPENROUTER] Stopped interval');
+    }
+  };
+
+  const captureAndScanWorld = async () => {
+    setGameState(GameState.GENERATING);
+    
+    try {
+      // IMPORTANT: Capture image BEFORE stopping the stream
+      // Otherwise videoRef.current might lose the video stream
+      
+      // Always capture the actual image from camera for most accurate world generation
+      if (!videoRef.current) {
+        alert('Camera not available. Please wait for camera to initialize.');
+        setGameState(GameState.IDLE);
+        return;
+      }
+      
+      const canvas = document.createElement('canvas');
+      const videoWidth = videoRef.current.videoWidth || 640;
+      const videoHeight = videoRef.current.videoHeight || 480;
+      
+      if (videoWidth === 0 || videoHeight === 0) {
+        alert('Video not ready yet. Please wait for the camera to initialize.');
+        setGameState(GameState.IDLE);
+        return;
+      }
+      
+      // Use higher resolution for better quality images
+      // Scale up canvas if video dimensions are small
+      const scaleFactor = Math.max(1, Math.ceil(1920 / Math.max(videoWidth, videoHeight))); // Aim for at least 1920px on the longer side
+      canvas.width = videoWidth * scaleFactor;
+      canvas.height = videoHeight * scaleFactor;
+      const ctx = canvas.getContext('2d');
+      
+      // Enable image smoothing for better quality
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      
+      // Draw video at higher resolution
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      
+      // Convert to base64 with maximum quality (1.0 instead of 0.8)
+      const imageData = canvas.toDataURL('image/jpeg', 1.0);
+      
+      console.log('[SCAN] Captured image, sending to backend...');
+      console.log('[SCAN] Image data length:', imageData.length, 'characters');
+      console.log('[SCAN] Video dimensions:', videoWidth, 'x', videoHeight);
+      console.log('[SCAN] Canvas dimensions:', canvas.width, 'x', canvas.height, `(scale: ${scaleFactor}x)`);
+      
+      // Prepare request - will include image if valid, otherwise use streaming description only
+      const requestBody = {};
+      
+      // Validate image size (base64 images should be much larger - at least 10,000 chars for a proper image)
+      const hasValidImage = imageData && imageData.length >= 10000;
+      
+      if (hasValidImage) {
+        // Image is valid - use it (with optional streaming description for enhancement)
+        requestBody.image_data = imageData;
+        console.log('[SCAN] ✅ Valid image captured, using for world generation');
+      } else {
+        // Image capture failed - use streaming description only if available
+        console.warn('[SCAN] ⚠️ Image capture failed (too small:', imageData?.length || 0, 'chars). Falling back to streaming description only.');
+        
+        // Use ref to get latest scan result (state might not be updated yet)
+        const latestScanResult = lastScanResultRef.current || lastScanResult;
+        
+        if (!latestScanResult || (!latestScanResult.description && typeof latestScanResult !== 'string')) {
+          // No streaming description available either - can't proceed
+          const errorMsg = `Failed to capture image (${imageData?.length || 0} chars, expected >10,000) and no streaming analysis available. Please ensure your camera is working and try again.`;
+          console.error('[SCAN]', errorMsg);
+          alert(errorMsg);
+          setGameState(GameState.IDLE);
+          return;
+        }
+        
+        console.log('[SCAN] ✅ Using streaming description only (no valid image)');
+      }
+      
+      // Add Overshoot streaming description if available for enhanced accuracy
+      // Use ref to get latest scan result (state might not be updated yet)
+      const latestScanResult = lastScanResultRef.current || lastScanResult;
+      if (latestScanResult && (latestScanResult.description || (typeof latestScanResult === 'string'))) {
+        const descriptionText = latestScanResult.description || latestScanResult;
+        console.log('[SCAN] Including Overshoot description:', descriptionText.substring(0, 100) + '...');
+        requestBody.streaming_analysis = {
+          description: descriptionText,
+          type: 'text_description'
+        };
+        requestBody.use_streaming = true;
+      }
+      
+      const res = await fetch(`${API_BASE}/scan-world`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
       });
       
       
@@ -3160,6 +3482,10 @@ const VoiceWorldBuilder = () => {
       
       const data = await res.json();
       console.log('[SCAN] World generated from scan:', data);
+      
+      // Stop the camera stream after successful scan
+      // (Overshoot descriptions already captured via lastScanResultRef)
+      await stopCameraStreamOnly();
       
       // Use the same world loading logic as generateWorld
       // Since generateWorld does all loading inline, we'll do the same here
@@ -3434,6 +3760,8 @@ const VoiceWorldBuilder = () => {
       
     } catch (error) {
       console.error('[SCAN ERROR]:', error);
+      // Stop camera stream on error (but don't try to scan again)
+      await stopCameraStreamOnly();
       
       let errorMessage = 'Failed to generate world from scan.\n\n';
       
@@ -3465,6 +3793,7 @@ const VoiceWorldBuilder = () => {
   };
 
   const generateWorld = async (promptText) => {
+    console.log("[WORLD] generateWorld called with prompt:", promptText);
     setGameState(GameState.GENERATING);
     try {
       const res = await fetch(`${API_BASE}/generate-world`, {
@@ -4254,7 +4583,29 @@ const VoiceWorldBuilder = () => {
       }
 
 
-      if (data.structures?.rocks && newRockCount > oldRockCount) {
+      // Check if rocks have color properties (indicates styling update via "set")
+      const rocksHaveColors = data.structures?.rocks?.some(r => r.rock_color || r.color) || false;
+      const shouldReplaceAllRocks = (rocksHaveColors && newRockCount === oldRockCount) || 
+                                     (newRockCount === oldRockCount && newRockCount > 0 && oldRockCount > 0 && rocksHaveColors);
+      
+      if (shouldReplaceAllRocks) {
+        // Replace all rocks (for styling updates with colors)
+        console.log(`[MODIFY] Replacing all ${oldRockCount} rocks with styled versions...`);
+        const rocksToRemove = structuresRef.current.filter(obj => obj.userData?.structureType === 'rock');
+        rocksToRemove.forEach(rock => {
+          scene.remove(rock);
+        });
+        structuresRef.current = structuresRef.current.filter(obj => obj.userData?.structureType !== 'rock');
+        
+        // Add all new styled rocks
+        data.structures.rocks.forEach(rockData => {
+          const rock = createRock(rockData);
+          rock.userData = { ...rock.userData, structureType: 'rock' };
+          scene.add(rock);
+          structuresRef.current.push(rock);
+        });
+        console.log(`[MODIFY] ✅ Successfully replaced ${data.structures.rocks.length} rocks`);
+      } else if (data.structures?.rocks && newRockCount > oldRockCount) {
         const newRocks = data.structures.rocks.slice(oldRockCount);
         console.log(`[MODIFY] Adding ${newRocks.length} new rocks...`);
         
@@ -4266,7 +4617,48 @@ const VoiceWorldBuilder = () => {
         });
       }
 
-      if (data.structures?.buildings && newBuildingCount > oldBuildingCount) {
+      // Check if buildings have color properties (indicates styling update via "set")
+      const buildingsHaveColors = data.structures?.buildings?.some(b => b.building_color || b.color) || false;
+      const shouldReplaceAllBuildings = (buildingsHaveColors && newBuildingCount === oldBuildingCount) || 
+                                        (newBuildingCount === oldBuildingCount && newBuildingCount > 0 && oldBuildingCount > 0 && buildingsHaveColors);
+      
+      if (shouldReplaceAllBuildings) {
+        // Replace all buildings (for styling updates with colors)
+        console.log(`[MODIFY] Replacing all ${oldBuildingCount} buildings with styled versions...`);
+        const buildingsToRemove = structuresRef.current.filter(obj => obj.userData?.structureType === 'building');
+        buildingsToRemove.forEach(building => {
+          scene.remove(building);
+        });
+        structuresRef.current = structuresRef.current.filter(obj => obj.userData?.structureType !== 'building');
+        
+        // Add all new styled buildings
+        const biomeName = data.world?.biome_name;
+        data.structures.buildings.forEach((buildingData, idx) => {
+          const gridIndex = Math.floor(
+            idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ)
+          );
+          const localIndex = idx % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
+          const gridOrigin = buildingGridOrigins[gridIndex % buildingGridOrigins.length];
+          const buildingType = getBuildingTypeForBiome(biomeName, idx);
+
+          const building = createBuilding(
+            buildingData,
+            localIndex,
+            buildingType,
+            gridOrigin
+          );
+
+          building.userData = {
+            ...building.userData,
+            structureType: 'building',
+            buildingType,
+          };
+
+          scene.add(building);
+          structuresRef.current.push(building);
+        });
+        console.log(`[MODIFY] ✅ Successfully replaced ${data.structures.buildings.length} buildings`);
+      } else if (data.structures?.buildings && newBuildingCount > oldBuildingCount) {
         const biomeName = data.world?.biome_name;
         const newBuildings = data.structures.buildings.slice(oldBuildingCount);
 
@@ -4388,6 +4780,31 @@ const VoiceWorldBuilder = () => {
         console.log('[MODIFY] Updating lighting...');
         updateLighting(data.world.lighting_config);
         // updateLighting now handles northern lights automatically based on lighting_config.northern_lights flag
+      }
+
+      // Check if terrain needs to be updated (terrain color change)
+      if (data.world?.heightmap_raw && data.world?.colour_map_array) {
+        console.log('[MODIFY] Updating terrain with new colors...');
+        
+        // Remove old terrain mesh
+        if (terrainMeshRef.current) {
+          scene.remove(terrainMeshRef.current);
+          terrainMeshRef.current = null;
+        }
+        
+        // Update refs with new terrain data
+        heightmapRef.current = data.world.heightmap_raw;
+        colorMapRef.current = data.world.colour_map_array;
+        terrainPlacementMaskRef.current = heightmapRef.current.map(row =>
+          row.map(height => (height >= 0 ? 1 : 0))
+        );
+        
+        // Create new terrain mesh with updated colors
+        const newTerrainMesh = createTerrain(heightmapRef.current, colorMapRef.current, 256);
+        terrainMeshRef.current = newTerrainMesh;
+        scene.add(newTerrainMesh);
+        
+        console.log('[MODIFY] ✅ Terrain updated successfully');
       }
 
       if (data.physics) {
@@ -5033,35 +5450,129 @@ const VoiceWorldBuilder = () => {
       console.log(`  Horizon: #${horizonColor.getHexString()}, Middle: #${middleColor.getHexString()}, Top: #${topColor.getHexString()}`);
     }
   };
-  const startVoiceCapture = (forceModify = false) => {
-    if (!('webkitSpeechRecognition' in window)) {
-      return alert('Speech recognition not supported. Use Chrome or Edge.');
+  const stopVoiceCapture = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      console.log("[VOICE] Recording stopped manually");
+    }
+    // Stop audio stream
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach(track => track.stop());
+      audioStreamRef.current = null;
+    }
+  };
+
+  const startVoiceCapture = async (forceModify = false) => {
+    // If already recording, stop first
+    if (isListening) {
+      stopVoiceCapture();
+      return;
     }
 
-    const recognition = new window.webkitSpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
+    // Check for MediaRecorder API (more widely supported than webkitSpeechRecognition)
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return alert('Microphone access not supported. Please use a modern browser.');
+    }
 
-    recognition.onstart = () => setIsListening(true);
-    recognition.onerror = () => setIsListening(false);
-    recognition.onend = () => setIsListening(false);
+    try {
+      setIsListening(true);
+      console.log("[VOICE] Starting audio capture...");
 
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      console.log("Voice:", transcript);
+      // Get audio stream
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm' // Chrome/Edge support webm, fallback handled below
+      });
+      mediaRecorderRef.current = mediaRecorder;
+
+      const audioChunks = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        // Stop all tracks to release microphone
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach(track => track.stop());
+          audioStreamRef.current = null;
+        }
+        mediaRecorderRef.current = null;
+
+        // Create audio blob
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        console.log("[VOICE] Audio captured, sending to ElevenLabs API...");
+
+        // Send to backend for transcription using ElevenLabs Speech-to-Text
+        try {
+          const formData = new FormData();
+          formData.append('audio_file', audioBlob, 'recording.webm');
+
+          const response = await fetch(`${API_BASE}/transcribe-audio`, {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Transcription failed: ${response.status} - ${errorText}`);
+          }
+
+          const result = await response.json();
+          const transcript = result.text || result.transcript || '';
+
+          if (!transcript || !transcript.trim()) {
+            console.warn("[VOICE] Empty transcription received");
+            setIsListening(false);
+            alert("Could not transcribe audio. Please try again or speak more clearly.");
+            return;
+          }
+
+          const trimmedTranscript = transcript.trim();
+          console.log("[VOICE] Transcription result:", trimmedTranscript);
+          // Use ref to get current gameState (not the captured one from closure)
+          const currentGameState = gameStateRef.current;
+          console.log("[VOICE] Current gameState (from ref):", currentGameState);
+          setIsListening(false);
+          setSubmittedPrompt(trimmedTranscript);
+
+          // Automatically trigger world generation/modification as if user typed it
+          // Only modify if we're actually playing (have an active world)
+          // Otherwise, generate a new world
+          const shouldModify = currentGameState === GameState.PLAYING;
+          
+          console.log("[VOICE] Decision - shouldModify:", shouldModify, "currentGameState:", currentGameState, "PLAYING:", GameState.PLAYING);
+          
+          if (shouldModify) {
+            // World already exists and is active - modify it
+            console.log("[VOICE] Modifying existing world - calling sendChatMessageForModify with:", trimmedTranscript);
+            setChatConversation([]); // Start fresh chat
+            sendChatMessageForModify(trimmedTranscript);
+          } else {
+            // No world exists or not playing - generate new one
+            console.log("[VOICE] Generating new world - calling generateWorld with:", trimmedTranscript);
+            generateWorld(trimmedTranscript);
+          }
+        } catch (error) {
+          console.error("[VOICE] Transcription error:", error);
+          setIsListening(false);
+          alert(`Failed to transcribe audio: ${error.message}`);
+        }
+      };
+
+      // Start recording
+      mediaRecorder.start(100); // Collect data every 100ms
+      console.log("[VOICE] Recording started... Click again to stop.");
+      
+    } catch (error) {
+      console.error("[VOICE] Error accessing microphone:", error);
       setIsListening(false);
-      setSubmittedPrompt(transcript);
-
-      if (forceModify || gameState === GameState.PLAYING) {
-        setChatConversation([]); // Start fresh chat
-        sendChatMessageForModify(transcript);
-      } else {
-        generateWorld(transcript);
-      }
-    };
-
-    recognition.start();
+      alert(`Failed to access microphone: ${error.message}`);
+    }
   };
  
   // Update ref whenever physicsSettings changes
@@ -5074,6 +5585,7 @@ const VoiceWorldBuilder = () => {
   }, []);
 
   const sendChatMessageForModify = async (userMessage) => {
+    console.log("[MODIFY] sendChatMessageForModify called with:", userMessage);
     // Add user message to conversation
     const newMessages = [...chatConversation, { role: 'user', content: userMessage }];
     setChatConversation(newMessages);
@@ -5435,8 +5947,8 @@ const VoiceWorldBuilder = () => {
             }}
             style={{
               position: 'absolute',
-              top: '90px',
-              right: '27px',
+              top: '110px',  // Same height as mic button for symmetrical switch layout
+              right: '152px',  // Left side of mic button (70px gap from mic center for symmetry)
               zIndex: 10,
               width: '56px',
               height: '56px',
@@ -5470,8 +5982,8 @@ const VoiceWorldBuilder = () => {
             onClick={() => setShowChatHistory(!showChatHistory)}
             style={{
               position: 'absolute',
-              top: '90px',
-              right: '135px',
+              top: '110px',  // Same height as mic button for symmetrical switch layout
+              right: '12px',  // Right side of mic button (70px gap from mic center for symmetry)
               zIndex: 10,
               width: '56px',
               height: '56px',
@@ -5504,8 +6016,8 @@ const VoiceWorldBuilder = () => {
           {/* Export World Button */}
           <div style={{
             position: 'absolute',
-            top: '90px',
-            right: '200px',
+            top: '110px',  // Same height as H button
+            right: '220px',  // To the left of H button (H is at right: 152px, width 56px, so H's left edge is at 208px; Export (56px) with 12px gap = 220px)
             zIndex: 10
           }}>
             <button
@@ -5964,7 +6476,7 @@ const VoiceWorldBuilder = () => {
           )}
 
           <div style={{
-            position: 'absolute', top: 20, left: 20, zIndex: 10,
+            position: 'absolute', top: 50, left: 20, zIndex: 10,  // Moved below camera indicator (top: 12px + ~30px height = 50px)
             backgroundColor: 'rgba(0,0,0,0.7)',
             padding: '15px', borderRadius: '8px',
             color: '#fff', fontFamily: 'monospace', fontSize: '14px'
@@ -6195,7 +6707,7 @@ const VoiceWorldBuilder = () => {
           </div>
 
           <div style={{
-            position: 'fixed', top: '140px', right: '80px', zIndex: 20
+            position: 'fixed', top: '110px', right: '80px', zIndex: 20  // Centered between H (right: 27px) and C (right: 145px) buttons for symmetrical switch layout
           }}>
             <button
               onClick={() => startVoiceCapture(true)}
@@ -6207,7 +6719,7 @@ const VoiceWorldBuilder = () => {
                 background: isListening ? '#FF5555' : 'rgba(255, 85, 85, 0.6)',
                 color: '#fff',
                 border: 'none',
-                cursor: isListening ? 'not-allowed' : 'pointer',
+                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -6286,12 +6798,11 @@ const VoiceWorldBuilder = () => {
                 }}
               />
               <button
-                onClick={startVoiceCapture}
-                disabled={isListening}
+                onClick={() => startVoiceCapture()}
                 style={{
                   background: 'transparent',
                   border: 'none',
-                  cursor: isListening ? 'not-allowed' : 'pointer',
+                  cursor: 'pointer',
                   padding: '4px',
                   display: 'flex',
                   alignItems: 'center',
@@ -6378,7 +6889,7 @@ const VoiceWorldBuilder = () => {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 12.5c1.38 0 2.5-1.12 2.5-2.5S13.38 7.5 12 7.5 9.5 8.62 9.5 10s1.12 2.5 2.5 2.5zm0-7c2.49 0 4.5 2.01 4.5 4.5S14.49 14.5 12 14.5 7.5 12.49 7.5 10 9.51 5.5 12 5.5zM12 19c-7 0-11-4.03-11-9V6h2v4c0 4.97 3.51 7 9 7s9-2.03 9-7V6h2v4c0 4.97-4 9-11 9z"/>
                 </svg>
-                {scanMode ? (streamingActive ? '🛑 Stop Streaming' : 'Cancel Scan') : '📹 Start Video Streaming'}
+                {scanMode ? (streamingActive ? '⏹️ Stop Recording & Analyze' : 'Cancel') : '▶️ Start Recording'}
           </button>
             </div>
           </div>

@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OVERSHOOT_API_KEY = os.getenv("OVERSHOOT_API_KEY")
-OVERSHOOT_API_URL = os.getenv("OVERSHOOT_API_URL", "https://api.overshoot.ai/v1/analyze")
+OVERSHOOT_API_URL = os.getenv("OVERSHOOT_API_URL", "https://cluster1.overshoot.ai/api/v0.2")
 
 # Debug: Check if API keys are loaded
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -42,27 +42,73 @@ async def analyze_with_openai_vision(image_data: str) -> Optional[Dict]:
     """
     openai_key = os.getenv("OPENAI_API_KEY")
     if not openai_key:
+        print("[VISION] ❌ OPENAI_API_KEY not set in environment")
         return None
     
     try:
         import openai
         from openai import OpenAI
         
-        client = OpenAI(api_key=openai_key)
+        # Check if this is an OpenRouter API key (starts with "sk-or-")
+        is_openrouter = openai_key.startswith("sk-or-")
+        
+        if is_openrouter:
+            # Use OpenRouter endpoint with required headers
+            base_url = "https://openrouter.ai/api/v1"
+            default_headers = {
+                "HTTP-Referer": "http://localhost:3000",  # Your app URL
+                "X-Title": "AI World Builder"  # Your app name
+            }
+            print(f"[VISION] Using OpenRouter API (key: {openai_key[:10]}...)")
+        else:
+            # Use standard OpenAI endpoint
+            base_url = None  # Use default OpenAI endpoint
+            default_headers = {}
+            print(f"[VISION] Using OpenAI API (key: {openai_key[:10]}...)")
+        
+        client = OpenAI(
+            api_key=openai_key,
+            base_url=base_url,
+            default_headers=default_headers if is_openrouter else None
+        )
         
         # Remove data URL prefix
         image_base64 = image_data
         if ',' in image_data:
             image_base64 = image_data.split(',')[1]
         
-        print("[VISION] Using OpenAI Vision API...")
+        # Validate image size (base64 images should be much larger)
+        if len(image_base64) < 1000:
+            print(f"[VISION] ❌ Image data too small: {len(image_base64)} chars (expected >1000 for valid base64 image)")
+            print(f"[VISION] Image data preview: {image_base64[:200]}")
+            return None
+        
+        print(f"[VISION] Using {'OpenRouter' if is_openrouter else 'OpenAI'} Vision API... (image size: {len(image_base64)} chars)")
+        
+        # For OpenRouter, use provider/model format (e.g., "openai/gpt-4o-mini")
+        # For OpenAI, use model name directly (e.g., "gpt-4o-mini")
+        model_name = "openai/gpt-4o-mini" if is_openrouter else "gpt-4o-mini"
         
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # or "gpt-4o" for better results
+            model=model_name,
             messages=[
                 {
                     "role": "system",
-                    "content": """Analyze this image of a real-world environment and return a JSON object with:
+                    "content": """Analyze this image in EXTREME DETAIL and return a JSON object that accurately represents what you see.
+
+Be very specific and detailed about:
+- The environment type (indoor room, outdoor scene, nature, urban, etc.)
+- All objects visible (furniture, people, structures, natural elements, etc.)
+- Colors and lighting (dominant colors, light sources, time of day feeling)
+- Spatial layout (arrangement, positioning, density)
+- Materials and textures (wood, metal, concrete, fabric, etc.)
+
+Convert what you see into a 3D game world that matches the image:
+- Indoor scenes → city biome with buildings/structures representing the room
+- Outdoor scenes → appropriate biome (forest, city, desert, etc.) with matching objects
+- Objects in image → place similar structures/creative objects in the world
+
+Return a JSON object with:
 {
   "objects": [
     {"type": "tree", "count": 5},
@@ -92,7 +138,7 @@ Detect objects like: trees, rocks, buildings, mountains, street lamps, etc."""
                     ]
                 }
             ],
-            max_tokens=500,
+            max_tokens=1000,
             response_format={"type": "json_object"}
         )
         
@@ -356,7 +402,18 @@ def parse_overshoot_response(raw_response: Dict) -> Dict:
     if isinstance(colors_data, list):
         color_palette = colors_data
     elif isinstance(colors_data, dict):
-        color_palette = colors_data.get("palette") or colors_data.get("dominant") or []
+        palette = colors_data.get("palette") or colors_data.get("dominant")
+        if isinstance(palette, list):
+            color_palette = palette
+        elif isinstance(palette, str):
+            color_palette = [palette]
+        else:
+            color_palette = []
+    elif isinstance(colors_data, str):
+        color_palette = [colors_data]
+    elif isinstance(colors_data, (int, float)):
+        # Skip numeric colors (not valid hex)
+        color_palette = []
     else:
         color_palette = []
     
@@ -529,8 +586,19 @@ def generate_world_from_scan(scan_data: Dict) -> Dict:
     """
     biome = scan_data.get("biome", "city")
     objects = scan_data.get("objects", {})
-    colors = scan_data.get("colors", [])
+    colors_raw = scan_data.get("colors", [])
     spatial_layout = scan_data.get("spatial_layout", [])
+    
+    # Ensure colors is always a list
+    if isinstance(colors_raw, list):
+        colors = colors_raw
+    elif isinstance(colors_raw, str):
+        colors = [colors_raw]
+    elif isinstance(colors_raw, (int, float)):
+        # Convert numeric color to hex string if needed
+        colors = []
+    else:
+        colors = []
     
     # Build structure counts
     structure_counts = {
@@ -565,8 +633,14 @@ def generate_world_from_scan(scan_data: Dict) -> Dict:
     }
 
 
-def extract_tree_colors(color_palette: List[str], spatial_layout: List[Dict]) -> Dict:
+def extract_tree_colors(color_palette, spatial_layout) -> Dict:
     """Extract tree-specific colors from scan data."""
+    # Ensure color_palette is a list
+    if not isinstance(color_palette, list):
+        color_palette = []
+    if not isinstance(spatial_layout, list):
+        spatial_layout = []
+    
     # Find tree-related colors
     leaf_colors = []
     trunk_colors = []
@@ -614,8 +688,12 @@ def is_brown_shade(hex_color: str) -> bool:
         return False
 
 
-def determine_time_of_day(weather: Optional[str], colors: List[str]) -> str:
+def determine_time_of_day(weather: Optional[str], colors) -> str:
     """Determine time of day from weather and lighting."""
+    # Ensure colors is a list
+    if not isinstance(colors, list):
+        colors = []
+    
     if not colors:
         return "noon"
     

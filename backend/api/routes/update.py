@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from voice.voice import handle_live_command, merge_world, handle_chat_conversation
 from world.terrain import generate_heightmap
 from world.color_scheme import assign_palette_to_elements
+import re
 
 router = APIRouter()
 
@@ -18,7 +19,6 @@ class ModifyRequest(BaseModel):
     progress: Optional[float] = 1.0
     image_data: Optional[str] = None  # base64 encoded image       
 
-@router.patch("/modify-world")
 @router.patch("/modify-world")
 async def modify_world(request: ModifyRequest) -> Dict:
     if not request.command:
@@ -66,6 +66,162 @@ async def modify_world(request: ModifyRequest) -> Dict:
         
         # Merge AI diff into the current world
         updated_world = merge_world(current_world, ai_diff)
+        
+        # Check if command requests terrain color change
+        command_lower = request.command.lower()
+        terrain_color_keywords = ["terrain", "ground", "land", "floor", "surface"]
+        color_keywords = ["pink", "red", "blue", "green", "yellow", "purple", "orange", "color", "colour"]
+        
+        is_terrain_color_request = any(keyword in command_lower for keyword in terrain_color_keywords) and \
+                                   any(keyword in command_lower for keyword in color_keywords)
+        
+        if is_terrain_color_request:
+            print(f"[API] Detected terrain color change request: {request.command}")
+            
+            # Extract color from command (look for hex codes or color names)
+            color_hex = None
+            hex_match = re.search(r'#([0-9a-fA-F]{6})', command_lower)
+            if hex_match:
+                color_hex = f"#{hex_match.group(1)}"
+            else:
+                # Map color names to hex
+                color_map = {
+                    "pink": "#FFC0CB",
+                    "red": "#FF0000",
+                    "blue": "#0000FF",
+                    "green": "#00FF00",
+                    "yellow": "#FFFF00",
+                    "purple": "#800080",
+                    "orange": "#FFA500"
+                }
+                for color_name, hex_val in color_map.items():
+                    if color_name in command_lower:
+                        color_hex = hex_val
+                        break
+            
+            if color_hex:
+                print(f"[API] Regenerating terrain with color: {color_hex}")
+                
+                # Get current biome and structure counts
+                biome = updated_world.get("world", {}).get("biome") or \
+                        updated_world.get("world", {}).get("biome_name") or \
+                        current_world.get("world", {}).get("biome") or \
+                        current_world.get("world", {}).get("biome_name") or \
+                        "default"
+                
+                # Get structure counts from current world
+                structure_counts = {}
+                if updated_world.get("structures"):
+                    structure_counts = {
+                        "tree": len(updated_world["structures"].get("trees", [])),
+                        "rock": len(updated_world["structures"].get("rocks", [])),
+                        "building": len(updated_world["structures"].get("buildings", [])),
+                        "mountain": len(updated_world["structures"].get("peaks", [])),
+                        "street_lamp": len(updated_world["structures"].get("street_lamps", []))
+                    }
+                
+                # Regenerate terrain with new color
+                terrain_data = generate_heightmap(
+                    biome_name=biome,
+                    structures=structure_counts,
+                    color_palette=[color_hex]  # Use single color for terrain
+                )
+                
+                # Update world with new terrain data
+                if "world" not in updated_world:
+                    updated_world["world"] = {}
+                
+                updated_world["world"]["heightmap_raw"] = terrain_data["heightmap_raw"]
+                updated_world["world"]["colour_map_array"] = terrain_data["colour_map_array"]
+                
+                print(f"[API] ✅ Terrain color updated to {color_hex}")
+        
+        # Check if command requests structure color change (trees, rocks, buildings, objects)
+        # Look for object/structure keywords but NOT terrain keywords (already handled above)
+        structure_keywords = ["tree", "trees", "rock", "rocks", "building", "buildings", "object", "objects", "structure", "structures"]
+        general_object_keywords = ["object", "objects", "everything", "all", "things", "stuff"]
+        
+        # Check if this is a structure color request (not terrain)
+        has_structure_keyword = any(keyword in command_lower for keyword in structure_keywords)
+        has_color_keyword = any(keyword in command_lower for keyword in color_keywords)
+        is_not_terrain_request = not is_terrain_color_request  # Already handled terrain above
+        
+        is_structure_color_request = is_not_terrain_request and has_color_keyword and \
+                                     (has_structure_keyword or any(keyword in command_lower for keyword in general_object_keywords))
+        
+        if is_structure_color_request:
+            print(f"[API] Detected structure color change request: {request.command}")
+            
+            # Extract color from command (look for hex codes or color names)
+            color_hex = None
+            hex_match = re.search(r'#([0-9a-fA-F]{6})', command_lower)
+            if hex_match:
+                color_hex = f"#{hex_match.group(1)}"
+            else:
+                # Map color names to hex
+                color_map = {
+                    "pink": "#FFC0CB",
+                    "red": "#FF0000",
+                    "blue": "#0000FF",
+                    "green": "#00FF00",
+                    "yellow": "#FFFF00",
+                    "purple": "#800080",
+                    "orange": "#FFA500"
+                }
+                for color_name, hex_val in color_map.items():
+                    if color_name in command_lower:
+                        color_hex = hex_val
+                        break
+            
+            if color_hex:
+                print(f"[API] Applying color {color_hex} to structures...")
+                
+                # Ensure structures exist in updated_world
+                if "structures" not in updated_world:
+                    updated_world["structures"] = {}
+                
+                # Determine which structures to color based on command
+                color_trees = "tree" in command_lower or any(kw in command_lower for kw in ["object", "everything", "all"])
+                color_rocks = "rock" in command_lower or any(kw in command_lower for kw in ["object", "everything", "all"])
+                color_buildings = "building" in command_lower or any(kw in command_lower for kw in ["object", "everything", "all"])
+                
+                # Get existing structures from merged world (use existing ones if no changes from AI)
+                existing_structures = updated_world.get("structures", {})
+                current_structures = current_world.get("structures", {}) if current_world else {}
+                
+                # Use existing structures if AI didn't modify them
+                trees = existing_structures.get("trees", current_structures.get("trees", []))
+                rocks = existing_structures.get("rocks", current_structures.get("rocks", []))
+                buildings = existing_structures.get("buildings", current_structures.get("buildings", []))
+                
+                # Apply colors to trees
+                if color_trees and trees:
+                    print(f"[API] Applying {color_hex} to {len(trees)} trees...")
+                    for tree in trees:
+                        tree["leaf_color"] = color_hex  # For leaves
+                        tree["trunk_color"] = color_hex  # For trunk (can be different, but using same for simplicity)
+                    updated_world["structures"]["trees"] = trees
+                    print(f"[API] ✅ Updated {len(trees)} trees with color {color_hex}")
+                
+                # Apply colors to rocks
+                if color_rocks and rocks:
+                    print(f"[API] Applying {color_hex} to {len(rocks)} rocks...")
+                    for rock in rocks:
+                        rock["rock_color"] = color_hex
+                        rock["color"] = color_hex  # Also set general color field
+                    updated_world["structures"]["rocks"] = rocks
+                    print(f"[API] ✅ Updated {len(rocks)} rocks with color {color_hex}")
+                
+                # Apply colors to buildings
+                if color_buildings and buildings:
+                    print(f"[API] Applying {color_hex} to {len(buildings)} buildings...")
+                    for building in buildings:
+                        building["building_color"] = color_hex
+                        building["color"] = color_hex  # Also set general color field
+                    updated_world["structures"]["buildings"] = buildings
+                    print(f"[API] ✅ Updated {len(buildings)} buildings with color {color_hex}")
+                
+                print(f"[API] ✅ Structure colors updated")
 
         print(f"[API] Returning updated world")
         
@@ -136,8 +292,9 @@ async def update_colors(request: ColorUpdateRequest) -> Dict:
         print(f"[UPDATE COLORS] Color palette: {request.color_palette}")
         print(f"[UPDATE COLORS] Structures: {request.structures}")
         
-        if not request.color_palette or len(request.color_palette) == 0:
-            raise HTTPException(status_code=400, detail="color_palette is required and cannot be empty")
+        # Ensure color_palette is a list before checking length
+        if not request.color_palette or not isinstance(request.color_palette, list) or len(request.color_palette) == 0:
+            raise HTTPException(status_code=400, detail="color_palette is required and must be a non-empty list")
         
         # Convert structures from array format to count format if needed
         # Frontend sends: {"trees": [...], "rocks": [...]}

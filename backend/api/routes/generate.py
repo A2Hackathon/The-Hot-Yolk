@@ -13,7 +13,7 @@ from world.color_scheme import assign_palette_to_elements
 from world.enemy_placer import place_enemies
 from world.lighting import get_lighting_preset, get_sky_color
 from world.physics_config import get_combined_config
-from world.overshoot_integration import analyze_environment, generate_world_from_scan
+from world.overshoot_integration import analyze_environment, generate_world_from_scan, analyze_with_openai_vision
 
 router = APIRouter()
 
@@ -28,11 +28,12 @@ def generate_trees(
     trees = []
     segments = len(heightmap_raw) - 1
     
-    # CRITICAL: Check if biome is winter/arctic/icy
+    # CRITICAL: Check if biome is winter/arctic/icy or lava
     biome_lower = biome.lower()
     is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen"]
+    is_lava = biome_lower in ["lava", "volcanic", "volcano", "magma", "molten"]
     
-    print(f"[TREE DEBUG] Biome: '{biome}' | Is Winter: {is_winter}")
+    print(f"[TREE DEBUG] Biome: '{biome}' | Is Winter: {is_winter} | Is Lava: {is_lava}")
     
     tree_config = {
         "arctic": {
@@ -50,6 +51,30 @@ def generate_trees(
             "max_height": 0.7,
             "scale_boost": 2.0,
             "leafless": False  # Normal trees with leaves
+        },
+        "lava": {
+            "types": [],  # No trees in lava biome
+            "density": 0.0, 
+            "min_height": 0.0, 
+            "max_height": 0.0,
+            "scale_boost": 1.0,
+            "leafless": True
+        },
+        "volcanic": {
+            "types": [],  # No trees in volcanic biome
+            "density": 0.0, 
+            "min_height": 0.0, 
+            "max_height": 0.0,
+            "scale_boost": 1.0,
+            "leafless": True
+        },
+        "volcano": {
+            "types": [],  # No trees in volcano biome
+            "density": 0.0, 
+            "min_height": 0.0, 
+            "max_height": 0.0,
+            "scale_boost": 1.0,
+            "leafless": True
         },
         "default": {
             "types": ["oak", "pine", "birch"], 
@@ -125,6 +150,9 @@ def generate_rocks(
     rock_config = {
         "arctic": {"types": ["ice_rock", "boulder"], "density": 1.2, "min_height": 0.3},
         "city": {"types": ["decorative_rock"], "density": 0.2, "min_height": 0.2},
+        "lava": {"types": ["lava_rock", "volcanic_rock", "boulder"], "density": 1.5, "min_height": 0.3},
+        "volcanic": {"types": ["lava_rock", "volcanic_rock", "boulder"], "density": 1.5, "min_height": 0.3},
+        "volcano": {"types": ["lava_rock", "volcanic_rock", "boulder"], "density": 1.5, "min_height": 0.3},
         "default": {"types": ["boulder", "rock"], "density": 1.0, "min_height": 0.3}
     }
     
@@ -426,7 +454,9 @@ def generate_mountain_peaks(
     if max_peaks == 0:
         return []
     
-    if biome.lower() not in ["arctic", "winter", "icy", "snow", "frozen"]:
+    biome_lower = biome.lower()
+    # Allow mountains for arctic/winter biomes AND lava/volcanic biomes
+    if biome_lower not in ["arctic", "winter", "icy", "snow", "frozen", "lava", "volcanic", "volcano", "magma"]:
         return []
 
     segments = len(heightmap_raw) - 1
@@ -521,6 +551,12 @@ def place_trees_on_terrain(
 
     biome_lower = biome.lower()
     is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen"]
+    is_lava = biome_lower in ["lava", "volcanic", "volcano", "magma", "molten"]
+
+    # No trees in lava biomes
+    if is_lava:
+        print(f"[TREE DEBUG] Lava biome detected - no trees will be placed")
+        return []
 
     tree_types = {
         "arctic": ["pine", "spruce"],
@@ -609,6 +645,12 @@ async def generate_world(prompt: Dict) -> Dict:
         structure_counts = parsed_params.get("structure", {})
         creative_objects = parsed_params.get("creative_objects", [])  # Get custom objects from AI
         color_palette = parsed_params.get("color_palette", [])
+        # Ensure color_palette is always a list
+        if not isinstance(color_palette, list):
+            if isinstance(color_palette, str):
+                color_palette = [color_palette]
+            else:
+                color_palette = []
         special_effects = parsed_params.get("special_effects", [])
         biome_description = parsed_params.get("biome_description", "")
         
@@ -677,7 +719,8 @@ async def generate_world(prompt: Dict) -> Dict:
         
         # Assign colors to landscape elements if palette is provided
         color_assignments = {}
-        if color_palette and len(color_palette) > 0:
+        # Ensure color_palette is a list before checking length
+        if color_palette and isinstance(color_palette, list) and len(color_palette) > 0:
             color_assignments = assign_palette_to_elements(color_palette)
             print(f"[Backend] Assigned colors to elements: {list(color_assignments.keys())}")
 
@@ -976,15 +1019,231 @@ async def scan_world(request: ScanRequest) -> Dict:
     """
     try:
         print("[SCAN] Processing scan request...")
+        print(f"[SCAN] Has image_data: {request.image_data is not None}")
+        print(f"[SCAN] Has streaming_analysis: {request.streaming_analysis is not None}")
         
-        # Handle streaming analysis from Overshoot AI SDK
-        if request.use_streaming and request.streaming_analysis:
-            print("[SCAN] Using streaming analysis from Overshoot AI SDK")
-            print(f"[SCAN] Streaming analysis keys: {list(request.streaming_analysis.keys()) if isinstance(request.streaming_analysis, dict) else 'Not a dict'}")
-            print(f"[SCAN] Streaming analysis type: {type(request.streaming_analysis)}")
+        scan_data = None
+        
+        # PRIORITY 1: Analyze image with OpenAI Vision API (most accurate visual analysis)
+        if request.image_data:
+            print("[SCAN] 📸 Analyzing image with OpenAI Vision API...")
+            print(f"[SCAN] Received image_data length: {len(request.image_data)} characters")
             
-            # The streaming_analysis from frontend is already parsed JSON from the SDK
-            # It might be in raw format or already parsed - handle both cases
+            if len(request.image_data) < 100:
+                raise HTTPException(status_code=400, detail=f"Image data too small ({len(request.image_data)} chars). Make sure camera captured the image properly.")
+            
+            # Analyze image with OpenAI Vision API for detailed visual analysis
+            try:
+                vision_scan_data = await analyze_environment(request.image_data)
+                print(f"[SCAN] ✅ OpenAI Vision analysis complete: biome={vision_scan_data.get('biome') if vision_scan_data else 'None'}")
+            except Exception as vision_error:
+                error_msg = f"OpenAI Vision analysis failed: {str(vision_error)}"
+                print(f"[SCAN ERROR] {error_msg}")
+                import traceback
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=error_msg)
+            
+            if vision_scan_data:
+                scan_data = vision_scan_data
+                
+                # ENHANCEMENT: If we also have Overshoot streaming description, combine both for maximum accuracy
+                if request.streaming_analysis and isinstance(request.streaming_analysis, dict):
+                    description = request.streaming_analysis.get("description", "")
+                    if description:
+                        print("[SCAN] 🎯 Combining OpenAI Vision + Overshoot description for maximum accuracy...")
+                        print(f"[SCAN] Overshoot description: {description[:200]}...")
+                        
+                        # Parse description as prompt to extract semantic details
+                        description_params = parse_prompt(description)
+                        
+                        # Enhance vision analysis with description insights
+                        # Vision provides structured data (biome, objects, colors)
+                        # Description provides contextual details and semantic understanding
+                        
+                        # Refine biome from description (more context-aware)
+                        if description_params.get("biome"):
+                            desc_biome = description_params["biome"]
+                            print(f"[SCAN] Description suggests biome: {desc_biome} (Vision detected: {scan_data.get('biome')})")
+                            # Prefer description biome if it's more specific, otherwise use vision
+                            scan_data["biome"] = desc_biome
+                        
+                        # Extract time of day from description
+                        if description_params.get("time"):
+                            time_from_desc = description_params["time"]
+                            print(f"[SCAN] Description suggests time: {time_from_desc}")
+                            scan_data["time"] = time_from_desc
+                        
+                        # Merge color palettes (combine vision colors with description colors)
+                        if description_params.get("color_palette"):
+                            desc_colors = description_params["color_palette"]
+                            print(f"[SCAN] Description suggests colors: {desc_colors} (type: {type(desc_colors).__name__})")
+                            existing_colors = scan_data.get("colors", [])
+                            
+                            # Ensure both are lists
+                            if not isinstance(desc_colors, list):
+                                if isinstance(desc_colors, (int, float, str)):
+                                    # Convert single value to list
+                                    desc_colors = [desc_colors] if isinstance(desc_colors, str) else []
+                                else:
+                                    desc_colors = []
+                            
+                            if isinstance(existing_colors, list) and isinstance(desc_colors, list):
+                                # Merge and deduplicate colors
+                                merged_colors = list(set(existing_colors + desc_colors))[:10]
+                                scan_data["colors"] = merged_colors
+                            elif isinstance(existing_colors, list):
+                                # Use existing colors if desc_colors is invalid
+                                scan_data["colors"] = existing_colors
+                            elif isinstance(desc_colors, list):
+                                # Use desc_colors if existing_colors is invalid
+                                scan_data["colors"] = desc_colors[:10]
+                        
+                        # Enhance structure counts with description context
+                        if description_params.get("structure"):
+                            desc_structures = description_params["structure"]
+                            print(f"[SCAN] Description suggests structures: {desc_structures}")
+                            vision_objects = scan_data.get("objects", {})
+                            # Merge structure counts intelligently
+                            for struct_type, count in desc_structures.items():
+                                if isinstance(count, (int, float)) and count > 0:
+                                    # Average or take max of vision and description counts
+                                    existing_count = vision_objects.get(struct_type, 0)
+                                    vision_objects[struct_type] = max(existing_count, int(count))
+                            scan_data["objects"] = vision_objects
+                        
+                        # Store original description for reference
+                        scan_data["description"] = description
+                        scan_data["enhanced_with_description"] = True
+                        print("[SCAN] ✅ Successfully combined OpenAI Vision + Overshoot description")
+        
+        # FALLBACK: If no image, use streaming description only
+        elif request.streaming_analysis and request.use_streaming:
+            print("[SCAN] Using streaming analysis only (no image provided)")
+            if isinstance(request.streaming_analysis, dict) and request.streaming_analysis.get("type") == "text_description":
+                # This is a text description - use it directly as a prompt for world generation
+                description = request.streaming_analysis.get("description", "")
+                print(f"[SCAN] Received text description: {description[:200]}...")
+                
+                if description:
+                    # Use the description as a prompt - call generate_world internally
+                    # This reuses all the existing world generation logic
+                    print(f"[SCAN] Using description as prompt for world generation: {description}")
+                    
+                    # Create a prompt dict and call the generate_world function logic
+                    # We'll parse the prompt and generate the world the same way generate-world does
+                    parsed_params = parse_prompt(description)
+                    
+                    biome = parsed_params.get("biome", "default")
+                    time_of_day = parsed_params.get("time", "noon")
+                    enemy_count = parsed_params.get("enemy_count", 5)
+                    structure_counts = parsed_params.get("structure", {})
+                    color_palette = parsed_params.get("color_palette", [])
+                    
+                    # Ensure color_palette is always a list BEFORE using it
+                    if not isinstance(color_palette, list):
+                        if isinstance(color_palette, str):
+                            color_palette = [color_palette]
+                        else:
+                            color_palette = []
+                    
+                    # Set up structure counts (same logic as generate_world)
+                    if not structure_counts:
+                        structure_counts = {}
+                    
+                    tree_count = structure_counts.get("tree", None)
+                    rock_count = structure_counts.get("rock", None)
+                    mountain_count = structure_counts.get("mountain", None)
+                    building_count = structure_counts.get("building", None)
+                    
+                    # Apply defaults
+                    if tree_count is None:
+                        tree_count = 25 if biome.lower() in ["arctic", "winter", "icy"] else 10
+                    if rock_count is None:
+                        rock_count = 5
+                    if mountain_count is None:
+                        mountain_count = 1 if biome.lower() in ["arctic", "winter", "icy", "snow", "frozen"] else 0
+                    
+                    structure_counts["mountain"] = mountain_count
+                    structure_counts["tree"] = tree_count
+                    structure_counts["rock"] = rock_count
+                    if building_count is not None:
+                        structure_counts["building"] = building_count
+                    
+                    # Generate terrain
+                    terrain_data = generate_heightmap(biome, structure_counts, color_palette=color_palette)
+                    heightmap_raw = terrain_data["heightmap_raw"]
+                    placement_mask = terrain_data["placement_mask"]
+                    
+                    # Assign colors if palette provided
+                    color_assignments = {}
+                    # Ensure color_palette is a list
+                    if not isinstance(color_palette, list):
+                        if isinstance(color_palette, str):
+                            color_palette = [color_palette]
+                        else:
+                            color_palette = []
+                    if color_palette and len(color_palette) > 0:
+                        color_assignments = assign_palette_to_elements(color_palette)
+                    
+                    # Generate structures (reuse existing functions)
+                    trees = generate_trees(heightmap_raw, placement_mask, biome, tree_count, terrain_size=256.0)
+                    rocks = generate_rocks(heightmap_raw, biome, rock_count, terrain_size=256.0, placement_mask=placement_mask)
+                    peaks = generate_mountain_peaks(heightmap_raw, biome, terrain_size=256.0, max_peaks=mountain_count)
+                    
+                    structures = {
+                        "trees": trees,
+                        "rocks": rocks,
+                        "peaks": peaks
+                    }
+                    
+                    # Add buildings if needed
+                    if building_count and building_count > 0 and biome.lower() == "city":
+                        buildings = generate_buildings(heightmap_raw, placement_mask, biome, building_count, terrain_size=256.0)
+                        structures["buildings"] = buildings
+                    
+                    # Generate enemies
+                    walkable_points = get_walkable_points(placement_mask=placement_mask, radius=1)
+                    if walkable_points:
+                        spawn_x, spawn_z = random.choice(walkable_points)
+                        spawn_y = heightmap_raw[int(spawn_z)][int(spawn_x)] * 10
+                    else:
+                        spawn_x, spawn_z, spawn_y = 0, 0, 5
+                    
+                    spawn_point = {"x": float(spawn_x), "y": float(spawn_y), "z": float(spawn_z)}
+                    enemies = place_enemies(enemy_count, heightmap_raw, placement_mask, terrain_size=256.0, player_spawn=spawn_point)
+                    
+                    # Generate lighting
+                    lighting_preset = get_lighting_preset(biome, time_of_day)
+                    sky_color = get_sky_color(biome, time_of_day)
+                    lighting_config = {
+                        **lighting_preset,
+                        "background": sky_color
+                    }
+                    
+                    # Get physics config
+                    physics_config = get_combined_config(biome)
+                    
+                    return {
+                        "world": {
+                            **terrain_data,
+                            "biome": biome,
+                            "biome_name": biome,
+                            "time": time_of_day,
+                            "lighting_config": lighting_config,
+                            "color_assignments": color_assignments
+                        },
+                        "structures": structures,
+                        "combat": {
+                            "enemies": enemies,
+                            "enemy_count": len(enemies)
+                        },
+                        "physics": physics_config,
+                        "spawn_point": spawn_point
+                    }
+                else:
+                    raise HTTPException(status_code=400, detail="Empty description received from streaming analysis")
+            
+            # Handle structured data (legacy format)
             from world.overshoot_integration import parse_overshoot_response
             
             # If it's already in the format we expect (has biome, objects keys), use directly
@@ -995,22 +1254,25 @@ async def scan_world(request: ScanRequest) -> Dict:
                 # Parse it through parse_overshoot_response to normalize format
                 scan_data = parse_overshoot_response(request.streaming_analysis)
             
+            # Ensure scan_data has correct types (colors must be a list)
+            if scan_data and isinstance(scan_data, dict):
+                if "colors" in scan_data:
+                    colors_raw = scan_data.get("colors", [])
+                    if not isinstance(colors_raw, list):
+                        if isinstance(colors_raw, str):
+                            scan_data["colors"] = [colors_raw]
+                        else:
+                            scan_data["colors"] = []
+                else:
+                    scan_data["colors"] = []
+                
+                # Ensure objects is a dict
+                if "objects" not in scan_data or not isinstance(scan_data.get("objects"), dict):
+                    scan_data["objects"] = {}
+            
             # Then convert to world params using generate_world_from_scan
             # Note: generate_world_from_scan expects parsed format, so scan_data should already be parsed
-            print(f"[SCAN] Parsed streaming analysis: biome={scan_data.get('biome')}, objects={scan_data.get('objects')}")
-        
-        # Handle single image analysis (legacy or fallback)
-        elif request.image_data:
-            print("[SCAN] Analyzing single image with Vision AI...")
-            print(f"[SCAN] Received image_data length: {len(request.image_data)} characters")
-            
-            if len(request.image_data) < 100:
-                raise HTTPException(status_code=400, detail=f"Image data too small ({len(request.image_data)} chars). Make sure camera captured the image properly.")
-            
-            print(f"[SCAN] Image data preview (first 100 chars): {request.image_data[:100]}...")
-            
-            # Analyze image with vision API
-            scan_data = await analyze_environment(request.image_data)
+            print(f"[SCAN] Parsed streaming analysis: biome={scan_data.get('biome')}, objects={scan_data.get('objects')}, colors type={type(scan_data.get('colors')).__name__}")
         else:
             raise HTTPException(status_code=400, detail="Either image_data or streaming_analysis must be provided")
         
@@ -1018,7 +1280,7 @@ async def scan_world(request: ScanRequest) -> Dict:
             # Check if it's an API key issue
             import os
             api_key = os.getenv("OVERSHOOT_API_KEY")
-            api_url = os.getenv("OVERSHOOT_API_URL", "https://api.overshoot.ai/v1/analyze")
+            api_url = os.getenv("OVERSHOOT_API_URL", "https://cluster1.overshoot.ai/api/v0.2")
             
             if not api_key:
                 raise HTTPException(
@@ -1066,6 +1328,12 @@ async def scan_world(request: ScanRequest) -> Dict:
         # Use existing world generation pipeline
         # Support dynamic biomes from scan data
         scan_color_palette = scan_data.get("colors", [])
+        # Ensure color_palette is always a list
+        if not isinstance(scan_color_palette, list):
+            if isinstance(scan_color_palette, str):
+                scan_color_palette = [scan_color_palette]
+            else:
+                scan_color_palette = []
         terrain_data = generate_heightmap(biome, structure_counts, color_palette=scan_color_palette)
         heightmap_raw = terrain_data["heightmap_raw"]
         placement_mask = terrain_data["placement_mask"]
@@ -1156,8 +1424,65 @@ async def scan_world(request: ScanRequest) -> Dict:
         
         return response
         
+    except HTTPException:
+        # Re-raise HTTPExceptions as-is (they already have proper error messages)
+        raise
     except Exception as e:
-        print(f"[SCAN ERROR] {e}")
+        error_msg = str(e) if str(e) else f"Unknown error: {type(e).__name__}"
+        print(f"[SCAN ERROR] {error_msg}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=error_msg)
+
+class OpenRouterImageAnalysisRequest(BaseModel):
+    image_data: str
+
+@router.post("/analyze-image-openrouter")
+async def analyze_image_openrouter(request: OpenRouterImageAnalysisRequest) -> Dict:
+    """
+    Analyze a single image using OpenRouter Vision API.
+    Called every 3 seconds while streaming to get periodic snapshots.
+    """
+    try:
+        image_data = request.image_data
+        if not image_data:
+            raise HTTPException(status_code=400, detail="No image_data provided")
+        
+        print("[OPENROUTER] Analyzing image (periodic snapshot)...")
+        
+        # Use the existing analyze_with_openai_vision function
+        # It automatically detects OpenRouter API keys
+        result = await analyze_with_openai_vision(image_data)
+        
+        if not result:
+            raise HTTPException(status_code=500, detail="Failed to analyze image with OpenRouter Vision")
+        
+        # Return a simplified description format
+        description = result.get("description", "")
+        if not description:
+            # Try to construct description from result fields
+            objects = result.get("objects", {})
+            biome = result.get("biome", result.get("terrain", {}).get("type", "unknown"))
+            colors = result.get("colors", [])
+            
+            description = f"A {biome} environment"
+            if objects:
+                obj_list = ", ".join([f"{count} {obj_type}" for obj_type, count in objects.items() if count > 0])
+                if obj_list:
+                    description += f" with {obj_list}"
+            if colors:
+                description += f". Colors: {', '.join(colors[:3])}"
+        
+        return {
+            "description": description,
+            "biome": result.get("biome", "unknown"),
+            "objects": result.get("objects", {}),
+            "colors": result.get("colors", []),
+            "timestamp": result.get("timestamp")
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
