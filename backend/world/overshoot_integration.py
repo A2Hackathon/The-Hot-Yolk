@@ -11,35 +11,38 @@ import random
 import requests
 from typing import Dict, List, Optional
 import json
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+backend_dir = Path(__file__).parent.parent
+env_path = backend_dir / ".env"
+load_dotenv(dotenv_path=env_path)
 
 OVERSHOOT_API_KEY = os.getenv("OVERSHOOT_API_KEY")
 OVERSHOOT_API_URL = os.getenv("OVERSHOOT_API_URL", "https://cluster1.overshoot.ai/api/v0.2")
-
-# Debug: Check if API keys are loaded
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
 if OPENAI_API_KEY:
     print(f"[VISION] OpenAI API key loaded (length: {len(OPENAI_API_KEY)} characters)")
+if OPENROUTER_API_KEY:
+    print(f"[VISION] OpenRouter API key loaded (length: {len(OPENROUTER_API_KEY)} characters)")
 if OVERSHOOT_API_KEY:
     print(f"[VISION] Overshoot API key loaded (length: {len(OVERSHOOT_API_KEY)} characters)")
     print(f"[VISION] Overshoot API URL: {OVERSHOOT_API_URL}")
     print("[VISION] NOTE: Overshoot SDK is for streaming video, not single images.")
     print("[VISION] For single image analysis, OpenAI Vision is recommended.")
-if not OPENAI_API_KEY and not OVERSHOOT_API_KEY:
+if not (OPENAI_API_KEY or OPENROUTER_API_KEY or OVERSHOOT_API_KEY):
     print("[VISION] WARNING: No vision API keys found!")
-    print("[VISION] Set either OPENAI_API_KEY or OVERSHOOT_API_KEY in backend/.env")
+    print("[VISION] Set OPENAI_API_KEY, OPENROUTER_API_KEY, or OVERSHOOT_API_KEY in backend/.env")
 
 async def analyze_with_openai_vision(image_data: str) -> Optional[Dict]:
     """
-    Alternative: Use OpenAI Vision API to analyze environment.
-    Set OPENAI_API_KEY in .env to use this instead of Overshoot.
+    Alternative: Use OpenAI/OpenRouter Vision API to analyze environment.
     """
-    openai_key = os.getenv("OPENAI_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
     if not openai_key:
-        print("[VISION] ❌ OPENAI_API_KEY not set in environment")
+        print("[VISION] ❌ Neither OPENAI_API_KEY nor OPENROUTER_API_KEY set in environment")
         return None
     
     try:

@@ -55,15 +55,15 @@ const GameSettingsPanel = ({ onSettingsChange, initialSettings }) => {
   return (
     <div style={{
       position: 'fixed',
-      top: '40px',
-      right: '80px',
+      top: '95px',
+      right: '95px',
       zIndex: 200,
       pointerEvents: 'none',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'flex-end'
     }}>
-      {/* Toggle Button - circular to match other controls */}
+      {/* Toggle Button - positioned in Nintendo Switch layout (top of cluster) */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
@@ -79,7 +79,10 @@ const GameSettingsPanel = ({ onSettingsChange, initialSettings }) => {
           pointerEvents: 'auto',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center'
+          justifyContent: 'center',
+          position: 'relative',
+          top: '0',
+          right: '0'
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.backgroundColor = 'rgba(120, 120, 220, 0.95)';

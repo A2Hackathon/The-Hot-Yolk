@@ -7,6 +7,7 @@ from world.terrain import generate_heightmap, get_walkable_points
 from world.enemy_placer import place_enemies
 from world.lighting import get_lighting_preset, get_sky_color
 from world.physics_config import get_combined_config
+from models.generators import generate_object_template_with_ai
 
 router = APIRouter()
 
@@ -514,15 +515,311 @@ def place_trees_on_terrain(
     print(f"[TREE DEBUG] Placed {len(trees)} trees (biome={biome}, leafless={is_winter})")
     return trees
 
+def generate_room_walls(room_size: float = 30.0, wall_height: float = 8.0, wall_color: str = "#E8E8E8") -> List[Dict]:
+    """Generate 4 walls for a room biome"""
+    walls = []
+    half_size = room_size / 2
+    wall_thickness = 0.5
+    
+    # North wall (back)
+    walls.append({
+        "type": "wall",
+        "position": {"x": 0, "y": wall_height / 2, "z": -half_size},
+        "dimensions": {"width": room_size, "height": wall_height, "depth": wall_thickness},
+        "color": wall_color,
+        "rotation": 0
+    })
+    # South wall (front)
+    walls.append({
+        "type": "wall", 
+        "position": {"x": 0, "y": wall_height / 2, "z": half_size},
+        "dimensions": {"width": room_size, "height": wall_height, "depth": wall_thickness},
+        "color": wall_color,
+        "rotation": 0
+    })
+    # East wall (right)
+    walls.append({
+        "type": "wall",
+        "position": {"x": half_size, "y": wall_height / 2, "z": 0},
+        "dimensions": {"width": wall_thickness, "height": wall_height, "depth": room_size},
+        "color": wall_color,
+        "rotation": 0
+    })
+    # West wall (left)
+    walls.append({
+        "type": "wall",
+        "position": {"x": -half_size, "y": wall_height / 2, "z": 0},
+        "dimensions": {"width": wall_thickness, "height": wall_height, "depth": room_size},
+        "color": wall_color,
+        "rotation": 0
+    })
+    # Floor
+    walls.append({
+        "type": "floor",
+        "position": {"x": 0, "y": 0, "z": 0},
+        "dimensions": {"width": room_size, "height": 0.2, "depth": room_size},
+        "color": "#8B4513",  # Brown floor
+        "rotation": 0
+    })
+    return walls
+
+
+async def generate_scanned_object(obj_name: str, count: int = 1, room_size: float = 30.0) -> List[Dict]:
+    """Generate 3D objects from scanned item names. Uses AI to generate templates for unknown objects."""
+    objects = []
+    obj_lower = obj_name.lower().replace(" ", "_").replace("-", "_")
+    
+    # Object definitions - simple geometric shapes
+    object_templates = {
+        "coffee_maker": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.4, "z": 0}, "dimensions": {"width": 0.4, "height": 0.8, "depth": 0.3}, "color": "#2C2C2C"},
+                {"shape": "cylinder", "position": {"x": 0.1, "y": 0.6, "z": 0.2}, "radius": 0.08, "height": 0.3, "color": "#4A4A4A"},
+            ],
+            "scale": 1.0
+        },
+        "paper_towel": {
+            "parts": [
+                {"shape": "cylinder", "position": {"x": 0, "y": 0.3, "z": 0}, "radius": 0.15, "height": 0.6, "color": "#FFFFFF"},
+                {"shape": "cylinder", "position": {"x": 0, "y": 0.3, "z": 0}, "radius": 0.03, "height": 0.65, "color": "#8B4513"},
+            ],
+            "scale": 1.0
+        },
+        "chair": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.25, "z": 0}, "dimensions": {"width": 0.5, "height": 0.05, "depth": 0.5}, "color": "#8B4513"},
+                {"shape": "box", "position": {"x": 0, "y": 0.55, "z": -0.22}, "dimensions": {"width": 0.5, "height": 0.6, "depth": 0.05}, "color": "#8B4513"},
+                {"shape": "cylinder", "position": {"x": -0.2, "y": 0.12, "z": -0.2}, "radius": 0.03, "height": 0.25, "color": "#5C4033"},
+                {"shape": "cylinder", "position": {"x": 0.2, "y": 0.12, "z": -0.2}, "radius": 0.03, "height": 0.25, "color": "#5C4033"},
+                {"shape": "cylinder", "position": {"x": -0.2, "y": 0.12, "z": 0.2}, "radius": 0.03, "height": 0.25, "color": "#5C4033"},
+                {"shape": "cylinder", "position": {"x": 0.2, "y": 0.12, "z": 0.2}, "radius": 0.03, "height": 0.25, "color": "#5C4033"},
+            ],
+            "scale": 1.0
+        },
+        "table": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.75, "z": 0}, "dimensions": {"width": 1.2, "height": 0.05, "depth": 0.8}, "color": "#8B4513"},
+                {"shape": "cylinder", "position": {"x": -0.5, "y": 0.375, "z": -0.3}, "radius": 0.04, "height": 0.75, "color": "#5C4033"},
+                {"shape": "cylinder", "position": {"x": 0.5, "y": 0.375, "z": -0.3}, "radius": 0.04, "height": 0.75, "color": "#5C4033"},
+                {"shape": "cylinder", "position": {"x": -0.5, "y": 0.375, "z": 0.3}, "radius": 0.04, "height": 0.75, "color": "#5C4033"},
+                {"shape": "cylinder", "position": {"x": 0.5, "y": 0.375, "z": 0.3}, "radius": 0.04, "height": 0.75, "color": "#5C4033"},
+            ],
+            "scale": 1.0
+        },
+        "couch": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.25, "z": 0}, "dimensions": {"width": 2.0, "height": 0.3, "depth": 0.8}, "color": "#4A6741"},
+                {"shape": "box", "position": {"x": 0, "y": 0.55, "z": -0.35}, "dimensions": {"width": 2.0, "height": 0.6, "depth": 0.1}, "color": "#4A6741"},
+                {"shape": "box", "position": {"x": -0.9, "y": 0.4, "z": 0}, "dimensions": {"width": 0.2, "height": 0.4, "depth": 0.8}, "color": "#3D5636"},
+                {"shape": "box", "position": {"x": 0.9, "y": 0.4, "z": 0}, "dimensions": {"width": 0.2, "height": 0.4, "depth": 0.8}, "color": "#3D5636"},
+            ],
+            "scale": 1.0
+        },
+        "lamp": {
+            "parts": [
+                {"shape": "cylinder", "position": {"x": 0, "y": 0.02, "z": 0}, "radius": 0.15, "height": 0.04, "color": "#2C2C2C"},
+                {"shape": "cylinder", "position": {"x": 0, "y": 0.5, "z": 0}, "radius": 0.02, "height": 1.0, "color": "#C0C0C0"},
+                {"shape": "cone", "position": {"x": 0, "y": 1.1, "z": 0}, "radius": 0.2, "height": 0.25, "color": "#FFFFD0"},
+            ],
+            "scale": 1.0
+        },
+        "bed": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.2, "z": 0}, "dimensions": {"width": 1.5, "height": 0.4, "depth": 2.0}, "color": "#FFFFFF"},
+                {"shape": "box", "position": {"x": 0, "y": 0.5, "z": -0.9}, "dimensions": {"width": 1.5, "height": 0.6, "depth": 0.1}, "color": "#8B4513"},
+                {"shape": "box", "position": {"x": 0, "y": 0.45, "z": 0.7}, "dimensions": {"width": 1.3, "height": 0.15, "depth": 0.5}, "color": "#ADD8E6"},
+            ],
+            "scale": 1.0
+        },
+        "monitor": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.4, "z": 0}, "dimensions": {"width": 0.6, "height": 0.4, "depth": 0.05}, "color": "#1A1A1A"},
+                {"shape": "box", "position": {"x": 0, "y": 0.38, "z": 0}, "dimensions": {"width": 0.55, "height": 0.35, "depth": 0.02}, "color": "#4169E1"},
+                {"shape": "box", "position": {"x": 0, "y": 0.1, "z": 0.05}, "dimensions": {"width": 0.08, "height": 0.2, "depth": 0.08}, "color": "#2C2C2C"},
+                {"shape": "box", "position": {"x": 0, "y": 0.02, "z": 0.05}, "dimensions": {"width": 0.25, "height": 0.02, "depth": 0.15}, "color": "#2C2C2C"},
+            ],
+            "scale": 1.0
+        },
+        "plant": {
+            "parts": [
+                {"shape": "cylinder", "position": {"x": 0, "y": 0.15, "z": 0}, "radius": 0.12, "height": 0.3, "color": "#8B4513"},
+                {"shape": "sphere", "position": {"x": 0, "y": 0.4, "z": 0}, "radius": 0.2, "color": "#228B22"},
+                {"shape": "sphere", "position": {"x": 0.1, "y": 0.5, "z": 0.05}, "radius": 0.15, "color": "#2E8B2E"},
+                {"shape": "sphere", "position": {"x": -0.08, "y": 0.45, "z": -0.05}, "radius": 0.12, "color": "#32CD32"},
+            ],
+            "scale": 1.0
+        },
+        "book": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.02, "z": 0}, "dimensions": {"width": 0.15, "height": 0.04, "depth": 0.2}, "color": "#8B0000"},
+            ],
+            "scale": 1.0
+        },
+        "cup": {
+            "parts": [
+                {"shape": "cylinder", "position": {"x": 0, "y": 0.05, "z": 0}, "radius": 0.04, "height": 0.1, "color": "#FFFFFF"},
+            ],
+            "scale": 1.0
+        },
+        "bottle": {
+            "parts": [
+                {"shape": "cylinder", "position": {"x": 0, "y": 0.1, "z": 0}, "radius": 0.04, "height": 0.2, "color": "#87CEEB"},
+                {"shape": "cylinder", "position": {"x": 0, "y": 0.22, "z": 0}, "radius": 0.02, "height": 0.05, "color": "#4169E1"},
+            ],
+            "scale": 1.0
+        },
+        "microwave": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.2, "z": 0}, "dimensions": {"width": 0.6, "height": 0.4, "depth": 0.45}, "color": "#2C2C2C"},
+                {"shape": "box", "position": {"x": -0.1, "y": 0.2, "z": 0.21}, "dimensions": {"width": 0.35, "height": 0.3, "depth": 0.02}, "color": "#1A1A1A"},
+                {"shape": "box", "position": {"x": 0.2, "y": 0.2, "z": 0.21}, "dimensions": {"width": 0.1, "height": 0.25, "depth": 0.02}, "color": "#3C3C3C"},
+            ],
+            "scale": 1.0
+        },
+        "cabinet": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.5, "z": 0}, "dimensions": {"width": 0.8, "height": 1.0, "depth": 0.4}, "color": "#8B4513"},
+                {"shape": "box", "position": {"x": -0.15, "y": 0.5, "z": 0.19}, "dimensions": {"width": 0.3, "height": 0.8, "depth": 0.02}, "color": "#A0522D"},
+                {"shape": "box", "position": {"x": 0.15, "y": 0.5, "z": 0.19}, "dimensions": {"width": 0.3, "height": 0.8, "depth": 0.02}, "color": "#A0522D"},
+            ],
+            "scale": 1.0
+        },
+        "shelf": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 1.0, "z": 0}, "dimensions": {"width": 1.2, "height": 0.03, "depth": 0.25}, "color": "#8B4513"},
+                {"shape": "box", "position": {"x": -0.58, "y": 0.5, "z": 0}, "dimensions": {"width": 0.04, "height": 1.0, "depth": 0.25}, "color": "#8B4513"},
+                {"shape": "box", "position": {"x": 0.58, "y": 0.5, "z": 0}, "dimensions": {"width": 0.04, "height": 1.0, "depth": 0.25}, "color": "#8B4513"},
+            ],
+            "scale": 1.0
+        },
+        "bowl": {
+            "parts": [
+                {"shape": "cylinder", "position": {"x": 0, "y": 0.05, "z": 0}, "radius": 0.12, "height": 0.1, "color": "#FFFFFF"},
+            ],
+            "scale": 1.0
+        },
+        "door": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 1.0, "z": 0}, "dimensions": {"width": 0.9, "height": 2.0, "depth": 0.08}, "color": "#A0522D"},
+                {"shape": "sphere", "position": {"x": 0.35, "y": 0.9, "z": 0.05}, "radius": 0.04, "color": "#FFD700"},
+            ],
+            "scale": 1.0
+        },
+        "light_switch": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 1.2, "z": 0}, "dimensions": {"width": 0.08, "height": 0.12, "depth": 0.02}, "color": "#F5F5F5"},
+                {"shape": "box", "position": {"x": 0, "y": 1.2, "z": 0.015}, "dimensions": {"width": 0.03, "height": 0.05, "depth": 0.01}, "color": "#FFFFFF"},
+            ],
+            "scale": 1.0
+        },
+        "refrigerator": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.9, "z": 0}, "dimensions": {"width": 0.8, "height": 1.8, "depth": 0.7}, "color": "#C0C0C0"},
+                {"shape": "box", "position": {"x": 0, "y": 1.5, "z": 0.34}, "dimensions": {"width": 0.75, "height": 0.6, "depth": 0.02}, "color": "#D3D3D3"},
+                {"shape": "box", "position": {"x": 0, "y": 0.6, "z": 0.34}, "dimensions": {"width": 0.75, "height": 1.0, "depth": 0.02}, "color": "#D3D3D3"},
+            ],
+            "scale": 1.0
+        },
+        "stove": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.45, "z": 0}, "dimensions": {"width": 0.8, "height": 0.9, "depth": 0.6}, "color": "#2C2C2C"},
+                {"shape": "cylinder", "position": {"x": -0.2, "y": 0.92, "z": -0.1}, "radius": 0.1, "height": 0.02, "color": "#1A1A1A"},
+                {"shape": "cylinder", "position": {"x": 0.2, "y": 0.92, "z": -0.1}, "radius": 0.1, "height": 0.02, "color": "#1A1A1A"},
+                {"shape": "cylinder", "position": {"x": -0.2, "y": 0.92, "z": 0.15}, "radius": 0.08, "height": 0.02, "color": "#1A1A1A"},
+                {"shape": "cylinder", "position": {"x": 0.2, "y": 0.92, "z": 0.15}, "radius": 0.08, "height": 0.02, "color": "#1A1A1A"},
+            ],
+            "scale": 1.0
+        },
+        "sink": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.45, "z": 0}, "dimensions": {"width": 0.6, "height": 0.9, "depth": 0.5}, "color": "#808080"},
+                {"shape": "box", "position": {"x": 0, "y": 0.85, "z": 0}, "dimensions": {"width": 0.5, "height": 0.15, "depth": 0.4}, "color": "#C0C0C0"},
+                {"shape": "cylinder", "position": {"x": 0, "y": 1.1, "z": -0.15}, "radius": 0.02, "height": 0.3, "color": "#C0C0C0"},
+            ],
+            "scale": 1.0
+        },
+        "tv": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.5, "z": 0}, "dimensions": {"width": 1.2, "height": 0.7, "depth": 0.08}, "color": "#1A1A1A"},
+                {"shape": "box", "position": {"x": 0, "y": 0.48, "z": 0}, "dimensions": {"width": 1.1, "height": 0.62, "depth": 0.02}, "color": "#000080"},
+                {"shape": "box", "position": {"x": 0, "y": 0.1, "z": 0.1}, "dimensions": {"width": 0.3, "height": 0.2, "depth": 0.15}, "color": "#1A1A1A"},
+            ],
+            "scale": 1.0
+        },
+        "window": {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 1.5, "z": 0}, "dimensions": {"width": 1.0, "height": 1.2, "depth": 0.1}, "color": "#8B4513"},
+                {"shape": "box", "position": {"x": 0, "y": 1.5, "z": 0.03}, "dimensions": {"width": 0.9, "height": 1.1, "depth": 0.02}, "color": "#87CEEB"},
+            ],
+            "scale": 1.0
+        },
+    }
+    
+    # Get template from predefined list, or generate with AI
+    template = object_templates.get(obj_lower)
+    
+    if not template:
+        # Try to generate template with AI
+        print(f"[OBJECT] '{obj_name}' not in templates, asking AI to design it...")
+        ai_template = await generate_object_template_with_ai(obj_name)
+        
+        if ai_template and "parts" in ai_template:
+            template = ai_template
+            print(f"[OBJECT] ✅ AI generated template for '{obj_name}' with {len(template['parts'])} parts")
+        else:
+            # Fallback: Generic object - create a simple colored box
+            print(f"[OBJECT] ⚠️ AI failed, using generic box for '{obj_name}'")
+            template = {
+                "parts": [
+                    {"shape": "box", "position": {"x": 0, "y": 0.25, "z": 0}, "dimensions": {"width": 0.5, "height": 0.5, "depth": 0.5}, "color": "#808080"},
+                ],
+                "scale": 0.8
+            }
+    
+    # Generate requested count of objects at random positions
+    half_room = room_size / 2 - 2  # Keep away from walls
+    for i in range(count):
+        pos_x = random.uniform(-half_room, half_room)
+        pos_z = random.uniform(-half_room, half_room)
+        
+        obj = {
+            "name": f"{obj_name}_{i+1}",
+            "type": "scanned_object",
+            "original_name": obj_name,
+            "position": {"x": pos_x, "y": 0, "z": pos_z},
+            "scale": template["scale"],
+            "parts": template["parts"],
+            "rotation": random.uniform(0, math.pi * 2)
+        }
+        objects.append(obj)
+    
+    return objects
+
+
 @router.post("/generate-world")
 async def generate_world(prompt: Dict) -> Dict:
     try:
         prompt_text = prompt.get("prompt", "")
+        scan_data = prompt.get("scan_data", {})  # New: structured scan data from Overshoot
+        
         if not prompt_text:
             raise HTTPException(status_code=400, detail="No prompt provided")
 
         print("\n" + "="*60)
         print("[Backend] Received prompt:", prompt_text)
+        if scan_data:
+            print("[Backend] Scan data:", scan_data)
+        
+        # Check if this is a room/indoor scan
+        is_room = scan_data.get("is_room", False) or "room" in prompt_text.lower()
+        scanned_biome = scan_data.get("biome", "")
+        if scanned_biome == "room" or scan_data.get("terrain") == "indoor":
+            is_room = True
+        
+        if is_room:
+            print("[Backend] 🏠 ROOM BIOME DETECTED - generating indoor environment")
+            return await generate_room_world_from_scan(scan_data)
+        
         parsed_params = parse_prompt(prompt_text)
         print("[Backend] Parsed params:", parsed_params)
         
@@ -636,3 +933,157 @@ async def generate_world(prompt: Dict) -> Dict:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate-room")
+async def generate_room_endpoint(request: Dict) -> Dict:
+    """Dedicated endpoint for generating room/indoor environments from camera scans"""
+    print("\n" + "="*60)
+    print("[ROOM ENDPOINT] Received room generation request")
+    print(f"[ROOM ENDPOINT] Request data: {request}")
+    
+    return await generate_room_world_from_scan(request)
+
+
+async def generate_room_world_from_scan(scan_data: Dict) -> Dict:
+    """Generate a room/indoor environment with walls and scanned objects"""
+    try:
+        print("[ROOM] ========================================")
+        print("[ROOM] Generating indoor room environment...")
+        print(f"[ROOM] Scan data: {scan_data}")
+        
+        room_size = 30.0  # Room is 30x30 units
+        wall_height = 8.0
+        
+        # Get colors from scan data
+        colors = scan_data.get("colors", ["#E8E8E8", "#8B4513", "#FFFFFF"])
+        wall_color = colors[0] if colors else "#E8E8E8"
+        floor_color = colors[1] if len(colors) > 1 else "#8B4513"
+        
+        print(f"[ROOM] Wall color: {wall_color}, Floor color: {floor_color}")
+        
+        # Generate walls
+        walls = generate_room_walls(room_size, wall_height, wall_color)
+        # Update floor color
+        for wall in walls:
+            if wall.get("type") == "floor":
+                wall["color"] = floor_color
+        
+        print(f"[ROOM] Generated {len(walls)} walls/floor")
+        
+        # Generate scanned objects
+        scanned_objects = []
+        custom_objects = scan_data.get("custom_objects", [])
+        all_objects = scan_data.get("objects", {})
+        
+        print(f"[ROOM] Custom objects from request: {custom_objects}")
+        print(f"[ROOM] All objects from request: {all_objects}")
+        
+        # Process custom objects from scan_data.custom_objects
+        for obj_info in custom_objects:
+            obj_name = obj_info.get("name", "unknown")
+            obj_count = obj_info.get("count", 1)
+            if obj_count > 0:
+                print(f"[ROOM] 📦 Generating {obj_count}x '{obj_name}'...")
+                generated = await generate_scanned_object(obj_name, obj_count, room_size)
+                scanned_objects.extend(generated)
+                print(f"[ROOM]    → Created {len(generated)} object(s)")
+        
+        # Also process any objects from the objects dict that aren't standard outdoor types
+        outdoor_types = ["tree", "rock", "building", "mountain", "peak", "street_lamp"]
+        processed_names = [o.get("name", "").lower().replace(" ", "_") for o in custom_objects]
+        
+        for obj_name, count in all_objects.items():
+            obj_lower = obj_name.lower().replace(" ", "_")
+            # Skip outdoor types and already processed objects
+            if obj_lower in outdoor_types:
+                continue
+            if obj_lower in processed_names:
+                continue
+            
+            obj_count = count if isinstance(count, int) else 1
+            if obj_count > 0:
+                print(f"[ROOM] 📦 Generating {obj_count}x '{obj_name}' from objects dict...")
+                generated = await generate_scanned_object(obj_name, obj_count, room_size)
+                scanned_objects.extend(generated)
+                print(f"[ROOM]    → Created {len(generated)} object(s)")
+        
+        print(f"[ROOM] Generated {len(scanned_objects)} scanned objects")
+        
+        # Create flat heightmap for room (very small, flat terrain)
+        segments = 64
+        heightmap_raw = [[0.1 for _ in range(segments + 1)] for _ in range(segments + 1)]
+        placement_mask = [[1 for _ in range(segments + 1)] for _ in range(segments + 1)]
+        
+        # Create flat color map (floor color)
+        r = int(floor_color[1:3], 16)
+        g = int(floor_color[3:5], 16)
+        b = int(floor_color[5:7], 16)
+        colour_map_array = [[[r, g, b] for _ in range(segments + 1)] for _ in range(segments + 1)]
+        
+        # Spawn point in center of room
+        spawn_point = {"x": 0.0, "y": 1.0, "z": 0.0}
+        
+        # Indoor lighting - bright ambient, soft shadows (matching frontend expected format)
+        lighting_config = {
+            "ambient": {
+                "color": "#FFFAF0",  # Warm white
+                "intensity": 1.0
+            },
+            "directional": {
+                "color": "#FFFFFF",
+                "intensity": 0.5,
+                "position": {"x": 0, "y": 20, "z": 0}  # Light from above
+            },
+            "fog": None,  # No fog indoors
+            "background": "#F5F5F5",  # Light ceiling
+            "northern_lights": False
+        }
+        
+        # Room sky color (ceiling color - light gray/white)
+        sky_colour = "#F5F5F5"
+        
+        # Physics config
+        from world.physics_config import get_combined_config
+        configs = get_combined_config("both")
+        
+        response = {
+            "world": {
+                "biome": "room",
+                "biome_name": "room",
+                "time": "noon",
+                "heightmap_raw": heightmap_raw,
+                "heightmap_url": None,
+                "texture_url": None,
+                "lighting_config": lighting_config,
+                "sky_colour": sky_colour,
+                "colour_map_array": colour_map_array,
+                "is_room": True,
+                "room_size": room_size
+            },
+            "structures": {
+                "trees": [],  # No trees in rooms
+                "rocks": [],  # No rocks in rooms
+                "peaks": [],
+                "buildings": [],
+                "street_lamps": [],
+                "walls": walls,  # Room walls
+                "scanned_objects": scanned_objects  # Objects from camera scan
+            },
+            "combat": {
+                "enemy_count": 0,
+                "enemies": [],
+                "combat_config": configs["combat"]
+            },
+            "physics": configs["physics"],
+            "spawn_point": spawn_point
+        }
+        
+        print(f"[ROOM] ✅ Room world generated with {len(walls)} walls and {len(scanned_objects)} objects")
+        return response
+        
+    except Exception as e:
+        print(f"[ROOM ERROR] {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Room generation failed: {str(e)}")

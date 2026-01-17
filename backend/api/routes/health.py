@@ -1,8 +1,12 @@
 from fastapi import APIRouter
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load environment variables from .env file in backend directory
+backend_dir = Path(__file__).parent.parent.parent
+env_path = backend_dir / ".env"
+load_dotenv(dotenv_path=env_path)
 
 router = APIRouter()
 

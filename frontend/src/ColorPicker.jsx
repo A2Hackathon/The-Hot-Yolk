@@ -125,15 +125,15 @@ const ColorPicker = ({ onColorPaletteChange, initialPalette = null, disabled = f
   return (
     <div style={{
       position: 'fixed',
-      top: '140px',
-      right: '80px',
+      top: '290px',
+      right: '95px',
       zIndex: 200,
       pointerEvents: 'none',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'flex-end'
     }}>
-      {/* Toggle Button */}
+      {/* Toggle Button - positioned in Nintendo Switch layout (bottom of cluster) */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
@@ -149,7 +149,10 @@ const ColorPicker = ({ onColorPaletteChange, initialPalette = null, disabled = f
           pointerEvents: 'auto',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center'
+          justifyContent: 'center',
+          position: 'relative',
+          top: '0',
+          right: '0'
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.backgroundColor = 'rgba(220, 120, 220, 0.95)';
