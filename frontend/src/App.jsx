@@ -4,7 +4,7 @@ import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import GameSettingsPanel from './GameSettingsPanel';
 import ColorPicker from './ColorPicker';
-import { RealtimeVision } from '@overshoot/sdk';
+// AI analysis is handled by backend (overshoot_integration.py)
 
 
 const API_BASE = 'http://localhost:8000/api';
@@ -2420,38 +2420,9 @@ const VoiceWorldBuilder = () => {
         console.warn('[CAMERA] Attempting camera access from non-secure context:', hostname);
       }
 
-      // Check for Overshoot API key
-      // Use window.prompt to avoid conflict with state variable 'prompt'
-      const overshootApiKeyRaw = window.prompt(
-        'Enter your Overshoot AI API Key:\n\n' +
-        'Get your key from: https://cluster1.overshoot.ai/api/v0.2\n\n' +
-        '(Leave empty to use camera only without streaming)'
-      );
-      
-      if (!overshootApiKeyRaw || overshootApiKeyRaw.trim() === '') {
-        // Fallback to basic camera without streaming
-        console.log('[CAMERA] No Overshoot API key provided, using basic camera');
-        await startBasicCamera();
-        return;
-      }
-
-      // Clean the API key: remove all whitespace, newlines, carriage returns, and non-printable characters
-      // This fixes the "String contains non ISO-8859-1 code point" error
-      const overshootApiKey = overshootApiKeyRaw
-        .replace(/\r\n/g, '')  // Remove Windows line breaks
-        .replace(/\r/g, '')     // Remove carriage returns
-        .replace(/\n/g, '')     // Remove newlines
-        .replace(/\s+/g, '')    // Remove all whitespace
-        .trim();
-
-      if (!overshootApiKey || overshootApiKey.length < 10) {
-        alert('Invalid API key format. Please paste only the API key without any extra characters or spaces.');
-        await startBasicCamera();
-        return;
-      }
-
-      // Start Overshoot AI streaming
-      await startOvershootStreaming(overshootApiKey);
+      // Start streaming - sends frames to OpenAI and video to Overshoot (both via backend)
+      console.log('[CAMERA] Starting video streaming...');
+      await startStreamingCapture();
       
     } catch (error) {
       console.error('[CAMERA] Error starting streaming or camera:', error);
@@ -2489,98 +2460,247 @@ const VoiceWorldBuilder = () => {
     }
   };
 
-  const startOvershootStreaming = async (apiKey) => {
+  // Ref for streaming interval and video recording
+  const streamingIntervalRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const videoChunksRef = useRef([]);
+
+  // Main streaming function - sends frames to OpenAI and video to Overshoot (both via backend)
+  const startStreamingCapture = async () => {
     try {
-      console.log('[OVERSHOOT] Starting video streaming with Overshoot AI...');
-      console.log('[OVERSHOOT] API Key preview:', apiKey.substring(0, 10) + '...' + apiKey.substring(apiKey.length - 5));
+      console.log('[STREAMING] Starting capture (frames → OpenAI, video → Overshoot)...');
       
-      // Validate API key format (already cleaned in startCameraCapture)
-      if (!apiKey || apiKey.length < 10) {
-        throw new Error('Invalid API key format. Please check your Overshoot AI API key.');
+      // Reset previous scan results
+      setLastScanResult(null);
+      
+      // Get camera stream
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode: 'environment',
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          } 
+        });
+      } catch (constraintError) {
+        console.log('[OPENAI] Advanced constraints failed, trying basic video...');
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
       }
-
-
-
-      const visionConfig = {
-        apiUrl: 'https://cluster1.overshoot.ai/api/v0.2',
-        apiKey: apiKey,
-        prompt: 'Read any visible text',
-        source: { type: 'camera', cameraFacing: 'environment' },
-        processing: {
-          sampling_ratio: 0.1,
-          fps: 30,
-          clip_length_seconds: 1,
-          delay_seconds: 1
-        },
-        onResult: async (result) => {
-          console.log('[OVERSHOOT] Received analysis:', result);
+      
+      // Store the stream for later use
+      setCameraStream(stream);
+      
+      // First, enable the UI so the video element renders
+      setStreamingActive(true);
+      setScanMode(false); // Don't show full-screen overlay, we have floating preview
+      
+      console.log('[OPENAI] UI enabled, waiting for video element to be available...');
+      
+      // Function to start the analysis interval
+      const startAnalysisInterval = () => {
+        console.log('[STREAMING] ✅ Video ready, starting dual analysis:');
+        console.log('[STREAMING]   - Frames → OpenAI (every 2 seconds)');
+        console.log('[STREAMING]   - Video → Overshoot (every 5 seconds)');
+        
+        // ===== OPENAI: Frame-by-frame analysis =====
+        let frameCount = 0;
+        let isAnalyzingFrame = false;
+        
+        const captureAndAnalyzeFrame = async () => {
+          if (!videoRef.current || videoRef.current.videoWidth === 0) return;
+          if (isAnalyzingFrame) return;
+          
+          isAnalyzingFrame = true;
+          frameCount++;
           
           try {
-            // Result might already be parsed if outputSchema is used
-            let analysis;
-            if (typeof result.result === 'string') {
-              analysis = JSON.parse(result.result);
-            } else {
-              analysis = result.result; // Already an object
+            const canvas = document.createElement('canvas');
+            canvas.width = videoRef.current.videoWidth;
+            canvas.height = videoRef.current.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(videoRef.current, 0, 0);
+            const imageData = canvas.toDataURL('image/jpeg', 0.7);
+            
+            console.log(`[OPENAI] 📸 Frame #${frameCount} → backend/scan-world`);
+            
+            const res = await fetch(`${API_BASE}/scan-world`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image_data: imageData }),
+            });
+            
+            if (res.ok) {
+              const data = await res.json();
+              console.log(`[OPENAI] ✅ Frame #${frameCount} analyzed - Biome: ${data.world?.biome || 'unknown'}`);
+              
+              setLastScanResult({
+                biome: data.world?.biome || data.world?.biome_name || 'unknown',
+                timestamp: new Date().toLocaleTimeString(),
+                frameCount: frameCount,
+                source: 'openai'
+              });
+              
+              if (gameState !== GameState.PLAYING) {
+                await loadWorldFromScan(data);
+              }
             }
-            
-            console.log('[OVERSHOOT] Parsed analysis:', analysis);
-            setLastScanResult(analysis);
-            
-            // Send to backend for world generation
-            await processStreamingResult(analysis);
-          } catch (parseError) {
-            console.error('[OVERSHOOT] Error parsing result:', parseError);
-            console.log('[OVERSHOOT] Raw result:', result.result);
-            console.log('[OVERSHOOT] Result type:', typeof result.result);
+          } catch (error) {
+            console.error('[OPENAI] Frame error:', error);
           }
-        },
-        onError: (error) => {
-          console.error('[OVERSHOOT] SDK Error callback:', error);
-          console.error('[OVERSHOOT] Error details:', {
-            message: error.message,
-            name: error.name,
-            stack: error.stack
+          
+          isAnalyzingFrame = false;
+        };
+        
+        // Start OpenAI frame capture every 2 seconds
+        captureAndAnalyzeFrame();
+        streamingIntervalRef.current = setInterval(captureAndAnalyzeFrame, 2000);
+        
+        // ===== OVERSHOOT: Video recording and analysis =====
+        let videoClipCount = 0;
+        
+        const startVideoRecording = () => {
+          if (!stream) return;
+          
+          try {
+            videoChunksRef.current = [];
+            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            mediaRecorderRef.current = mediaRecorder;
+            
+            mediaRecorder.ondataavailable = (event) => {
+              if (event.data.size > 0) {
+                videoChunksRef.current.push(event.data);
+              }
+            };
+            
+            mediaRecorder.onstop = async () => {
+              videoClipCount++;
+              const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
+              
+              // Convert to base64
+              const reader = new FileReader();
+              reader.onloadend = async () => {
+                const videoBase64 = reader.result;
+                console.log(`[OVERSHOOT] 📹 Video clip #${videoClipCount} (${(videoBlob.size/1024).toFixed(1)}KB) → backend/stream-video`);
+                
+                try {
+                  const res = await fetch(`${API_BASE}/stream-video`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video_data: videoBase64 }),
+                  });
+                  
+                  if (res.ok) {
+                    const data = await res.json();
+                    console.log(`[OVERSHOOT] ✅ Video #${videoClipCount} analyzed - Biome: ${data.world?.biome || 'unknown'}`);
+                  } else {
+                    const errorText = await res.text();
+                    console.log(`[OVERSHOOT] ⚠️ Video analysis: ${errorText.substring(0, 100)}`);
+                  }
+                } catch (error) {
+                  console.log('[OVERSHOOT] Video send error:', error.message);
+                }
+              };
+              reader.readAsDataURL(videoBlob);
+              
+              // Start next recording
+              if (streamingActive) {
+                startVideoRecording();
+              }
+            };
+            
+            mediaRecorder.start();
+            console.log(`[OVERSHOOT] 🎬 Recording video clip #${videoClipCount + 1}...`);
+            
+            // Stop recording after 5 seconds to send clip
+            setTimeout(() => {
+              if (mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+              }
+            }, 5000);
+            
+          } catch (error) {
+            console.log('[OVERSHOOT] MediaRecorder not supported:', error.message);
+          }
+        };
+        
+        // Start video recording for Overshoot
+        startVideoRecording();
+      };
+      
+      // Function to set up video once element is available
+      const setupVideo = () => {
+        if (!videoRef.current) {
+          console.log('[OPENAI] Video element not yet in DOM, retrying...');
+          return false;
+        }
+        
+        console.log('[OPENAI] Video element found, setting up stream...');
+        videoRef.current.srcObject = stream;
+        
+        // Wait for video to load metadata before starting analysis
+        videoRef.current.onloadedmetadata = () => {
+          console.log('[OPENAI] Video metadata loaded:', videoRef.current.videoWidth, 'x', videoRef.current.videoHeight);
+          videoRef.current.play().then(() => {
+            console.log('[OPENAI] Video playing');
+            startAnalysisInterval();
+          }).catch(err => {
+            console.error('[OPENAI] Error playing video:', err);
+            // Try to start anyway
+            startAnalysisInterval();
           });
+        };
+        
+        // Fallback: if metadata already loaded (e.g., video was reused)
+        if (videoRef.current.readyState >= 1) {
+          console.log('[STREAMING] Video already has metadata, starting immediately');
+          videoRef.current.play().catch(() => {});
+          startAnalysisInterval();
+        }
+        
+        return true;
+      };
+      
+      // Wait for React to render the video element, then set it up
+      // Use setTimeout to allow React to re-render with streamingActive=true
+      const waitForVideoElement = () => {
+        let attempts = 0;
+        const maxAttempts = 20; // Try for up to 2 seconds
+        
+        const checkInterval = setInterval(() => {
+          attempts++;
+          if (setupVideo()) {
+            clearInterval(checkInterval);
+            console.log('[STREAMING] ✅ Video setup complete');
+          } else if (attempts >= maxAttempts) {
+            clearInterval(checkInterval);
+            console.error('[STREAMING] ❌ Video element never became available after', maxAttempts * 100, 'ms');
+            alert('Failed to initialize camera preview. Please try again.');
+            setStreamingActive(false);
+            if (stream) {
+              stream.getTracks().forEach(track => track.stop());
+            }
+          }
+        }, 100); // Check every 100ms
+      };
+      
+      // Start waiting for video element after a short delay to let React render
+      setTimeout(waitForVideoElement, 50);
+      
+      // Store a reference to stop the streaming
+      overshootVisionRef.current = {
+        stop: () => {
+          if (streamingIntervalRef.current) {
+            clearInterval(streamingIntervalRef.current);
+            streamingIntervalRef.current = null;
+          }
         }
       };
-
-      console.log('[OVERSHOOT] Creating RealtimeVision with config:', {
-        apiUrl: visionConfig.apiUrl || '(using SDK default)',
-        apiKey: visionConfig.apiKey.substring(0, 10) + '...',
-        hasPrompt: !!visionConfig.prompt,
-        hasSource: !!visionConfig.source
-      });
-
-      const vision = new RealtimeVision(visionConfig);
-
-      overshootVisionRef.current = vision;
-      
-      console.log('[OVERSHOOT] Attempting to start stream...');
-      
-      // Start the stream
-      await vision.start();
-      
-      setStreamingActive(true);
-      setScanMode(true);
-      
-      console.log('[OVERSHOOT] ✅ Video streaming started successfully');
-      
-      // Show video preview if available
-      if (videoRef.current) {
-        // Try to get video element from vision instance
-        if (vision.videoElement) {
-          videoRef.current.srcObject = vision.videoElement.srcObject;
-        } else if (vision.source) {
-          // Alternative way to access video stream
-          videoRef.current.srcObject = vision.source;
-        }
-      }
       
     } catch (error) {
-      console.error('[OVERSHOOT] Error starting streaming:', error);
-      console.error('[OVERSHOOT] Error type:', error.constructor.name);
-      console.error('[OVERSHOOT] Full error:', error);
+      console.error('[STREAMING] Error starting streaming:', error);
+      console.error('[STREAMING] Error type:', error.constructor.name);
+      console.error('[STREAMING] Full error:', error);
       
       let errorMessage = 'Failed to start Overshoot streaming.\n\n';
       
@@ -2941,25 +3061,42 @@ const VoiceWorldBuilder = () => {
   };
 
   const stopCameraCapture = async () => {
-    // Stop Overshoot streaming if active
-    if (overshootVisionRef.current && streamingActive) {
-      try {
-        await overshootVisionRef.current.stop();
-        console.log('[OVERSHOOT] Streaming stopped');
-      } catch (error) {
-        console.error('[OVERSHOOT] Error stopping stream:', error);
-      }
-      overshootVisionRef.current = null;
-      setStreamingActive(false);
+    console.log('[STREAMING] Stopping all capture...');
+    
+    // Stop frame capture interval (OpenAI)
+    if (streamingIntervalRef.current) {
+      clearInterval(streamingIntervalRef.current);
+      streamingIntervalRef.current = null;
+      console.log('[OPENAI] Frame capture stopped');
     }
     
-    // Stop basic camera stream if active
+    // Stop video recording (Overshoot)
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+      console.log('[OVERSHOOT] Video recording stopped');
+    }
+    
+    // Stop Overshoot SDK streaming if active (legacy)
+    if (overshootVisionRef.current) {
+      try {
+        await overshootVisionRef.current.stop();
+      } catch (error) {
+        // Ignore errors
+      }
+      overshootVisionRef.current = null;
+    }
+    
+    // Stop camera stream
     if (cameraStream) {
       cameraStream.getTracks().forEach(track => track.stop());
       setCameraStream(null);
     }
     
+    setStreamingActive(false);
+    setLastScanResult(null);
     setScanMode(false);
+    console.log('[STREAMING] All capture stopped');
   };
 
   const captureAndScanWorld = async () => {
@@ -5237,6 +5374,165 @@ const VoiceWorldBuilder = () => {
           ? 'Camera: basic mode'
           : 'Camera: off'}
       </div>
+
+      {/* Floating Camera Preview while Streaming */}
+      {streamingActive && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            zIndex: 150,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '10px',
+          }}
+        >
+          {/* Camera Preview Rectangle */}
+          <div
+            style={{
+              width: '280px',
+              height: '210px',
+              borderRadius: '12px',
+              overflow: 'hidden',
+              border: '3px solid #22c55e',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+              backgroundColor: '#000',
+              position: 'relative',
+            }}
+          >
+            {/* Live indicator */}
+            <div
+              style={{
+                position: 'absolute',
+                top: '10px',
+                left: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                backgroundColor: 'rgba(220, 38, 38, 0.9)',
+                padding: '4px 10px',
+                borderRadius: '4px',
+                zIndex: 10,
+              }}
+            >
+              <div
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: '#fff',
+                  animation: 'pulse 1.5s ease-in-out infinite',
+                }}
+              />
+              <span style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                LIVE
+              </span>
+            </div>
+            
+            {/* Analysis status indicator */}
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '10px',
+                left: '10px',
+                right: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                backgroundColor: lastScanResult ? 'rgba(34, 197, 94, 0.9)' : 'rgba(59, 130, 246, 0.9)',
+                padding: '6px 12px',
+                borderRadius: '4px',
+                zIndex: 10,
+              }}
+            >
+              {lastScanResult ? (
+                <>
+                  <span style={{ fontSize: '14px' }}>✅</span>
+                  <span style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                    #{lastScanResult.frameCount || 1}: {lastScanResult.biome || lastScanResult.raw_text?.substring(0, 20) || 'Received'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <div
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      border: '2px solid #fff',
+                      borderTopColor: 'transparent',
+                      borderRadius: '50%',
+                      animation: 'spin 1s linear infinite',
+                    }}
+                  />
+                  <span style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                    Waiting for analysis...
+                  </span>
+                </>
+              )}
+            </div>
+            
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                transform: 'scaleX(-1)', // Mirror for better UX
+              }}
+            />
+          </div>
+          
+          {/* Stop Streaming Button */}
+          <button
+            onClick={stopCameraCapture}
+            style={{
+              padding: '10px 20px',
+              fontSize: '14px',
+              backgroundColor: '#dc2626',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              boxShadow: '0 4px 12px rgba(220, 38, 38, 0.4)',
+              transition: 'background-color 0.2s, transform 0.1s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#b91c1c';
+              e.currentTarget.style.transform = 'scale(1.02)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = '#dc2626';
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+          >
+            🛑 Stop Streaming
+          </button>
+        </div>
+      )}
+
+      {/* CSS for animations */}
+      <style>
+        {`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+          }
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}
+      </style>
 
      {gameState === GameState.PLAYING && (
   <GameSettingsPanel 

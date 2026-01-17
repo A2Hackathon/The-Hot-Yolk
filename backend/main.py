@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from api.routes.generate import router as generate_router
 from api.routes.update import router as update_router
 from api.routes.health import router as health_router
+from api.routes.scan import router as scan_router
 
 
 # Create FastAPI app
@@ -31,6 +32,7 @@ app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 app.include_router(generate_router, prefix="/api")
 app.include_router(update_router, prefix="/api")
 app.include_router(health_router, prefix="/api")
+app.include_router(scan_router, prefix="/api")
 
 @app.get("/")
 async def root():

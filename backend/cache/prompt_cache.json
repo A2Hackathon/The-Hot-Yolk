@@ -1517,5 +1517,92 @@
     "hit_count": 0,
     "last_accessed": 1768650129.9334807,
     "prompt_preview": "arctic"
+  },
+  "b7bc28f0c3cbd471": {
+    "params": {
+      "biome": "lava",
+      "biome_description": "A world of intense heat and molten lava, with volcanic landscapes and burning skies",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 0,
+        "rock": 40,
+        "mountain": 12,
+        "building": 0,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "lava_fountain",
+          "position": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.5,
+          "parts": [
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 2.0,
+                "height": 4.0
+              },
+              "color": "#FF9900"
+            }
+          ]
+        },
+        {
+          "name": "magma_pit",
+          "position": {
+            "x": -15.0,
+            "y": 0.0,
+            "z": 30.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 45,
+            "z": 0
+          },
+          "scale": 2.0,
+          "parts": [
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0,
+                "y": -1.0,
+                "z": 0
+              },
+              "radius": 3.0,
+              "color": "#FF3300"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#FF9900",
+        "#FF6600",
+        "#FF3300",
+        "#CC0000"
+      ],
+      "special_effects": [
+        "glow",
+        "smoke"
+      ]
+    },
+    "timestamp": 1768673107.2874727,
+    "hit_count": 0,
+    "last_accessed": 1768673107.287474,
+    "prompt_preview": "create a lava world"
   }
 }

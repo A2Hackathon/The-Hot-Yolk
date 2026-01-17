@@ -5,16 +5,12 @@ Supports OpenAI Vision API (recommended for single images) and Overshoot AI (str
 NOTE: Overshoot AI SDK (@overshoot/sdk) is designed for real-time video streaming,
 not single image analysis. For single image capture (our use case), OpenAI Vision API
 is the recommended approach.
-
-To use:
-1. OpenAI Vision (recommended): Set OPENAI_API_KEY in .env
-2. Overshoot AI (if REST endpoint exists): Set OVERSHOOT_API_KEY in .env
 """
 import os
+import random
 import requests
 from typing import Dict, List, Optional
 import json
-import random
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -174,61 +170,117 @@ DO NOT include any text, descriptions, or explanations. Return ONLY the JSON obj
         return None
 
 
-async def analyze_with_overshoot_rest(image_base64: str) -> Optional[Dict]:
+async def analyze_video_with_overshoot(video_base64: str) -> Optional[Dict]:
     """
-    Analyze image using Overshoot AI REST endpoint.
-    This is for single image analysis (not streaming).
+    Analyze VIDEO using Overshoot AI.
+    This sends the full video data to Overshoot for analysis.
+    
+    Args:
+        video_base64: Base64 encoded video data (with or without data URL prefix)
+    
+    Returns:
+        Dict with analysis results or None if failed
     """
     if not OVERSHOOT_API_KEY:
-        print("[VISION] OVERSHOOT_API_KEY not set - skipping Overshoot analysis")
+        print("[OVERSHOOT VIDEO] ❌ OVERSHOOT_API_KEY not set - cannot analyze video")
         return None
     
     try:
-        # Remove data URL prefix if present
-        if ',' in image_base64:
-            image_base64 = image_base64.split(',')[1]
+        # Remove data URL prefix if present (e.g., "data:video/webm;base64,")
+        video_data = video_base64
+        if ',' in video_base64:
+            video_data = video_base64.split(',')[1]
         
         headers = {
             "Authorization": f"Bearer {OVERSHOOT_API_KEY}",
             "Content-Type": "application/json"
         }
         
+        # Detailed prompt for video analysis - return JSON
+        json_prompt = """Analyze this video and identify the environment shown. Return ONLY a valid JSON object:
+{
+  "biome": "arctic|forest|desert|city|room|default",
+  "objects": {
+    "tree": {"count": 0, "colors": {"leaves": "#HEX", "trunk": "#HEX"}},
+    "rock": {"count": 0, "color": "#HEX"},
+    "building": {"count": 0, "color": "#HEX"},
+    "mountain": {"count": 0, "color": "#HEX"},
+    "chair": {"count": 0, "color": "#HEX"},
+    "couch": {"count": 0, "color": "#HEX"},
+    "table": {"count": 0, "color": "#HEX"}
+  },
+  "terrain": {"type": "flat|hilly|mountainous|indoor", "color": "#HEX"},
+  "sky": {"color": "#HEX"},
+  "colors": {"palette": ["#HEX", "#HEX", "#HEX"]},
+  "weather": "clear|cloudy|rainy|snowy|foggy"
+}
+
+RULES:
+1. Return ONLY valid JSON - no text, no explanations
+2. ALL colors MUST be hex format (#RRGGBB)
+3. Count visible objects accurately across all frames
+4. Ignore humans/people in the video
+5. Focus on environment, furniture, and structures
+6. Analyze the entire video duration"""
+        
+        # Overshoot video analysis endpoint
+        video_api_url = OVERSHOOT_API_URL.replace('/v0.2', '/v0.2/video') if '/v0.2' in OVERSHOOT_API_URL else f"{OVERSHOOT_API_URL}/video"
+        
         payload = {
-            "image": image_base64,
-            "analysis_type": "environment_scan",
+            "video": video_data,
+            "prompt": json_prompt,
+            "analysis_type": "video_environment_scan",
+            "response_format": "json",
             "features": [
                 "object_detection",
-                "terrain_classification",
+                "terrain_classification", 
                 "weather_detection",
                 "color_palette",
-                "spatial_relationships"
+                "spatial_relationships",
+                "temporal_analysis"
             ]
         }
         
-        print(f"[OVERSHOOT] Analyzing frame with Overshoot REST API...")
+        print(f"[OVERSHOOT VIDEO] 📹 Analyzing video with Overshoot AI...")
+        print(f"[OVERSHOOT VIDEO] API URL: {video_api_url}")
+        print(f"[OVERSHOOT VIDEO] Video data size: {len(video_data)} characters")
+        print(f"[OVERSHOOT VIDEO] API Key: {OVERSHOOT_API_KEY[:10]}..." if OVERSHOOT_API_KEY else "[OVERSHOOT VIDEO] No API key")
         
         response = requests.post(
-            OVERSHOOT_API_URL,
+            video_api_url,
             headers=headers,
             json=payload,
-            timeout=30
+            timeout=60  # Longer timeout for video
         )
         
         if response.status_code == 200:
             result = response.json()
-            print(f"[OVERSHOOT] ✅ Successfully analyzed frame with Overshoot")
+            print(f"[OVERSHOOT VIDEO] ✅ Successfully analyzed video")
+            print(f"[OVERSHOOT VIDEO] Response: {str(result)[:500]}")
             return parse_overshoot_response(result)
         elif response.status_code == 404:
-            print(f"[OVERSHOOT] ⚠️ REST API endpoint not found (404). Overshoot may only support streaming SDK, not single image REST API.")
-            print(f"[OVERSHOOT] Attempted URL: {OVERSHOOT_API_URL}")
-            print(f"[OVERSHOOT] For single image/video analysis, use OpenAI Vision API instead (set OPENAI_API_KEY).")
+            print(f"[OVERSHOOT VIDEO] ⚠️ Video endpoint not found (404)")
+            print(f"[OVERSHOOT VIDEO] Tried URL: {video_api_url}")
+            print(f"[OVERSHOOT VIDEO] Overshoot may not support video upload - try their streaming SDK instead")
+            return None
+        elif response.status_code == 401:
+            print(f"[OVERSHOOT VIDEO] ❌ Authentication failed (401). Check OVERSHOOT_API_KEY.")
+            return None
+        elif response.status_code == 413:
+            print(f"[OVERSHOOT VIDEO] ❌ Video too large (413). Try a shorter recording.")
             return None
         else:
-            print(f"[OVERSHOOT] API returned status {response.status_code}: {response.text[:200]}")
+            print(f"[OVERSHOOT VIDEO] API returned status {response.status_code}: {response.text[:500]}")
             return None
             
+    except requests.exceptions.Timeout:
+        print(f"[OVERSHOOT VIDEO] ⚠️ Request timed out after 60 seconds")
+        return None
+    except requests.exceptions.ConnectionError as e:
+        print(f"[OVERSHOOT VIDEO] ❌ Connection error: {e}")
+        return None
     except Exception as e:
-        print(f"[OVERSHOOT] Error analyzing with Overshoot REST: {e}")
+        print(f"[OVERSHOOT VIDEO] Error analyzing video: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -236,12 +288,10 @@ async def analyze_with_overshoot_rest(image_base64: str) -> Optional[Dict]:
 
 async def analyze_environment(image_data: str) -> Dict:
     """
-    Analyze environment image using available vision AI services.
+    Analyze environment image using OpenAI Vision API.
     
-    Priority:
-    1. OpenAI Vision API (recommended - designed for single images)
-    2. Overshoot AI REST endpoint (if available - NOTE: Overshoot SDK is for streaming)
-    3. Fallback mock data
+    NOTE: For single image/frame analysis, use OpenAI Vision.
+          For video analysis, use analyze_video_with_overshoot() instead.
     
     Args:
         image_data: Base64 encoded image string (with or without data URL prefix)
@@ -255,29 +305,17 @@ async def analyze_environment(image_data: str) -> Dict:
         - weather: Weather condition string
         - terrain_type: Terrain type string
     """
-    # Try OpenAI Vision first (recommended for single image analysis)
-    print(f"[analyze_environment] Attempting OpenAI Vision analysis...")
+    # Use OpenAI Vision for single image/frame analysis
+    print(f"[OPENAI] Analyzing image with OpenAI Vision...")
     openai_result = await analyze_with_openai_vision(image_data)
     if openai_result:
-        print("[VISION] ✅ Using OpenAI Vision API result")
+        print("[OPENAI] ✅ Image analyzed successfully")
         return openai_result
-    else:
-        print("[analyze_environment] OpenAI Vision returned None, checking why...")
     
-    # If OpenAI Vision failed, try Overshoot REST endpoint as fallback
-    if OVERSHOOT_API_KEY:
-        print("[analyze_environment] Trying Overshoot REST endpoint as fallback...")
-        overshoot_result = await analyze_with_overshoot_rest(image_data)
-        if overshoot_result:
-            print("[VISION] ✅ Using Overshoot REST API result (fallback)")
-            return overshoot_result
-    
-    # If no APIs available or both failed, use fallback
-    if not OVERSHOOT_API_KEY and not OPENAI_API_KEY:
-        print("[VISION] No API keys set - using fallback mode")
-        print("[VISION] To use real AI analysis:")
-        print("[VISION]   - Set OPENAI_API_KEY in .env (recommended for single images)")
-        print("[VISION]   - OR set OVERSHOOT_API_KEY in .env (if REST endpoint exists)")
+    # If OpenAI Vision failed and no API key set, use fallback
+    if not OPENAI_API_KEY:
+        print("[VISION] ❌ OPENAI_API_KEY not set - using fallback mode")
+        print("[VISION] To use real AI analysis, set OPENAI_API_KEY in .env")
         # Return mock data for testing without API key
         return {
             "biome": "arctic",
@@ -291,10 +329,9 @@ async def analyze_environment(image_data: str) -> Dict:
             "terrain_type": "mountainous"
         }
     
-    # Both APIs tried but both failed - return None so caller knows
-    print("[analyze_environment] ❌ Both OpenAI Vision and Overshoot REST failed - no API keys available or all API calls failed")
-    print(f"[analyze_environment] OPENAI_API_KEY present: {OPENAI_API_KEY is not None}")
-    print(f"[analyze_environment] OVERSHOOT_API_KEY present: {OVERSHOOT_API_KEY is not None}")
+    # OpenAI failed - return None
+    print("[OPENAI] ❌ OpenAI Vision analysis failed")
+    print(f"[OPENAI] OPENAI_API_KEY present: {OPENAI_API_KEY is not None}")
     return None
 
 
