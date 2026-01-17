@@ -6,7 +6,7 @@ DEFAULT_PHYSICS = {
     "player": {
         "speed": 5.0,
         "jump_height": 3.0,
-        "gravity": -20.0,
+        "gravity": 30.0,
         "acceleration": 20.0,
     },
     "mechanic": {

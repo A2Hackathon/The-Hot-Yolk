@@ -8,8 +8,8 @@ export default defineConfig({
     port: 3000,
     strictPort: true,
     proxy: {
-      '/api': 'http://localhost:8001',
-      '/assets': 'http://localhost:8001'
+      '/api': 'http://localhost:8000',
+      '/assets': 'http://localhost:8000'
     },
     // Enable HTTPS for camera access from network (optional)
     // To use this, you'd need to generate SSL certificates

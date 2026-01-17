@@ -6,8 +6,6 @@ from fastapi.staticfiles import StaticFiles
 from api.routes.generate import router as generate_router
 from api.routes.update import router as update_router
 from api.routes.health import router as health_router
-from api.routes.models import router as models_router
-from api.routes.voice import router as voice_router
 
 
 # Create FastAPI app
@@ -26,14 +24,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.middleware("http")
-async def log_requests(request, call_next):
-    print(f"REQUEST: {request.method} {request.url.path}")
-    response = await call_next(request)
-    print(f"RESPONSE: {response.status_code}")
-    return response
-
-
 # Serve generated assets (heightmaps, skyboxes, enemy textures)
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 
@@ -41,8 +31,6 @@ app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 app.include_router(generate_router, prefix="/api")
 app.include_router(update_router, prefix="/api")
 app.include_router(health_router, prefix="/api")
-app.include_router(models_router, prefix="/api")
-app.include_router(voice_router, prefix="/api")
 
 @app.get("/")
 async def root():
@@ -54,29 +42,18 @@ async def root():
         "docs": "/docs"
     }
 
-@app.get("/test")
-async def test_endpoint():
-    return {"message": "Test working"}
-
 # Run server if executed directly
 if __name__ == "__main__":
     import uvicorn
     print("=" * 60)
     print("🌍 AI World Builder Backend Starting...")
-    
-    print("DEBUG: Listing all registered routes:")
-    for route in app.routes:
-        if hasattr(route, "path"):
-             print(f"  - {route.path} [{','.join(route.methods) if hasattr(route, 'methods') else 'mount'}]")
-    
     print(f"API Docs: http://localhost:8000/docs")
-
     print(f"Health Check: http://localhost:8000/api/health")
     print("=" * 60)
     
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8001,
+        port=8000,
         reload=True  # Auto-reload on code changes
     )

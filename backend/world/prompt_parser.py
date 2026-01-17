@@ -340,12 +340,14 @@ CRITICAL RULES:
 5. DON'T convert specific locations to generic biomes - "gotham" stays "gotham", not "city"
 6. If the input is unclear/gibberish/random → Be CREATIVE and imaginative
 7. ALWAYS return valid JSON, no matter what the input is
+8. ALWAYS generate EXACTLY 2 distinct types of "creative_objects" that are NOT standard biome objects (trees, rocks, etc.). These must be deduced from the biome name and prompt.
 
 IMPORTANT: 
 - User wrote: "gotham" → biome: "gotham" (NOT "city"), generate DARK colors based on Gotham's visual identity
 - User wrote: "tokyo" → biome: "tokyo" (NOT "city"), generate NEON colors based on Tokyo's visual identity  
 - User wrote: "metropolis" → biome: "metropolis" (NOT "city"), generate BRIGHT colors based on Metropolis's visual identity
 - Use the EXACT location/character name from the user's prompt as the biome name!
+- ALWAYS generate 2 creative objects (e.g., for "gotham": "bat_signal", "gargoyle")
 
 THEME RESEARCH & CONTEXTUAL AWARENESS:
 When user mentions a location/character/theme, USE YOUR KNOWLEDGE to generate authentic settings:
@@ -583,9 +585,9 @@ Return ONLY this JSON structure (NO markdown, NO backticks):
     "building": <number>,
     "street_lamp": <number>
   },
-  "creative_objects": [     // OPTIONAL: Custom objects built from shapes (cars, chairs, statues, etc.)
+  "creative_objects": [     // REQUIRED: EXACTLY 2 creative objects NOT in standard biome
     {
-      "name": "car",
+      "name": "bat_signal",
       "position": {"x": 10.0, "y": 0.0, "z": 20.0},
       "rotation": {"x": 0, "y": 0, "z": 0},
       "scale": 1.0,
@@ -597,6 +599,20 @@ Return ONLY this JSON structure (NO markdown, NO backticks):
           "color": "#FF0000"
         }
       ]
+    },
+    {
+      "name": "gargoyle",
+      "position": {"x": -15.0, "y": 0.0, "z": 30.0},
+      "rotation": {"x": 0, "y": 45, "z": 0},
+      "scale": 1.2,
+      "parts": [
+        {
+          "shape": "sphere",
+          "position": {"x": 0, "y": 1.0, "z": 0},
+          "radius": 0.5,
+          "color": "#808080"
+        }
+      ]
     }
   ],
   "color_palette": ["#HEX", "#HEX", ...],
@@ -605,6 +621,8 @@ Return ONLY this JSON structure (NO markdown, NO backticks):
 
 REMEMBER: 
 - NEVER refuse to create a world. Turn ANYTHING into valid parameters!
+- ALWAYS generate EXACTLY 2 creative_objects that are NOT standard biome objects (trees, rocks, buildings, street_lamps, mountains)
+- These 2 creative objects MUST be deduced from the biome name and user prompt
 - If user asks for custom objects (cars, chairs, statues, vehicles, furniture, robots, etc.), use "creative_objects" to build them from shapes!
 - COLORS ARE YOUR RESPONSIBILITY: 
   * Read what the user ACTUALLY wrote (e.g., "gotham")
@@ -631,6 +649,11 @@ CRITICAL INSTRUCTIONS:
    
 3. Match the visual identity of what the user mentioned
    - Colors, lighting, structures should all match the theme's authentic visual characteristics
+   
+4. ALWAYS generate EXACTLY 2 creative_objects that are NOT standard biome objects
+   - These 2 objects MUST be deduced from the biome name and user prompt
+   - Examples: For "gotham" → "bat_signal" and "gargoyle"; For "tokyo" → "neon_sign" and "vending_machine"
+   - NEVER include trees, rocks, buildings, street_lamps, or mountains as creative_objects
 
 Create a world that matches the EXACT prompt the user wrote above."""}
             ],

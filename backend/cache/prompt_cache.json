@@ -113,5 +113,1409 @@
     "hit_count": 0,
     "last_accessed": 1768541216.6741977,
     "prompt_preview": "gotham"
+  },
+  "10d1aa2c7069b216": {
+    "params": {
+      "biome": "indoor room",
+      "biome_description": "A quiet, intimate, and personal space with a dominant background of horizontal blinds and a neutral color palette.",
+      "time": "noon",
+      "enemy_count": 0,
+      "weapon": "none",
+      "structure": {
+        "tree": 0,
+        "rock": 0,
+        "mountain": 0,
+        "building": 1,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "horizontal blinds",
+          "position": {
+            "x": 0.0,
+            "y": 2.0,
+            "z": -5.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "plane",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 5.0,
+                "height": 3.0
+              },
+              "color": "#F5F5DC"
+            }
+          ]
+        },
+        {
+          "name": "white wall",
+          "position": {
+            "x": 3.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "plane",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 5.0,
+                "height": 3.0
+              },
+              "color": "#FFFFFF"
+            }
+          ]
+        },
+        {
+          "name": "white door frame",
+          "position": {
+            "x": 3.5,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "plane",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 1.0,
+                "height": 3.0
+              },
+              "color": "#FFFFFF"
+            }
+          ]
+        },
+        {
+          "name": "person",
+          "position": {
+            "x": 0.0,
+            "y": -1.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 0.5
+              },
+              "color": "#F0E4CC"
+            },
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": -0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 0.2,
+                "height": 1.0
+              },
+              "color": "#2F2F2F"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#F5F5DC",
+        "#2F2F2F",
+        "#F0E4CC",
+        "#FFFFFF"
+      ],
+      "special_effects": [
+        "soft lighting",
+        "diffuse illumination"
+      ]
+    },
+    "timestamp": 1768638720.714221,
+    "hit_count": 0,
+    "last_accessed": 1768638720.7142227,
+    "prompt_preview": "Based on the video feed, here is a detailed description of the scene, intended for use in generating"
+  },
+  "5db61ab7d1c68de7": {
+    "params": {
+      "biome": "indoor bedroom",
+      "biome_description": "A quiet, intimate indoor setting with a personal, everyday atmosphere, featuring a young girl with long, dark hair and a hand gently touching her hair, set against a background of window blinds, a pale lavender/blue wall, and a small, colorful piece of artwork.",
+      "time": "noon",
+      "enemy_count": 0,
+      "weapon": "none",
+      "structure": {
+        "tree": 0,
+        "rock": 0,
+        "mountain": 0,
+        "building": 1,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "window blinds",
+          "position": {
+            "x": 5.0,
+            "y": 2.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "plane",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 4.0,
+                "height": 2.0
+              },
+              "color": "#F5F5F5"
+            }
+          ]
+        },
+        {
+          "name": "wall",
+          "position": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "plane",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 10.0,
+                "height": 5.0
+              },
+              "color": "#C7B8EA"
+            }
+          ]
+        },
+        {
+          "name": "framed artwork",
+          "position": {
+            "x": 3.0,
+            "y": 2.5,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 0.5,
+          "parts": [
+            {
+              "shape": "frame",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 1.0,
+                "height": 1.0
+              },
+              "color": "#FFFFFF"
+            },
+            {
+              "shape": "image",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 0.8,
+                "height": 0.8
+              },
+              "color": "#FF69B4"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#C7B8EA",
+        "#F5F5F5",
+        "#FFC0CB",
+        "#663300"
+      ],
+      "special_effects": [
+        "soft lighting",
+        "diffuse shadows"
+      ]
+    },
+    "timestamp": 1768639308.0111997,
+    "hit_count": 0,
+    "last_accessed": 1768639308.0112007,
+    "prompt_preview": "Based on the provided video frames, here is a detailed description of the scene, intended for use in"
+  },
+  "c40c561c42bebda3": {
+    "params": {
+      "biome": "indoor room",
+      "biome_description": "A cozy, intimate space with a casual atmosphere, featuring a person in a residential setting with warm lighting and soft textures.",
+      "time": "noon",
+      "enemy_count": 0,
+      "weapon": "none",
+      "structure": {
+        "tree": 0,
+        "rock": 0,
+        "mountain": 0,
+        "building": 1,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "couch",
+          "position": {
+            "x": 2.0,
+            "y": 0.0,
+            "z": -3.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 3.0,
+                "height": 1.0,
+                "depth": 2.0
+              },
+              "color": "#FFC0CB"
+            }
+          ]
+        },
+        {
+          "name": "window",
+          "position": {
+            "x": -2.0,
+            "y": 1.0,
+            "z": -3.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "rectangle",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 2.0,
+                "height": 2.0
+              },
+              "color": "#F5F5DC"
+            }
+          ]
+        },
+        {
+          "name": "wall art",
+          "position": {
+            "x": 1.0,
+            "y": 2.0,
+            "z": -3.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "circle",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 0.5
+              },
+              "color": "#C9E4CA"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#FFC0CB",
+        "#F5F5DC",
+        "#C9E4CA",
+        "#964B00",
+        "#786C3B"
+      ],
+      "special_effects": [
+        "soft lighting",
+        "intimate atmosphere"
+      ]
+    },
+    "timestamp": 1768639321.1440835,
+    "hit_count": 0,
+    "last_accessed": 1768639321.1440842,
+    "prompt_preview": "Based on the provided video frames, here is a detailed description of the scene, intended for use in"
+  },
+  "3f6f82132acbb494": {
+    "params": {
+      "biome": "living room",
+      "biome_description": "A cozy, traditional, and vintage-style indoor space with warm and muted colors, featuring a large light-colored sofa, dark wooden furniture, and soft lighting.",
+      "time": "noon",
+      "enemy_count": 0,
+      "weapon": "none",
+      "structure": {
+        "tree": 0,
+        "rock": 0,
+        "mountain": 0,
+        "building": 1,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "sofa",
+          "position": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 4.0,
+                "height": 1.5,
+                "depth": 3.0
+              },
+              "color": "#F5F5DC"
+            },
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.8,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 2.0,
+                "height": 0.5,
+                "depth": 2.0
+              },
+              "color": "#FFC0CB"
+            }
+          ]
+        },
+        {
+          "name": "side table",
+          "position": {
+            "x": 2.0,
+            "y": 0.0,
+            "z": 1.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 1.0,
+                "height": 1.0,
+                "depth": 1.0
+              },
+              "color": "#786C3B"
+            }
+          ]
+        },
+        {
+          "name": "decorative items",
+          "position": {
+            "x": 2.0,
+            "y": 1.0,
+            "z": 1.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "radius": 0.2,
+              "color": "#FF69B4"
+            },
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0.5,
+                "y": 0,
+                "z": 0
+              },
+              "radius": 0.2,
+              "color": "#FFFF00"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#F5F5DC",
+        "#FFC0CB",
+        "#C7B8EA",
+        "#786C3B",
+        "#FFFFFF"
+      ],
+      "special_effects": [
+        "soft lighting",
+        "warm glow"
+      ]
+    },
+    "timestamp": 1768639415.7612627,
+    "hit_count": 0,
+    "last_accessed": 1768639415.7612634,
+    "prompt_preview": "Based on the video feed, here is a detailed description of the scene, intended for use in generating"
+  },
+  "6ea1e46785174ead": {
+    "params": {
+      "biome": "indoor room",
+      "biome_description": "A cozy, intimate personal space with warm lighting and soft tones, featuring a young woman with long, dark hair as the central focus.",
+      "time": "noon",
+      "enemy_count": 0,
+      "weapon": "none",
+      "structure": {
+        "tree": 0,
+        "rock": 0,
+        "mountain": 0,
+        "building": 1,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "bed",
+          "position": {
+            "x": -5.0,
+            "y": 0.0,
+            "z": -10.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 4.0,
+                "height": 2.0,
+                "depth": 6.0
+              },
+              "color": "#FFC0CB"
+            }
+          ]
+        },
+        {
+          "name": "couch",
+          "position": {
+            "x": 5.0,
+            "y": 0.0,
+            "z": -10.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 4.0,
+                "height": 2.0,
+                "depth": 6.0
+              },
+              "color": "#FFC0CB"
+            }
+          ]
+        },
+        {
+          "name": "picture frame",
+          "position": {
+            "x": 0.0,
+            "y": 2.0,
+            "z": -5.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "frame",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 2.0,
+                "height": 2.0,
+                "depth": 0.1
+              },
+              "color": "#FFFF00"
+            }
+          ]
+        },
+        {
+          "name": "lamp",
+          "position": {
+            "x": 0.0,
+            "y": 1.0,
+            "z": -5.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 0.5,
+                "height": 2.0
+              },
+              "color": "#FFFFFF"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#FFC0CB",
+        "#FFFFFF",
+        "#FFFF00",
+        "#008000",
+        "#FFA07A"
+      ],
+      "special_effects": [
+        "warm lighting",
+        "soft shadows",
+        "cozy atmosphere"
+      ]
+    },
+    "timestamp": 1768640780.1156535,
+    "hit_count": 0,
+    "last_accessed": 1768640780.115655,
+    "prompt_preview": "Based on the video feed, here is a detailed description of the scene, intended for use in generating"
+  },
+  "1c074ee8fda01658": {
+    "params": {
+      "biome": "personal, lived-in space, most likely a bedroom or a child's room",
+      "biome_description": "A cozy and intimate indoor space with a casual atmosphere, featuring a large bed, colorful artwork, and warm lighting.",
+      "time": "noon",
+      "enemy_count": 0,
+      "weapon": "none",
+      "structure": {
+        "tree": 0,
+        "rock": 0,
+        "mountain": 0,
+        "building": 1,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "bed",
+          "position": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 4.0,
+                "height": 1.0,
+                "depth": 6.0
+              },
+              "color": "#FFFFFF"
+            },
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 1.0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 0.5,
+                "height": 2.0
+              },
+              "color": "#FFC0CB"
+            }
+          ]
+        },
+        {
+          "name": "picture frame",
+          "position": {
+            "x": 0.0,
+            "y": 2.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "frame",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 2.0,
+                "height": 1.5
+              },
+              "color": "#FFFF00"
+            }
+          ]
+        },
+        {
+          "name": "stuffed animal",
+          "position": {
+            "x": 1.0,
+            "y": 0.5,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 0.2
+              },
+              "color": "#FFFFFF"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#FFC0CB",
+        "#FFFFFF",
+        "#FFFF00",
+        "#FFA07A"
+      ],
+      "special_effects": [
+        "warm lighting",
+        "soft glow"
+      ]
+    },
+    "timestamp": 1768640879.7639346,
+    "hit_count": 0,
+    "last_accessed": 1768640879.763936,
+    "prompt_preview": "Based on the video feed, here is a detailed description of the scene, intended for use in generating"
+  },
+  "b05c12b363d12b70": {
+    "params": {
+      "biome": "indoor room",
+      "biome_description": "A cozy, intimate, and personal indoor space with a warm atmosphere, featuring a bed, personal decorations, and casual attire.",
+      "time": "night",
+      "enemy_count": 0,
+      "weapon": "none",
+      "structure": {
+        "tree": 0,
+        "rock": 0,
+        "mountain": 0,
+        "building": 1,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "bed",
+          "position": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 2.0,
+                "height": 1.0,
+                "depth": 4.0
+              },
+              "color": "#FFFFFF"
+            },
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 0.5,
+                "height": 1.0
+              },
+              "color": "#FFC0CB"
+            }
+          ]
+        },
+        {
+          "name": "nightstand",
+          "position": {
+            "x": -1.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 0.5,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 1.0,
+                "height": 0.5,
+                "depth": 1.0
+              },
+              "color": "#786C3B"
+            }
+          ]
+        },
+        {
+          "name": "picture frame",
+          "position": {
+            "x": 0.0,
+            "y": 1.5,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 0.5,
+          "parts": [
+            {
+              "shape": "rectangle",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 1.0,
+                "height": 1.0
+              },
+              "color": "#FFFFFF"
+            },
+            {
+              "shape": "rectangle",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 0.8,
+                "height": 0.8
+              },
+              "color": "#FFFF00"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#FFC0CB",
+        "#FFFFFF",
+        "#786C3B",
+        "#FFFF00",
+        "#008000"
+      ],
+      "special_effects": [
+        "warm lighting",
+        "intimate atmosphere"
+      ]
+    },
+    "timestamp": 1768640913.8842826,
+    "hit_count": 0,
+    "last_accessed": 1768640913.8842833,
+    "prompt_preview": "Based on the provided video frames, here is a detailed description of the scene, intended for use in"
+  },
+  "83571332a6c33a4f": {
+    "params": {
+      "biome": "indoor room",
+      "biome_description": "A casual, personal space with a warm and intimate atmosphere, featuring a light purple/lavender wall, off-white ceiling, and abstract artwork in earthy tones.",
+      "time": "noon",
+      "enemy_count": 0,
+      "weapon": "none",
+      "structure": {
+        "tree": 0,
+        "rock": 0,
+        "mountain": 0,
+        "building": 1,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "framed picture",
+          "position": {
+            "x": 1.0,
+            "y": 1.5,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "rectangle",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 1.0,
+                "height": 1.5,
+                "depth": 0.1
+              },
+              "color": "#F5F5DC"
+            },
+            {
+              "shape": "rectangle",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 0.8,
+                "height": 1.2,
+                "depth": 0.1
+              },
+              "color": "#8B9467"
+            }
+          ]
+        },
+        {
+          "name": "window blind",
+          "position": {
+            "x": -1.0,
+            "y": 1.5,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "rectangle",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 1.0,
+                "height": 1.5,
+                "depth": 0.1
+              },
+              "color": "#FFFFFF"
+            },
+            {
+              "shape": "rectangle",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 0.1,
+                "height": 1.5,
+                "depth": 0.1
+              },
+              "color": "#808080"
+            }
+          ]
+        },
+        {
+          "name": "light fixture",
+          "position": {
+            "x": 0.0,
+            "y": 2.5,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "rectangle",
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 0.2,
+                "height": 0.1,
+                "depth": 0.2
+              },
+              "color": "#000000"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#C7B8EA",
+        "#F5F5DC",
+        "#8B9467",
+        "#808080",
+        "#FFFFFF"
+      ],
+      "special_effects": [
+        "warm lighting",
+        "soft shadows"
+      ]
+    },
+    "timestamp": 1768640948.3930995,
+    "hit_count": 0,
+    "last_accessed": 1768640948.3930998,
+    "prompt_preview": "Based on the provided video frames, here is a detailed description of the scene, intended for use in"
+  },
+  "6b0645dc57ec9413": {
+    "params": {
+      "biome": "bedroom or a casual living space",
+      "biome_description": "A private, lived-in environment with a large tufted sofa, a bed, and personal items like clothes and toys, creating a cozy and intimate atmosphere.",
+      "time": "noon",
+      "enemy_count": 0,
+      "weapon": "none",
+      "structure": {
+        "tree": 0,
+        "rock": 0,
+        "mountain": 0,
+        "building": 1,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "sofa",
+          "position": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 4.0,
+                "height": 1.0,
+                "depth": 2.0
+              },
+              "color": "#F5F5DC"
+            },
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 0.2,
+                "height": 1.0
+              },
+              "color": "#F5F5DC"
+            }
+          ]
+        },
+        {
+          "name": "bed",
+          "position": {
+            "x": 3.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 3.0,
+                "height": 1.0,
+                "depth": 2.0
+              },
+              "color": "#C9C4B5"
+            },
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 3.0,
+                "height": 0.5,
+                "depth": 2.0
+              },
+              "color": "#E4D6F5"
+            }
+          ]
+        },
+        {
+          "name": "cat",
+          "position": {
+            "x": 1.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 0.2,
+          "parts": [
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 0.5
+              },
+              "color": "#FFFFFF"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#F5F5DC",
+        "#E4D6F5",
+        "#C9C4B5",
+        "#FFFFFF"
+      ],
+      "special_effects": [
+        "warm lighting",
+        "soft shadows"
+      ]
+    },
+    "timestamp": 1768640981.46886,
+    "hit_count": 0,
+    "last_accessed": 1768640981.4688609,
+    "prompt_preview": "Based on the video feed, here is a detailed description of the scene, intended for use in generating"
+  },
+  "7edb887a2da231b8": {
+    "params": {
+      "biome": "rainbow world",
+      "biome_description": "A vibrant and colorful world filled with rainbow hues and majestic structures",
+      "time": "noon",
+      "enemy_count": 0,
+      "weapon": "none",
+      "structure": {
+        "tree": 30,
+        "rock": 25,
+        "mountain": 3,
+        "building": 0,
+        "street_lamp": 0
+      },
+      "creative_objects": [],
+      "color_palette": [
+        "#FF0000",
+        "#FFA500",
+        "#FFFF00",
+        "#008000",
+        "#0000FF",
+        "#4B0082"
+      ],
+      "special_effects": [
+        "rainbow_gradients",
+        "colorful_fog"
+      ]
+    },
+    "timestamp": 1768643310.184008,
+    "hit_count": 0,
+    "last_accessed": 1768643310.1840096,
+    "prompt_preview": "create a rainbow world"
+  },
+  "806a7e7b173c799e": {
+    "params": {
+      "biome": "arctic",
+      "biome_description": "A frozen, icy world with snow-covered landscapes and limited vegetation",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "double_jump",
+      "structure": {
+        "tree": 30,
+        "rock": 20,
+        "mountain": 5,
+        "building": 0,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "iceberg",
+          "position": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.5,
+          "parts": [
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "radius": 2.0,
+              "color": "#ADD8E6"
+            }
+          ]
+        },
+        {
+          "name": "polar_bear",
+          "position": {
+            "x": -15.0,
+            "y": 0.0,
+            "z": 30.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 45,
+            "z": 0
+          },
+          "scale": 1.2,
+          "parts": [
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "radius": 1.0,
+              "height": 2.0,
+              "color": "#FFFFFF"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#ADD8E6",
+        "#FFFFFF",
+        "#87CEEB",
+        "#456778"
+      ],
+      "special_effects": [
+        "snowfall",
+        "frost"
+      ]
+    },
+    "timestamp": 1768650129.9334798,
+    "hit_count": 0,
+    "last_accessed": 1768650129.9334807,
+    "prompt_preview": "arctic"
   }
 }
