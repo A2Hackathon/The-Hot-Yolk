@@ -9,6 +9,7 @@ import math
 import json
 from world.prompt_parser import parse_prompt, get_groq_client
 from world.terrain import generate_heightmap, get_walkable_points
+from world.color_scheme import assign_palette_to_elements
 from world.enemy_placer import place_enemies
 from world.lighting import get_lighting_preset, get_sky_color
 from world.physics_config import get_combined_config
@@ -114,9 +115,10 @@ def generate_rocks(
     heightmap_raw: List[List[float]],
     biome: str,
     count: int = 20,
-    terrain_size: float = 256.0
+    terrain_size: float = 256.0,
+    placement_mask: Optional[List[List[int]]] = None
 ) -> List[Dict]:
-    """Generate rock/boulder positions"""
+    """Generate rock/boulder positions (excludes mountains via placement_mask)"""
     rocks = []
     segments = len(heightmap_raw) - 1
     
@@ -133,6 +135,11 @@ def generate_rocks(
     for z in range(5, segments - 5):
         for x in range(5, segments - 5):
             h = heightmap_raw[z][x]
+            # Only place rocks where placement_mask allows (excludes mountains)
+            # If no placement_mask provided, use height check only
+            if placement_mask is not None:
+                if placement_mask[z][x] != 1:  # Skip if not walkable (includes mountains)
+                    continue
             if h >= config["min_height"]:
                 valid_points.append((x, z))
     
@@ -147,7 +154,7 @@ def generate_rocks(
         world_y = heightmap_raw[z_idx][x_idx] * 10
         
         rock_type = random.choice(config["types"])
-        scale = random.uniform(0.6, 1.8)
+        scale = random.uniform(0.3, 0.7)  # Reduced size (was 0.6-1.8)
         rotation = random.uniform(0, math.pi * 2)
         
         rocks.append({
@@ -348,6 +355,67 @@ def generate_buildings(
     print(f"[Structures] Placed {len(buildings)} {biome} buildings")
     return buildings
 
+
+def generate_glowing_flowers(
+    heightmap_raw: List[List[float]],
+    placement_mask: List[List[int]],
+    biome: str,
+    count: int = 30,
+    terrain_size: float = 256.0
+) -> List[Dict]:
+    """Generate glowing blue flowers for arctic biomes"""
+    flowers = []
+    
+    # Only generate for arctic biomes
+    if biome.lower() not in ["arctic", "winter", "icy", "snow", "frozen"]:
+        return flowers
+    
+    segments = len(heightmap_raw) - 1
+    
+    # Get valid points from placement mask
+    valid_points = []
+    for z in range(2, segments - 2):
+        for x in range(2, segments - 2):
+            if placement_mask[z][x] == 1:  # Walkable area
+                valid_points.append((x, z))
+    
+    if not valid_points:
+        print(f"[FLOWERS] No valid points found for flowers in {biome} biome")
+        return flowers
+    
+    print(f"[FLOWERS] Found {len(valid_points)} valid points for flower placement in {biome}")
+    random.shuffle(valid_points)
+    flowers_to_place = min(count, len(valid_points))
+    
+    for i in range(flowers_to_place):
+        x_idx, z_idx = valid_points[i]
+        world_x = (x_idx / segments) * terrain_size - terrain_size / 2
+        world_z = (z_idx / segments) * terrain_size - terrain_size / 2
+        world_y = heightmap_raw[z_idx][x_idx] * 10
+        
+        # Vary height - longer stems
+        stem_height = random.uniform(1.5, 3.0)  # Longer stems (was 0.3-1.5)
+        stem_curve = random.uniform(-0.3, 0.3)  # More pronounced curve (was -0.1 to 0.1)
+        
+        # Flower scale - bigger petals
+        flower_scale = random.uniform(1.5, 2.0)  # Bigger petals (was 0.8-1.2)
+        
+        # Rotation
+        rotation = random.uniform(0, math.pi * 2)
+        
+        flowers.append({
+            "type": "glowing_flower",
+            "position": {"x": float(world_x), "y": float(world_y), "z": float(world_z)},
+            "stem_height": float(stem_height),
+            "stem_curve": float(stem_curve),
+            "scale": float(flower_scale),
+            "rotation": float(rotation)
+        })
+    
+    print(f"[Structures] Placed {len(flowers)} glowing blue flowers for {biome}")
+    if len(flowers) > 0:
+        print(f"[FLOWERS] First flower position: {flowers[0]['position']}")
+    return flowers
 
 def generate_mountain_peaks(
     heightmap_raw,
@@ -561,13 +629,7 @@ async def generate_world(prompt: Dict) -> Dict:
         if biome_description:
             print(f"[Backend] Biome description: {biome_description}")
 
-        # --- Generate terrain ---
-        # Pass color_palette to terrain generator for dynamic biome support
-        terrain_data = generate_heightmap(biome, structure_counts, color_palette=color_palette)
-        heightmap_raw = terrain_data["heightmap_raw"]
-        placement_mask = terrain_data["placement_mask"]
-
-        # --- Generate 3D structures ---
+        # --- Set up structure counts BEFORE terrain generation ---
         # Use AI-suggested structure counts if provided, otherwise use intelligent defaults
         # The AI parser now suggests context-aware counts, so prioritize those
         
@@ -597,10 +659,30 @@ async def generate_world(prompt: Dict) -> Dict:
             base_tree_count = 25 if biome.lower() in ["arctic", "winter", "icy"] else 10
             tree_count = base_tree_count
         if rock_count is None:
-            base_rock_count = 15 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
+            base_rock_count = 5  # Reduced from 15/10/20 to 5 for all biomes
             rock_count = base_rock_count
         if mountain_count is None:
-            mountain_count = 3 if biome.lower() in ["arctic", "winter", "icy"] else 0
+            # Default: 1 huge mountain for arctic, 0 for other biomes
+            mountain_count = 1 if biome.lower() in ["arctic", "winter", "icy", "snow", "frozen"] else 0
+        
+        # CRITICAL: Ensure structure_counts has mountain count BEFORE calling generate_heightmap
+        # so that mountains are generated in the terrain mesh
+        structure_counts["mountain"] = mountain_count
+        
+        # --- Generate terrain ---
+        # Pass color_palette and structure_counts to terrain generator for dynamic biome support
+        terrain_data = generate_heightmap(biome, structure_counts, color_palette=color_palette)
+        heightmap_raw = terrain_data["heightmap_raw"]
+        placement_mask = terrain_data["placement_mask"]
+        
+        # Assign colors to landscape elements if palette is provided
+        color_assignments = {}
+        if color_palette and len(color_palette) > 0:
+            color_assignments = assign_palette_to_elements(color_palette)
+            print(f"[Backend] Assigned colors to elements: {list(color_assignments.keys())}")
+
+        # --- Generate 3D structures ---
+        
         if building_count is None:
             # Generate buildings for city and futuristic/cyberpunk biomes
             if biome.lower() == "city":
@@ -636,8 +718,13 @@ async def generate_world(prompt: Dict) -> Dict:
 
         terrain_size = 256
 
-        # Generate peaks first (they affect tree placement)
-        peaks = generate_mountain_peaks(heightmap_raw, biome, terrain_size, max_peaks=mountain_count) if mountain_count > 0 else []
+        # Mountains are now generated directly in the terrain mesh, not as separate structures
+        # Keep peaks as empty array for compatibility (frontend will skip rendering them)
+        peaks = []
+        
+        # Generate glowing flowers for arctic biomes (default count)
+        flower_count = 30 if biome.lower() in ["arctic", "winter", "icy", "snow", "frozen"] else 0
+        flowers = generate_glowing_flowers(heightmap_raw, placement_mask, biome, flower_count, terrain_size)
         
         structures = {
             "trees": place_trees_on_terrain(
@@ -646,12 +733,13 @@ async def generate_world(prompt: Dict) -> Dict:
                 biome=biome,
                 tree_count=tree_count,
                 terrain_size=terrain_size,
-                existing_peaks=peaks  # Pass peaks so trees avoid them
+                existing_peaks=peaks  # Pass empty peaks (mountains are in terrain now)
             ),
-            "rocks": generate_rocks(heightmap_raw, biome, rock_count, terrain_size),
-            "peaks": peaks,
+            "rocks": generate_rocks(heightmap_raw, biome, rock_count, terrain_size, placement_mask),
+            "peaks": peaks,  # Empty - mountains are now part of terrain mesh
             "buildings": generate_buildings(heightmap_raw, placement_mask, biome, building_count, terrain_size),
             "street_lamps": generate_street_lamps(heightmap_raw, placement_mask, biome, street_lamp_count, terrain_size),
+            "flowers": flowers,  # Glowing blue flowers for arctic
             "creative_objects": creative_objects  # Include custom objects from AI parser
         }
 
@@ -718,6 +806,30 @@ async def generate_world(prompt: Dict) -> Dict:
         print(f"[Backend] Sky color: {sky_colour}")
         print("="*60 + "\n")
         
+        # Add color information to structures if color_assignments are available
+        # For arctic biomes, use blue/icy colors for trees by default
+        is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen"]
+        default_leaf_color = "#5B9BD5" if is_arctic else "#228B22"  # Light blue for arctic, green otherwise
+        default_trunk_color = "#4A7BA7" if is_arctic else "#8b4513"  # Blue-grey for arctic, brown otherwise
+        
+        if color_assignments:
+            # Add color info to trees
+            if structures.get("trees"):
+                for tree in structures["trees"]:
+                    if isinstance(tree, dict):
+                        tree["leaf_color"] = color_assignments.get("tree_leaves", default_leaf_color)
+                        tree["trunk_color"] = color_assignments.get("tree_trunk", default_trunk_color)
+        elif is_arctic:
+            # If no color_assignments but arctic biome, still set blue tree colors
+            if structures.get("trees"):
+                for tree in structures["trees"]:
+                    if isinstance(tree, dict):
+                        tree["leaf_color"] = default_leaf_color
+                        tree["trunk_color"] = default_trunk_color
+            
+            # Add color info to buildings (they'll use building color when created)
+            # Note: Buildings use color from color_assignments in frontend
+        
         # --- Build response ---
         response = {
             "world": {
@@ -728,7 +840,9 @@ async def generate_world(prompt: Dict) -> Dict:
                 "texture_url": terrain_data.get("texture_url"),
                 "lighting_config": lighting_config,
                 "sky_colour": sky_colour,
-                "colour_map_array": terrain_data.get('colour_map_array')
+                "colour_map_array": terrain_data.get('colour_map_array'),
+                "color_assignments": color_assignments,  # Include color assignments
+                "color_palette": color_palette  # Include original palette
             },
             "structures": structures,
             "combat": {
@@ -979,7 +1093,7 @@ async def scan_world(request: ScanRequest) -> Dict:
                 trunk_color=tree_colors.get("trunk_color"),
                 existing_peaks=peaks
             ),
-            "rocks": generate_rocks(heightmap_raw, biome, rock_count, terrain_size),
+            "rocks": generate_rocks(heightmap_raw, biome, rock_count, terrain_size, placement_mask),
             "peaks": peaks,
             "buildings": generate_buildings(heightmap_raw, placement_mask, biome, building_count, terrain_size),
             "street_lamps": generate_street_lamps(heightmap_raw, placement_mask, biome, street_lamp_count, terrain_size)

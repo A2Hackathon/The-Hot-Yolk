@@ -79,6 +79,23 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
     is_winter = biome.lower() in ["arctic", "winter", "icy"]
     is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen"]
     
+    # Arctic cave: bright light from above (simulating cave opening)
+    if is_arctic:
+        # Cave lighting: bright overhead light (like cave opening)
+        config["background"] = "#E0F4FF"  # Bright icy blue (light from cave opening)
+        config["ambient"]["color"] = "#B0E0FF"  # Cool blue ambient
+        config["ambient"]["intensity"] = 0.6  # Moderate brightness
+        config["directional"]["color"] = "#FFFFFF"  # Bright white overhead light
+        config["directional"]["intensity"] = 1.2  # Very bright directional (cave opening)
+        config["directional"]["position"] = {"x": 0, "y": 200, "z": 0}  # Directly overhead
+        config["fog"] = {
+            "color": "#C8E6FF",  # Light blue fog for cave atmosphere
+            "near": 50,
+            "far": 200
+        }
+        # Ensure northern lights are enabled for arctic
+        config["northern_lights"] = True
+    
     # City-specific modifications for noon
     if biome.lower() == "city" and time == "noon":
         config["background"] = "#D7AFF5"  # Purple-pink sky transitioning to butter cream yellow

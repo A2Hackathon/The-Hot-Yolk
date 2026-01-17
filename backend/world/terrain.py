@@ -7,6 +7,7 @@ import uuid
 import json
 import hashlib
 import colorsys
+from typing import Optional, Dict
 
 # Biome settings 
 BIOME_SETTINGS = {
@@ -23,9 +24,9 @@ GROUND_COLORS = {
 
 # Arctic altitude-based snow colours
 ARCTIC_SNOW = {
-    "low": (255, 255, 255) ,   # blue-grey ice
-    "mid":  (255, 255, 255),   # clean snow
-    "high": (255, 255, 255)   # pure white peaks
+    "low": (200, 230, 255),   # Light sky blue (ground level/cave floor)
+    "mid": (150, 200, 255),   # Medium bright blue (cave walls)
+    "high": (100, 150, 255)   # Vibrant electric blue (cave ceiling/high areas)
 }
 
 
@@ -37,7 +38,7 @@ STRUCTURE_KEYWORDS = {
 }
 
 PLACEMENT_RULES = {
-    "arctic": {"min_height": 0.3, "max_height": 1.2, "max_slope": 0.25},
+    "arctic": {"min_height": 0.2, "max_height": 1.0, "max_slope": 0.3},  # Standard terrain (cave features removed)
     "city": {"min_height": 0.2, "max_height": 0.8, "max_slope": 0.4},
     "default": {"min_height": 0.2, "max_height": 1.0, "max_slope": 0.3}
 }
@@ -151,7 +152,7 @@ def generate_placement_mask(heightmap, biome_name):
     return mask
 
 # ---------------- Core Generation ----------------
-def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, height=256, scale=0.3, color_palette=None):
+def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, height=256, scale=0.3, color_palette=None, color_assignments=None):
     """
     Generate heightmap with dynamic biome support.
     UNIVERSAL: Works for ANY biome type, NEVER fails.
@@ -167,6 +168,7 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
     height_multiplier, ground_rgb, structure_count_dict = get_biome_settings(biome_name, structure_count_dict, color_palette)
     heightmap = np.zeros((height, width))
 
+    # Standard terrain generation for all biomes (removed cave features for arctic)
     # Base Simplex noise
     for y in range(height):
         for x in range(width):
@@ -189,12 +191,88 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
     # Masks
     river_mask = np.zeros((height, width), dtype=bool)
     mountain_mask = np.zeros((height, width), dtype=bool)
+    
+    # Generate mountains directly in the terrain mesh (instead of separate cone structures)
+    # For all biomes (including arctic - arctic gets 1 huge mountain)
+    if structure_count_dict and structure_count_dict.get("mountain", 0) > 0:
+        mountain_count = structure_count_dict.get("mountain", 0)
+        print(f"[TERRAIN] Generating {mountain_count} mountains directly in terrain mesh")
+        
+        placed_mountains = []
+        min_mountain_distance = width * 0.15  # Minimum distance between mountains
+        
+        for _ in range(mountain_count):
+            # Try to place mountain
+            for attempt in range(50):
+                # Random position
+                mx = random.randint(int(width * 0.1), int(width * 0.9))
+                my = random.randint(int(height * 0.1), int(height * 0.9))
+                
+                # Check distance from other mountains
+                too_close = False
+                for pmx, pmy in placed_mountains:
+                    dist = np.sqrt((mx - pmx)**2 + (my - pmy)**2)
+                    if dist < min_mountain_distance:
+                        too_close = True
+                        break
+                
+                if too_close:
+                    continue
+                
+                # Place mountain - create a cone-shaped elevation
+                # Arctic gets TALL mountains, others get normal size
+                if is_arctic:
+                    # TALL mountain for arctic: massive radius and VERY TALL height
+                    mountain_radius = random.randint(60, 80)  # HUGE radius (60-80 cells = ~60-80 units)
+                    mountain_height = random.uniform(8.0, 12.0)  # VERY TALL height (becomes 80-120 units when *10)
+                    print(f"[TERRAIN] Creating TALL arctic mountain: radius={mountain_radius}, height={mountain_height:.2f} (={mountain_height*10:.0f} units)")
+                else:
+                    # Normal mountains for other biomes
+                    mountain_radius = random.randint(15, 25)  # Radius in cells
+                    mountain_height = random.uniform(1.5, 2.5)  # Height multiplier (becomes 15-25 units when *10)
+                
+                # Create mountain cone - steep for arctic, smooth for others
+                for y in range(max(0, my - mountain_radius), min(height, my + mountain_radius + 1)):
+                    for x in range(max(0, mx - mountain_radius), min(width, mx + mountain_radius + 1)):
+                        dist = np.sqrt((x - mx)**2 + (y - my)**2)
+                        if dist <= mountain_radius:
+                            # Calculate falloff factor based on distance
+                            factor = 1.0 - (dist / mountain_radius)
+                            
+                            # Arctic mountains: STEEP cone (sharp peak)
+                            # Others: Smooth cone
+                            if is_arctic:
+                                # Use exponential falloff for STEEP, dramatic peak
+                                # factor^4 creates very steep sides (almost vertical near base)
+                                factor = factor ** 4.0  # Very steep falloff for sharp peak
+                            else:
+                                # Smooth cone shape for other biomes
+                                factor = factor ** 1.5  # Smooth falloff
+                            
+                            elevation = mountain_height * factor
+                            
+                            # Add to existing height
+                            heightmap[y, x] += elevation
+                            # Much higher cap for arctic TALL mountains
+                            max_height = 15.0 if is_arctic else 3.0  # 150 units for arctic (VERY TALL), 30 for others
+                            heightmap[y, x] = min(heightmap[y, x], max_height)
+                            
+                            # Mark as mountain for coloring
+                            mountain_mask[y, x] = True
+                
+                placed_mountains.append((mx, my))
+                print(f"[TERRAIN] Placed mountain at ({mx}, {my}) with radius {mountain_radius}, height {mountain_height:.2f}")
+                break
 
     # Track placed tree positions
     placed_tree_positions = []
 
-    # Apply structures
+    # Apply structures (mountains are handled separately above, skip them here)
     for structure, count in structure_count_dict.items():
+        # Skip mountains - they're generated directly in terrain mesh above
+        if structure == "mountain":
+            continue
+            
         multiplier = STRUCTURE_KEYWORDS.get(structure, 1.0)
         radius = 5  # general radius for terrain deformation
         for _ in range(count):
@@ -202,7 +280,7 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
             for attempt in range(20):
                 cx, cy = random.randint(0, width-1), random.randint(0, height-1)
 
-                # Check terrain collision for mountains/rivers
+                # Check terrain collision for rivers
                 if structure == "river":
                     for y2 in range(max(0, cy-radius), min(height, cy+radius+1)):
                         for x2 in range(max(0, cx-radius), min(width, cx+radius+1)):
@@ -262,15 +340,8 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
         for x in range(width):
             if river_mask[y, x]:
                 colour_map_array[y, x] = (0, 120, 255)
-            elif biome_name == "arctic":
-                # All terrain (including mountains) should be white snow in arctic
-                colour_map_array[y, x] = get_arctic_snow_colour(
-                    heightmap[y, x],
-                    height_multiplier * 1.5
-                )
-            elif mountain_mask[y, x]:
-                colour_map_array[y, x] = (120, 120, 120)
             elif palette_rgb and len(palette_rgb) > 0:
+                # PRIORITY: If custom palette is provided, use it (overrides biome defaults)
                 # Use palette colors (even if just 1 color, use it)
                 if len(palette_rgb) == 1:
                     # Single color - use it directly
@@ -298,6 +369,14 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
                     variation = np.random.randint(-5, 5, 3)
                     final_color = np.clip(final_color.astype(int) + variation, 0, 255).astype(np.uint8)
                     colour_map_array[y, x] = tuple(final_color)
+            elif biome_name == "arctic":
+                # All terrain (including mountains) should be white snow in arctic (only if no custom palette)
+                colour_map_array[y, x] = get_arctic_snow_colour(
+                    heightmap[y, x],
+                    height_multiplier * 1.5
+                )
+            elif mountain_mask[y, x]:
+                colour_map_array[y, x] = (120, 120, 120)
             else:
                 colour_map_array[y, x] = get_colour(ground_rgb)
 

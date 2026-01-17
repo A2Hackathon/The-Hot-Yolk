@@ -3,10 +3,11 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import GameSettingsPanel from './GameSettingsPanel';
+import ColorPicker from './ColorPicker';
 import { RealtimeVision } from '@overshoot/sdk';
 
 
-const API_BASE = 'http://localhost:8001/api';
+const API_BASE = 'http://localhost:8000/api';
 
 const GameState = {
   IDLE: 'idle',
@@ -59,10 +60,11 @@ const VoiceWorldBuilder = () => {
   const [lastScanResult, setLastScanResult] = useState(null);
   const [physicsSettings, setPhysicsSettings] = useState({
   speed: 5.0,
-  gravity: 20.0,
+  gravity: -20.0,  // Fixed: Should be negative to match backend (-20.0)
   jumpHeight: 3.0
 });
   const physicsSettingsRef = useRef(physicsSettings);
+  const [colorPalette, setColorPalette] = useState(null);
   const buildingGridConfig = {
     gridSizeX: 2,   // buildings per row
     gridSizeZ: 2,   // buildings per column
@@ -242,7 +244,8 @@ const VoiceWorldBuilder = () => {
 
         const moveSpeed = physicsSettingsRef.current.speed * 0.06;
         const dashSpeed = moveSpeed * 4;
-        const gravity = -(physicsSettingsRef.current.gravity * 0.0009);
+        // Gravity: backend uses negative values (e.g., -20.0), so multiply by 0.0009 to get appropriate force
+        const gravity = physicsSettingsRef.current.gravity * 0.0009;
 
         if (pressedKeys.current.has('arrowleft')) cameraOffset.current.angle += 0.04;
         if (pressedKeys.current.has('arrowright')) cameraOffset.current.angle -= 0.04;
@@ -695,9 +698,145 @@ const VoiceWorldBuilder = () => {
     return group;
   };
 
-  const createRock = (rockData) => {
+  const createGlowingFlower = (flowerData) => {
+    const group = new THREE.Group();
+    
+    // Thin, curvy dark blue stem (made from multiple segments for smooth curve)
+    const stemHeight = flowerData.stem_height || 1.0;
+    const stemCurve = flowerData.stem_curve || 0;
+    const stemRadius = 0.02; // Much thinner stem (was 0.05)
+    const segmentCount = 8; // More segments for smoother curve
+    const segmentHeight = stemHeight / segmentCount;
+    
+    // Create curvy stem using multiple segments with varying rotation
+    for (let i = 0; i < segmentCount; i++) {
+      const segmentGeometry = new THREE.CylinderGeometry(stemRadius, stemRadius, segmentHeight, 6);
+      const stemMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0x1a3a5a,  // Dark blue stem
+        roughness: 0.8,
+        metalness: 0.1
+      });
+      const segment = new THREE.Mesh(segmentGeometry, stemMaterial);
+      
+      // Position segment along stem height
+      const yPos = i * segmentHeight + segmentHeight / 2;
+      segment.position.y = yPos;
+      
+      // Create smooth curve: each segment rotates slightly more
+      const curveAmount = stemCurve * 0.5; // Increase curve intensity
+      const segmentRotation = (i / (segmentCount - 1)) * curveAmount * 2 - curveAmount;
+      segment.rotation.z = segmentRotation;
+      segment.rotation.y = segmentRotation * 0.3; // Add slight Y rotation for 3D curve
+      
+      segment.castShadow = true;
+      group.add(segment);
+    }
+    
+    // Four-pointed star-shaped flower/crystal at top - BIGGER petals
+    const flowerScale = flowerData.scale || 1.0;
+    const starSize = 1.0 * flowerScale; // Even bigger petals (was 0.7, originally 0.4)
+    
+    // Create four-pointed star using two perpendicular rectangles rotated 45 degrees
+    // First rectangle (horizontal/vertical)
+    const rect1Geometry = new THREE.BoxGeometry(starSize * 0.8, starSize * 0.15, starSize * 0.15);
+    const rect2Geometry = new THREE.BoxGeometry(starSize * 0.15, starSize * 0.8, starSize * 0.15);
+    
+    // Bright ethereal blue glow (most intense at center, softly diffusing outwards)
+    const glowColor = 0x00aaff;  // Bright cyan-blue
+    const glowMaterial = new THREE.MeshStandardMaterial({
+      color: glowColor,
+      emissive: glowColor,
+      emissiveIntensity: 2.5,  // Very bright glow
+      roughness: 0.1,
+      metalness: 0.9,
+      transparent: true,
+      opacity: 0.95
+    });
+    
+    // Create star by combining two perpendicular rectangles
+    const rect1 = new THREE.Mesh(rect1Geometry, glowMaterial);
+    const rect2 = new THREE.Mesh(rect2Geometry, glowMaterial);
+    
+    // Center of star at top of curvy stem
+    rect1.position.y = stemHeight;
+    rect2.position.y = stemHeight;
+    
+    // Apply stem curve to flower position for alignment
+    const flowerCurveOffset = stemCurve * 0.3;
+    rect1.position.x = flowerCurveOffset;
+    rect2.position.x = flowerCurveOffset;
+    
+    // Add outer glow (slightly larger, more transparent)
+    const outerGlowGeometry1 = new THREE.BoxGeometry(starSize, starSize * 0.2, starSize * 0.2);
+    const outerGlowGeometry2 = new THREE.BoxGeometry(starSize * 0.2, starSize, starSize * 0.2);
+    const outerGlowMaterial = new THREE.MeshStandardMaterial({
+      color: glowColor,
+      emissive: glowColor,
+      emissiveIntensity: 1.5,
+      transparent: true,
+      opacity: 0.4,
+      roughness: 0.1,
+      metalness: 0.8
+    });
+    
+    const outerGlow1 = new THREE.Mesh(outerGlowGeometry1, outerGlowMaterial);
+    const outerGlow2 = new THREE.Mesh(outerGlowGeometry2, outerGlowMaterial);
+    outerGlow1.position.y = stemHeight;
+    outerGlow2.position.y = stemHeight;
+    // Align outer glow with flower curve
+    outerGlow1.position.x = flowerCurveOffset;
+    outerGlow2.position.x = flowerCurveOffset;
+    
+    // Center bright core (small sphere for intense center glow)
+    const coreGeometry = new THREE.SphereGeometry(starSize * 0.15, 8, 8);
+    const coreMaterial = new THREE.MeshStandardMaterial({
+      color: 0x00ffff,  // Bright cyan
+      emissive: 0x00ffff,
+      emissiveIntensity: 5.0,  // Very intense center
+      transparent: true,
+      opacity: 0.9,
+      roughness: 0.0,
+      metalness: 1.0
+    });
+    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+    core.position.y = stemHeight;
+    core.position.x = flowerCurveOffset; // Align core with flower curve
+    
+    group.add(rect1);
+    group.add(rect2);
+    group.add(outerGlow1);
+    group.add(outerGlow2);
+    group.add(core);
+    
+    // Position on terrain
+    const pos = flowerData.position || { x: 0, y: 0, z: 0 };
+    const terrainY = getHeightAt(pos.x, pos.z);
+    group.position.set(pos.x, terrainY, pos.z);
+    group.rotation.y = flowerData.rotation || 0;
+    
+    // Mark as flower for easy access
+    group.userData = {
+      structureType: 'flower',
+      type: 'glowing_flower'
+    };
+    
+    return group;
+  };
+
+  const createRock = (rockData, colorAssignments = null) => {
     const geometry = new THREE.DodecahedronGeometry(1, 0);
-    const color = rockData.type === 'ice_rock' ? 0xCCE5FF : 0x808080;
+    // Use light gray for all rocks (default)
+    let color = rockData.rock_color || rockData.color;
+    if (!color && colorAssignments) {
+      color = colorAssignments.rock || colorAssignments.mountain_dark;
+    }
+    if (!color) {
+      color = 0xD3D3D3;  // Light gray for all rocks (was ice_rock: 0xCCE5FF, default: 0x808080)
+    }
+    // Convert hex string to number if needed
+    if (typeof color === 'string') {
+      color = parseInt(color.replace('#', ''), 16);
+    }
     const material = new THREE.MeshStandardMaterial({ 
       color: color, 
       roughness: 0.8,
@@ -1103,18 +1242,31 @@ const VoiceWorldBuilder = () => {
     const group = new THREE.Group();
     let mesh;
 
-    // City building colors - light pink and light blue pastels (from second image)
-    const cityColors = [
-      0xFFB6C1,  // Light pink (bright light hitting surface)
-      0xFFC0CB,  // Pink
-      0xFFD1DC,  // Very light pink
-      0xB0E0E6,  // Powder blue
-      0xADD8E6,  // Light blue
-      0xE0F6FF,  // Very light blue
-      0xFFE4E1,  // Misty rose (pink-white)
-      0xF0F8FF   // Alice blue (very light blue)
-    ];
-    const color = cityColors[Math.floor(Math.random() * cityColors.length)];
+    // Use color from buildingData, color_assignments, or default to city colors
+    let color = buildingData.building_color || buildingData.color;
+    if (!color && currentWorld?.world?.color_assignments) {
+      const assignments = currentWorld.world.color_assignments;
+      // Use building color, or variants if available
+      color = assignments.building || assignments.building_light || assignments.building_dark;
+    }
+    if (!color) {
+      // City building colors - light pink and light blue pastels (from second image)
+      const cityColors = [
+        0xFFB6C1,  // Light pink (bright light hitting surface)
+        0xFFC0CB,  // Pink
+        0xFFD1DC,  // Very light pink
+        0xB0E0E6,  // Powder blue
+        0xADD8E6,  // Light blue
+        0xE0F6FF,  // Very light blue
+        0xFFE4E1,  // Misty rose (pink-white)
+        0xF0F8FF   // Alice blue (very light blue)
+      ];
+      color = cityColors[Math.floor(Math.random() * cityColors.length)];
+    }
+    // Convert hex string to number if needed
+    if (typeof color === 'string') {
+      color = parseInt(color.replace('#', ''), 16);
+    }
 
     if (type === "igloo") {
       const radius = (buildingData.width || 4) * 1.5;
@@ -2263,8 +2415,8 @@ const VoiceWorldBuilder = () => {
     
     const aurora = new THREE.Mesh(geometry, material);
     
-    // Position the aurora in the sky
-    aurora.position.set(0, 100 + layer * 12, -150 - layer * 35);
+    // Position the aurora higher in the sky
+    aurora.position.set(0, 200 + layer * 15, -150 - layer * 35); // Raised from 100 to 200
     aurora.rotation.x = Math.PI * 0.3; // Tilt towards viewer
     aurora.userData.isNorthernLights = true;
     aurora.userData.layer = layer;
@@ -2312,7 +2464,7 @@ const VoiceWorldBuilder = () => {
       const forwardDistance = 150 + layer * 35;
       aurora.position.set(
         player.position.x + camForward.x * forwardDistance,
-        100 + layer * 12,
+        200 + layer * 15, // Raised from 100 + layer * 12 to 200 + layer * 15
         player.position.z + camForward.z * forwardDistance
       );
     });
@@ -2322,7 +2474,7 @@ const VoiceWorldBuilder = () => {
       const layer = aurora.userData.layer;
       aurora.position.set(
         player.position.x,
-        100 + layer * 12,
+        200 + layer * 15, // Raised from 100 + layer * 12 to 200 + layer * 15
         player.position.z + 150 + layer * 35
       );
     });
@@ -2472,10 +2624,7 @@ const VoiceWorldBuilder = () => {
         throw new Error('Invalid API key format. Please check your Overshoot AI API key.');
       }
 
-      // Note: The Overshoot API endpoint may not be publicly available yet
-      // The domain api.overshoot.ai doesn't resolve (DNS error)
-      // This suggests the service is still in development or requires special access
-      console.log('[OVERSHOOT] Note: api.overshoot.ai endpoint may not be publicly available yet');
+
 
       const visionConfig = {
         apiUrl: 'https://api.overshoot.ai',
@@ -2522,7 +2671,7 @@ const VoiceWorldBuilder = () => {
       };
 
       console.log('[OVERSHOOT] Creating RealtimeVision with config:', {
-        apiUrl: visionConfig.apiUrl,
+        apiUrl: visionConfig.apiUrl || '(using SDK default)',
         apiKey: visionConfig.apiKey.substring(0, 10) + '...',
         hasPrompt: !!visionConfig.prompt,
         hasSource: !!visionConfig.source
@@ -2572,7 +2721,7 @@ const VoiceWorldBuilder = () => {
         errorMessage += '2. Check if you need special access/whitelisting\n';
         errorMessage += '3. Use basic camera mode for now (working)\n';
         errorMessage += '4. Check Overshoot documentation for updates\n\n';
-      } else if (error.message && error.message.includes('401') || error.message.includes('403')) {
+      } else if (error.message && (error.message.includes('401') || error.message.includes('403'))) {
         errorMessage += 'Authentication Error: Invalid API key.\n\n';
         errorMessage += 'SOLUTION:\n';
         errorMessage += '1. Verify your API key at https://overshoot.ai\n';
@@ -2760,14 +2909,25 @@ const VoiceWorldBuilder = () => {
         console.log(`[OVERSHOOT] ✅ Added ${data.structures.rocks.length} rocks`);
       }
       
-      if (data.structures.peaks) {
-        data.structures.peaks.forEach(peakData => {
-          const peak = createMountainPeak(peakData, biomeName);
-          peak.userData = { structureType: 'peak' };
-          scene.add(peak);
-          structuresRef.current.push(peak);
+      if (data.structures.flowers) {
+        console.log(`[OVERSHOOT] Creating ${data.structures.flowers.length} glowing blue flowers...`);
+        data.structures.flowers.forEach((flowerData, idx) => {
+          const flower = createGlowingFlower(flowerData);
+          scene.add(flower);
+          structuresRef.current.push(flower);
+          if (idx === 0) {
+            console.log(`[FLOWERS] First flower created at position:`, flowerData.position, `| Scene position:`, flower.position);
+          }
         });
-        console.log(`[OVERSHOOT] ✅ Added ${data.structures.peaks.length} mountain peaks`);
+        console.log(`[OVERSHOOT] ✅ Added ${data.structures.flowers.length} glowing blue flowers`);
+      } else {
+        console.log(`[OVERSHOOT] No flowers in structures:`, Object.keys(data.structures || {}));
+      }
+      
+      // Mountains are now part of the terrain mesh, not separate structures
+      // Skip rendering separate peak meshes
+      if (data.structures.peaks && data.structures.peaks.length > 0) {
+        console.log(`[OVERSHOOT] Skipping ${data.structures.peaks.length} peaks - mountains are now part of terrain mesh`);
       }
 
       if (data.structures.buildings) {
@@ -3145,14 +3305,18 @@ const VoiceWorldBuilder = () => {
           console.log(`[SCAN] ✅ Added ${data.structures.rocks.length} rocks`);
         }
         
-        if (data.structures.peaks) {
-          data.structures.peaks.forEach(peakData => {
-            const peak = createMountainPeak(peakData, biomeName);
-            peak.userData = { structureType: 'peak' };
-            scene.add(peak);
-            structuresRef.current.push(peak);
+        if (data.structures.flowers) {
+          data.structures.flowers.forEach(flowerData => {
+            const flower = createGlowingFlower(flowerData);
+            scene.add(flower);
+            structuresRef.current.push(flower);
           });
-          console.log(`[SCAN] ✅ Added ${data.structures.peaks.length} mountain peaks`);
+          console.log(`[SCAN] ✅ Added ${data.structures.flowers.length} glowing blue flowers`);
+        }
+        
+        // Mountains are now part of the terrain mesh, not separate structures
+        if (data.structures.peaks && data.structures.peaks.length > 0) {
+          console.log(`[SCAN] Skipping ${data.structures.peaks.length} peaks - mountains are now part of terrain mesh`);
         }
 
         if (data.structures.buildings) {
@@ -3461,14 +3625,18 @@ const VoiceWorldBuilder = () => {
           console.log(`✅ Added ${data.structures.rocks.length} rocks`);
         }
         
-        if (data.structures.peaks) {
-          data.structures.peaks.forEach(peakData => {
-            const peak = createMountainPeak(peakData, biomeName);
-            peak.userData = { structureType: 'peak' };
-            scene.add(peak);
-            structuresRef.current.push(peak);
+        if (data.structures.flowers) {
+          data.structures.flowers.forEach(flowerData => {
+            const flower = createGlowingFlower(flowerData);
+            scene.add(flower);
+            structuresRef.current.push(flower);
           });
-          console.log(`✅ Added ${data.structures.peaks.length} mountain peaks`);
+          console.log(`✅ Added ${data.structures.flowers.length} glowing blue flowers`);
+        }
+        
+        // Mountains are now part of the terrain mesh, not separate structures
+        if (data.structures.peaks && data.structures.peaks.length > 0) {
+          console.log(`Skipping ${data.structures.peaks.length} peaks - mountains are now part of terrain mesh`);
         }
 
         if (data.structures.creative_objects) {
@@ -3983,16 +4151,10 @@ const VoiceWorldBuilder = () => {
         }
       }
 
+      // Mountains are now part of terrain mesh, not separate structures
+      // Skip peak removal - terrain regeneration will handle it
       if (newPeakCount < oldPeakCount) {
-        const toRemove = oldPeakCount - newPeakCount;
-        console.log(`[MODIFY] Removing ${toRemove} peaks...`);
-        for (let i = 0; i < toRemove; i++) {
-          const peak = structuresRef.current.find(obj => obj.userData?.structureType === 'peak');
-          if (peak) {
-            scene.remove(peak);
-            structuresRef.current = structuresRef.current.filter(obj => obj !== peak);
-          }
-        }
+        console.log(`[MODIFY] Skipping peak removal - mountains are now part of terrain mesh`);
       }
 
       // Check if street lamps should be replaced (set operation when counts match)
@@ -4179,17 +4341,10 @@ const VoiceWorldBuilder = () => {
         }
       }
 
+      // Mountains are now part of terrain mesh, not separate structures
+      // Skip peak addition - terrain regeneration will handle it
       if (data.structures?.peaks && newPeakCount > oldPeakCount) {
-        const newPeaks = data.structures.peaks.slice(oldPeakCount);
-        const currentBiome = data.world?.biome || data.world?.biome_name || biomeName;
-        console.log(`[MODIFY] Adding ${newPeaks.length} new peaks...`);
-        
-        newPeaks.forEach(peakData => {
-          const peak = createMountainPeak(peakData, currentBiome);
-          peak.userData = { ...peak.userData, structureType: 'peak' };
-          scene.add(peak);
-          structuresRef.current.push(peak);
-        });
+        console.log(`[MODIFY] Skipping peak addition - mountains are now part of terrain mesh`);
       }
 
       if (data.structures?.street_lamps && newStreetLampCount > oldStreetLampCount) {
@@ -4328,6 +4483,374 @@ const VoiceWorldBuilder = () => {
     // Reset file input
     const fileInput = document.getElementById('tree-image-upload');
     if (fileInput) fileInput.value = '';
+  };
+
+  // Handle color palette changes from ColorPicker
+  const handleColorPaletteChange = async (palette) => {
+    console.log('[COLOR PICKER] Applying color palette:', palette);
+    setColorPalette(palette);
+    
+    // Apply colors to current world if we have one
+    if (currentWorld && gameState === GameState.PLAYING) {
+      await applyColorPaletteToWorld(palette);
+    }
+  };
+
+  // Apply color palette to terrain
+  const applyColorPaletteToWorld = async (palette) => {
+    if (!currentWorld || !palette || palette.length === 0) {
+      console.warn('[COLOR PICKER] Cannot apply palette: missing world or palette');
+      return;
+    }
+
+    try {
+      const biome = currentWorld.world?.biome || currentWorld.world?.biome_name || 'default';
+      const structure_counts = currentWorld.structures || {};
+      
+      console.log('[COLOR PICKER] Regenerating terrain with palette:', palette);
+      console.log('[COLOR PICKER] Biome:', biome, 'Structures:', structure_counts);
+      
+      // Call backend to regenerate terrain with new colors
+      const res = await fetch(`${API_BASE}/update-colors`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          biome: biome,
+          structures: structure_counts,
+          color_palette: palette
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`API error: ${res.status}`);
+      }
+
+      const terrainData = await res.json();
+      
+      // Extract color assignments from response
+      const colorAssignments = terrainData.color_assignments || {};
+      console.log('[COLOR PICKER] Color assignments:', colorAssignments);
+      
+      // Update terrain with new colors
+      const scene = sceneRef.current;
+      if (!scene) {
+        console.error('[COLOR PICKER] Scene not available');
+        return;
+      }
+
+      console.log('[COLOR PICKER] Received terrain data:', {
+        hasHeightmap: !!terrainData.heightmap_raw,
+        hasColorMap: !!terrainData.colour_map_array,
+        heightmapShape: terrainData.heightmap_raw ? `${terrainData.heightmap_raw.length}x${terrainData.heightmap_raw[0]?.length}` : 'none',
+        colorMapShape: terrainData.colour_map_array ? `${terrainData.colour_map_array.length}x${terrainData.colour_map_array[0]?.length}` : 'none'
+      });
+
+      // Remove old terrain mesh - also search scene to ensure we remove it
+      if (terrainMeshRef.current) {
+        console.log('[COLOR PICKER] Removing old terrain mesh (by ref)');
+        scene.remove(terrainMeshRef.current);
+        if (terrainMeshRef.current.geometry) {
+          terrainMeshRef.current.geometry.dispose();
+        }
+        if (terrainMeshRef.current.material) {
+          if (terrainMeshRef.current.material.map) {
+            terrainMeshRef.current.material.map.dispose();
+          }
+          terrainMeshRef.current.material.dispose();
+        }
+        terrainMeshRef.current = null;
+      }
+      
+      // Also search scene for any terrain meshes and remove them (fallback)
+      // Look for meshes with vertex colors (terrain characteristic)
+      const terrainMeshes = scene.children.filter(child => {
+        return child.isMesh && 
+               child.material && 
+               child.material.vertexColors && 
+               child.geometry &&
+               child.geometry.attributes.color && // Has color attribute
+               !child.userData?.isSky && // Not the sky
+               !child.userData?.isGround; // Not the ground plane
+      });
+      
+      if (terrainMeshes.length > 0) {
+        console.log(`[COLOR PICKER] Found ${terrainMeshes.length} potential terrain mesh(es) in scene, removing...`);
+        terrainMeshes.forEach(mesh => {
+          console.log('[COLOR PICKER] Removing terrain mesh:', {
+            id: mesh.id,
+            position: mesh.position.toArray(),
+            rotation: mesh.rotation.toArray()
+          });
+          scene.remove(mesh);
+          if (mesh.geometry) mesh.geometry.dispose();
+          if (mesh.material) {
+            if (mesh.material.map) mesh.material.map.dispose();
+            mesh.material.dispose();
+          }
+        });
+      }
+
+      // Update refs with new terrain data
+      if (terrainData.heightmap_raw && terrainData.colour_map_array) {
+        console.log('[COLOR PICKER] Updating terrain refs and creating new mesh');
+        console.log('[COLOR PICKER] Before update - terrain mesh count:', 
+          scene.children.filter(c => c.isMesh && c.material?.vertexColors).length);
+        
+        // Store old color for comparison (before updating refs)
+        const oldColorSample = colorMapRef.current?.[0]?.[0];
+        
+        heightmapRef.current = terrainData.heightmap_raw;
+        colorMapRef.current = terrainData.colour_map_array;
+        terrainPlacementMaskRef.current = terrainData.placement_mask || 
+          heightmapRef.current.map(row => row.map(height => (height >= 0 ? 1 : 0)));
+        
+        // Log a sample of the new color data to verify it's different
+        if (colorMapRef.current && colorMapRef.current[0] && colorMapRef.current[0][0]) {
+          const newColorSample = colorMapRef.current[0][0];
+          console.log('[COLOR PICKER] Color comparison:', {
+            oldColor: oldColorSample,
+            newColor: newColorSample,
+            colorsChanged: oldColorSample ? JSON.stringify(oldColorSample) !== JSON.stringify(newColorSample) : 'N/A (no old color)'
+          });
+          console.log('[COLOR PICKER] Sample new color (first pixel):', newColorSample);
+          console.log('[COLOR PICKER] Sample new color (middle pixel):', 
+            colorMapRef.current[Math.floor(colorMapRef.current.length / 2)][Math.floor(colorMapRef.current[0].length / 2)]);
+        }
+        
+        // Create new terrain mesh with updated colors
+        const newTerrainMesh = createTerrain(
+          heightmapRef.current,
+          colorMapRef.current,
+          256
+        );
+        
+        if (!newTerrainMesh) {
+          console.error('[COLOR PICKER] Failed to create terrain mesh');
+          return;
+        }
+        
+        // Ensure terrain is positioned correctly (should be at origin)
+        // NOTE: createTerrain already rotates the geometry, so DON'T rotate the mesh again
+        newTerrainMesh.position.set(0, 0, 0);
+        // Don't set rotation.x - geometry is already rotated in createTerrain
+        
+        // Mark color attribute as needing update
+        if (newTerrainMesh.geometry && newTerrainMesh.geometry.attributes.color) {
+          newTerrainMesh.geometry.attributes.color.needsUpdate = true;
+        }
+        
+        terrainMeshRef.current = newTerrainMesh;
+        scene.add(newTerrainMesh);
+        
+        // Verify the new mesh has correct colors
+        if (newTerrainMesh.geometry && newTerrainMesh.geometry.attributes.color) {
+          const colorAttr = newTerrainMesh.geometry.attributes.color;
+          const sampleIdx = Math.floor(colorAttr.count / 2);
+          const firstIdx = 0;
+          console.log('[COLOR PICKER] Terrain mesh color samples:', {
+            firstVertex: {
+              r: colorAttr.array[firstIdx * 3],
+              g: colorAttr.array[firstIdx * 3 + 1],
+              b: colorAttr.array[firstIdx * 3 + 2]
+            },
+            middleVertex: {
+              r: colorAttr.array[sampleIdx * 3],
+              g: colorAttr.array[sampleIdx * 3 + 1],
+              b: colorAttr.array[sampleIdx * 3 + 2]
+            },
+            // Compare with color map array
+            expectedFromColorMap: colorMapRef.current[0]?.[0],
+            matches: colorAttr.array[firstIdx * 3] === colorMapRef.current[0]?.[0]?.[0] / 255 &&
+                     colorAttr.array[firstIdx * 3 + 1] === colorMapRef.current[0]?.[0]?.[1] / 255 &&
+                     colorAttr.array[firstIdx * 3 + 2] === colorMapRef.current[0]?.[0]?.[2] / 255
+          });
+        }
+        
+        console.log('[COLOR PICKER] After update - terrain mesh count:', 
+          scene.children.filter(c => c.isMesh && c.material?.vertexColors).length);
+        
+        
+        console.log('[COLOR PICKER] New terrain mesh added to scene:', {
+          meshId: newTerrainMesh.id,
+          position: newTerrainMesh.position.toArray(),
+          rotation: newTerrainMesh.rotation.toArray(),
+          visible: newTerrainMesh.visible,
+          inScene: scene.children.includes(newTerrainMesh),
+          hasColorAttribute: !!newTerrainMesh.geometry?.attributes?.color,
+          colorCount: newTerrainMesh.geometry?.attributes?.color?.count || 0,
+          sceneChildrenCount: scene.children.length
+        });
+        
+        // Ensure the new terrain mesh is visible and properly positioned
+        newTerrainMesh.visible = true;
+        newTerrainMesh.updateMatrix();
+        
+        // Force render update - use requestAnimationFrame to ensure proper rendering
+        if (rendererRef.current && cameraRef.current) {
+          requestAnimationFrame(() => {
+            if (rendererRef.current && cameraRef.current && sceneRef.current) {
+              rendererRef.current.render(sceneRef.current, cameraRef.current);
+              console.log('[COLOR PICKER] Forced render update after animation frame');
+            }
+          });
+        }
+        
+        // Update sky/background color FIRST (before structures) - this should always happen if color_assignments exist
+        const skyColorFromAssignments = colorAssignments?.sky;
+        if (skyColorFromAssignments) {
+          console.log('[COLOR PICKER] Updating sky color:', skyColorFromAssignments);
+          
+          // Update renderer clear color
+          if (rendererRef.current) {
+            const skyColor = new THREE.Color(skyColorFromAssignments);
+            rendererRef.current.setClearColor(skyColor);
+            console.log('[COLOR PICKER] Updated renderer clear color:', skyColorFromAssignments, 'RGB:', skyColor.r, skyColor.g, skyColor.b);
+          }
+          
+          // Update sky mesh texture
+          const skyMesh = scene.children.find(c => c.userData?.isSky);
+          console.log('[COLOR PICKER] Looking for sky mesh:', {
+            found: !!skyMesh,
+            sceneChildrenCount: scene.children.length,
+            skyMeshes: scene.children.filter(c => c.userData?.isSky).length
+          });
+          
+          if (skyMesh && skyMesh.material) {
+            const skyColor = new THREE.Color(skyColorFromAssignments);
+            
+            // Create gradient from sky color
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const context = canvas.getContext('2d');
+            const gradient = context.createLinearGradient(0, 0, 0, 512);
+            
+            // Create darker top and lighter bottom for gradient effect
+            const topColor = new THREE.Color(skyColorFromAssignments);
+            topColor.multiplyScalar(0.6); // Darker at top
+            const bottomColor = new THREE.Color(skyColorFromAssignments);
+            bottomColor.multiplyScalar(1.2); // Lighter at bottom
+            
+            gradient.addColorStop(0, `#${topColor.getHexString().padStart(6, '0')}`);
+            gradient.addColorStop(0.5, skyColorFromAssignments);
+            gradient.addColorStop(1, `#${bottomColor.getHexString().padStart(6, '0')}`);
+            
+            context.fillStyle = gradient;
+            context.fillRect(0, 0, 512, 512);
+            
+            // Dispose old texture if it exists
+            if (skyMesh.material.map) {
+              skyMesh.material.map.dispose();
+            }
+            
+            // Update sky texture
+            const skyTexture = new THREE.CanvasTexture(canvas);
+            skyMesh.material.map = skyTexture;
+            skyMesh.material.needsUpdate = true;
+            
+            console.log('[COLOR PICKER] Updated sky mesh texture:', skyColorFromAssignments, {
+              topColor: topColor.getHexString(),
+              midColor: skyColor.getHexString(),
+              bottomColor: bottomColor.getHexString()
+            });
+          } else {
+            console.warn('[COLOR PICKER] Sky mesh not found or has no material:', {
+              skyMesh: !!skyMesh,
+              hasMaterial: skyMesh?.material ? true : false
+            });
+          }
+          
+          // Update ambient light color based on sky
+          const ambientLight = scene.children.find(c => c.isAmbientLight);
+          if (ambientLight) {
+            const skyColor = new THREE.Color(skyColorFromAssignments);
+            skyColor.multiplyScalar(0.8); // Darken slightly
+            ambientLight.color.copy(skyColor);
+            console.log('[COLOR PICKER] Updated ambient light color');
+          }
+        } else {
+          console.warn('[COLOR PICKER] No sky color in color_assignments:', colorAssignments);
+        }
+        
+        // Update structures with new colors from color_assignments
+        if (colorAssignments && Object.keys(colorAssignments).length > 0) {
+          console.log('[COLOR PICKER] Updating structure colors...');
+          
+          // Update tree colors
+          structuresRef.current.forEach((structure) => {
+            if (structure.userData?.structureType === 'tree') {
+              const leafColor = colorAssignments.tree_leaves || '#228B22';
+              const trunkColor = colorAssignments.tree_trunk || '#8b4513';
+              
+              // Update leaf colors
+              structure.traverse((child) => {
+                if (child.isMesh && child.material && child.material.vertexColors) {
+                  const colorAttr = child.geometry.attributes.color;
+                  if (colorAttr) {
+                    const color = new THREE.Color(leafColor);
+                    for (let i = 0; i < colorAttr.count; i++) {
+                      colorAttr.setXYZ(i, color.r, color.g, color.b);
+                    }
+                    colorAttr.needsUpdate = true;
+                  }
+                } else if (child.isMesh && child.material && child.material.color) {
+                  // Check if it's a trunk (standard material)
+                  if (child.material.roughness > 1.0) { // Trunk has roughness > 1.0
+                    child.material.color.set(trunkColor);
+                  }
+                }
+              });
+            } else if (structure.userData?.structureType === 'building') {
+              const buildingColor = colorAssignments.building || '#FFB6C1';
+              structure.traverse((child) => {
+                if (child.isMesh && child.material && child.material.color) {
+                  // Update building color, but keep windows darker
+                  if (!child.material.map) { // Not a window (windows have textures)
+                    child.material.color.set(buildingColor);
+                  }
+                }
+              });
+            } else if (structure.userData?.structureType === 'rock') {
+              const rockColor = colorAssignments.rock || '#808080';
+              structure.traverse((child) => {
+                if (child.isMesh && child.material && child.material.color) {
+                  child.material.color.set(rockColor);
+                }
+              });
+            } else if (structure.userData?.structureType === 'mountain') {
+              const mountainColor = colorAssignments.mountain || '#708090';
+              structure.traverse((child) => {
+                if (child.isMesh && child.material && child.material.color) {
+                  child.material.color.set(mountainColor);
+                }
+              });
+            }
+          });
+        }
+        
+        // Update current world with new terrain data and color assignments
+        setCurrentWorld(prev => ({
+          ...prev,
+          world: {
+            ...prev?.world,
+            heightmap_raw: terrainData.heightmap_raw,
+            colour_map_array: terrainData.colour_map_array,
+            placement_mask: terrainData.placement_mask,
+            color_assignments: colorAssignments
+          }
+        }));
+        
+        console.log('[COLOR PICKER] ✅ Terrain and structure colors updated successfully');
+      } else {
+        console.error('[COLOR PICKER] Missing terrain data:', {
+          heightmap: !!terrainData.heightmap_raw,
+          colorMap: !!terrainData.colour_map_array
+        });
+      }
+    } catch (error) {
+      console.error('[COLOR PICKER] Error applying color palette:', error);
+      alert(`Failed to apply color palette: ${error.message}`);
+    }
   };
 
   const updateLighting = (lightingConfig) => {
@@ -4875,6 +5398,14 @@ const VoiceWorldBuilder = () => {
   <GameSettingsPanel 
     onSettingsChange={handlePhysicsChange}
     initialSettings={physicsSettings}
+  />
+)}
+
+     {gameState === GameState.PLAYING && (
+  <ColorPicker
+    onColorPaletteChange={handleColorPaletteChange}
+    initialPalette={colorPalette}
+    disabled={!currentWorld}
   />
 )}
 
