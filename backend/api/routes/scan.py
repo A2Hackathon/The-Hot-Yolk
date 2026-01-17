@@ -13,7 +13,6 @@ router = APIRouter()
 
 class ScanRequest(BaseModel):
     image_data: str
-    analysis_only: Optional[bool] = False
 
 class VideoRequest(BaseModel):
     video_data: str  # Base64 encoded video
@@ -42,9 +41,6 @@ async def scan_world(request: ScanRequest) -> Dict:
             )
         
         print(f"[OPENAI] Vision analysis result: {scan_result}")
-
-        if request.analysis_only:
-            return scan_result
         
         # Generate world parameters from scan data
         print("[OPENAI] Generating world from analysis...")
