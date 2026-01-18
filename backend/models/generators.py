@@ -27,7 +27,8 @@ _triposr_model_cache: Dict[str, str] = {}
 async def generate_3d_model_triposr(image_data: Optional[str] = None, image_url: Optional[str] = None, object_name: Optional[str] = None, prompt: Optional[str] = None) -> Optional[str]:
     """
     Generate 3D model using TripoSR API via AIMLAPI.
-    Supports BOTH text-to-3D (using prompt) and image-to-3D (using image_url).
+    
+    Supports both text-to-3D (prompt-only) and image-to-3D (image_url required) modes.
     TripoSR is fast (under 0.5 seconds) and generates 3D meshes.
     Returns GLB model URL if successful, None otherwise.
     
@@ -35,16 +36,15 @@ async def generate_3d_model_triposr(image_data: Optional[str] = None, image_url:
     Requires: AIML_API_KEY, TRIPOSR_API_KEY, or AIMLAPI_KEY environment variable
     
     Args:
-        image_data: Optional base64 encoded image data (for ImgBB fallback if using image-to-3D)
-        image_url: Optional direct image URL (for image-to-3D mode)
+        image_data: Optional base64 encoded image data (not used if image_url provided)
+        image_url: Optional - Direct image URL (for image-to-3D mode). If not provided, uses prompt-only (text-to-3D).
         object_name: Optional name for caching purposes
-        prompt: Optional text description (for text-to-3D mode - NO IMAGE URL NEEDED!)
+        prompt: Description for 3D reconstruction. Required if no image_url provided (text-to-3D mode).
     
     Returns:
         str: Direct URL to GLB model file, or None if generation failed
     
-    Note: If prompt is provided, uses text-to-3D (no image needed). If image_url is provided, uses image-to-3D.
-          Can use both together for better results.
+    Note: TripoSR supports both text-to-3D (prompt-only) and image-to-3D (image_url required).
     """
     global _triposr_model_cache
     
@@ -67,14 +67,14 @@ async def generate_3d_model_triposr(image_data: Optional[str] = None, image_url:
             "Content-Type": "application/json"
         }
         
-        # NEW: Check if we should use text-to-3D mode (prompt) or image-to-3D mode (image_url)
-        if prompt:
-            # TEXT-TO-3D MODE: Use prompt (no image URL needed! Solves localhost issue!)
-            print(f"[TripoSR] 🚀 Generating 3D model from TEXT DESCRIPTION (TripoSR text-to-3D)...")
+        # TEXT-TO-3D MODE: Use prompt-only (no image_url needed)
+        if prompt and not (image_url and image_url.strip()):
+            print(f"[TripoSR] 🚀 Generating 3D model from DESCRIPTION (TripoSR text-to-3D)...")
             print(f"[TripoSR] Using AIML_API_KEY: {TRIPOSR_API_KEY[:10] if TRIPOSR_API_KEY else 'NOT SET'}...")
-            print(f"[TripoSR] Prompt: {prompt[:150]}...")
-            print(f"[TripoSR] 💡 Using text-to-3D mode - NO IMAGE URL NEEDED (solves localhost issue!)")
+            print(f"[TripoSR] ✅ Using description-only mode (no image_url needed)")
+            print(f"[TripoSR] Prompt length: {len(prompt)} characters")
             
+            # Build payload with prompt only (text-to-3D mode)
             payload = {
                 "model": "triposr",
                 "prompt": prompt,
@@ -82,97 +82,53 @@ async def generate_3d_model_triposr(image_data: Optional[str] = None, image_url:
                 "mc_resolution": 256  # Good balance of detail vs speed
             }
             
-            # Optionally include image_url if provided (can improve results)
-            if image_url and ("localhost" not in image_url and "127.0.0.1" not in image_url):
-                payload["image_url"] = image_url
-                print(f"[TripoSR] 📸 Also using image URL as reference: {image_url[:60]}...")
-        else:
-            # IMAGE-TO-3D MODE: Use image_url (original behavior)
+            print(f"[TripoSR] 📝 Using OpenAI description for TripoSR 3D reconstruction")
+            print(f"[TripoSR] 📝 Description: {prompt[:150]}...")
+        
+        # IMAGE-TO-3D MODE: Requires image_url (if image_url provided)
+        elif image_url and image_url.strip():
             print(f"[TripoSR] 🚀 Generating 3D model from IMAGE (TripoSR image-to-3D)...")
             print(f"[TripoSR] Using AIML_API_KEY: {TRIPOSR_API_KEY[:10] if TRIPOSR_API_KEY else 'NOT SET'}...")
             
-            if not image_data and not image_url:
-                print(f"[TripoSR] ❌ No image data or image URL provided for image-to-3D mode")
+            # Check if image_url is localhost - AIMLAPI can't access localhost!
+            if "localhost" in image_url or "127.0.0.1" in image_url:
+                print(f"[TripoSR] ⚠️ WARNING: Image URL is localhost ({image_url[:80]}...)")
+                print(f"[TripoSR] ⚠️ AIMLAPI cannot access localhost URLs from their servers!")
+                print(f"[TripoSR] ❌ Cannot use localhost image URL - use text-to-3D mode with description instead")
                 return None
             
-            # Prepare image data - convert base64 data URL to base64 string
-            image_base64 = None
-            if image_data:
-                image_base64 = image_data
-                if ',' in image_data:
-                    image_base64 = image_data.split(',')[1]
-                print(f"[TripoSR] Image size: {len(image_base64)} chars (base64)")
+            print(f"[TripoSR] ✅ Using provided image URL: {image_url[:80]}...")
             
-            print(f"[TripoSR] Image URL provided: {image_url[:80] if image_url else 'None'}...")
-            
-            # Step 1: Use provided image_url if available (backend-hosted, preferred)
-            if image_url:
-                # Check if image_url is localhost - AIMLAPI can't access localhost!
-                if "localhost" in image_url or "127.0.0.1" in image_url:
-                    print(f"[TripoSR] ⚠️ WARNING: Image URL is localhost ({image_url[:80]}...)")
-                    print(f"[TripoSR] ⚠️ AIMLAPI cannot access localhost URLs from their servers!")
-                    print(f"[TripoSR] 💡 Falling back to ImgBB upload (or use publicly accessible URL)")
-                    image_url = None  # Force ImgBB upload
-                else:
-                    print(f"[TripoSR] ✅ Using provided image URL: {image_url[:80]}...")
-            
-            if not image_url:
-                # Step 2: If no image_url or localhost, try ImgBB (if API key provided)
-                imgbb_api_key = os.getenv("IMGBB_API_KEY")
-                
-                if imgbb_api_key and imgbb_api_key != "free" and image_base64:
-                    # Try ImgBB (public hosting, works with AIMLAPI)
-                    try:
-                        print(f"[TripoSR] 📤 Uploading to ImgBB (public hosting for AIMLAPI)...")
-                        imgbb_url = "https://api.imgbb.com/1/upload"
-                        imgbb_response = requests.post(
-                            imgbb_url,
-                            data={
-                                "key": imgbb_api_key,
-                                "image": image_base64
-                            },
-                            timeout=30
-                        )
-                        
-                        if imgbb_response.status_code == 200:
-                            imgbb_data = imgbb_response.json()
-                            image_url = imgbb_data.get("data", {}).get("url")
-                            if image_url:
-                                print(f"[TripoSR] ✅ Image uploaded to ImgBB: {image_url[:60]}...")
-                        else:
-                            print(f"[TripoSR] ⚠️ ImgBB upload failed: {imgbb_response.status_code}")
-                            print(f"[TripoSR] 💡 Error: {imgbb_response.text[:200]}")
-                    except Exception as imgbb_error:
-                        print(f"[TripoSR] ⚠️ ImgBB upload failed: {imgbb_error}")
-                
-                # If still no image_url, we can't proceed with image-to-3D
-                if not image_url:
-                    print(f"[TripoSR] ❌ No publicly accessible image URL available")
-                    print(f"[TripoSR] 💡 Problem: Backend URL is localhost (AIMLAPI can't access it)")
-                    print(f"[TripoSR] 💡 Solution:")
-                    print(f"[TripoSR]    1. Get free ImgBB API key from https://api.imgbb.com/")
-                    print(f"[TripoSR]    2. Add to backend/.env: IMGBB_API_KEY=your_key_here")
-                    print(f"[TripoSR]    3. Or use text-to-3D mode with prompt instead!")
-                    print(f"[TripoSR] 💡 ImgBB free tier requires API key but is easy to get")
-                    return None
-            
-            # Step 2: Send to AIMLAPI TripoSR with image URL
+            # Build payload with image_url (required) and optional prompt for enhanced reconstruction
             payload = {
                 "model": "triposr",
                 "image_url": image_url,
                 "output_format": "glb",
-                "do_remove_background": False,  # Keep background for full scene
                 "mc_resolution": 256  # Good balance of detail vs speed
             }
-        
-        if prompt:
-            print(f"[TripoSR] 📤 Sending to AIMLAPI TripoSR (text-to-3D mode, ~0.5 seconds)...")
-            print(f"[TripoSR] Endpoint: {api_url}")
-            print(f"[TripoSR] Payload: model=triposr, prompt={prompt[:80]}..., output_format=glb")
+            
+            # Include prompt if provided - this describes what TripoSR should reconstruct from the image
+            # The prompt guides TripoSR's 3D reconstruction process (describes what's visible in the image)
+            if prompt:
+                payload["prompt"] = prompt
+                print(f"[TripoSR] 📝 Including detailed scene description as prompt for TripoSR reconstruction")
+                print(f"[TripoSR] 📝 Prompt length: {len(prompt)} characters (describes what TripoSR should reconstruct)")
         else:
-            print(f"[TripoSR] 📤 Sending to AIMLAPI TripoSR (image-to-3D mode, ~0.5 seconds)...")
-            print(f"[TripoSR] Endpoint: {api_url}")
-            print(f"[TripoSR] Payload: model=triposr, image_url={image_url[:80]}..., output_format=glb")
+            # No prompt or image_url provided - cannot proceed
+            print(f"[TripoSR] ❌ No prompt or image_url provided for TripoSR generation")
+            print(f"[TripoSR] 💡 TripoSR requires either a prompt (text-to-3D) or image_url (image-to-3D)")
+            return None
+        
+        # Determine mode for logging
+        mode = "text-to-3D (prompt-only)" if prompt and not (image_url and image_url.strip()) else "image-to-3D"
+        print(f"[TripoSR] 📤 Sending to AIMLAPI TripoSR ({mode} mode, ~0.5 seconds)...")
+        print(f"[TripoSR] Endpoint: {api_url}")
+        payload_info = "model=triposr, output_format=glb"
+        if image_url:
+            payload_info += f", image_url={image_url[:80]}..."
+        if prompt:
+            payload_info += f", prompt={len(prompt)} chars (scene description for TripoSR)"
+        print(f"[TripoSR] Payload: {payload_info}")
         
         response = requests.post(api_url, headers=headers, json=payload, timeout=60)
         
@@ -194,9 +150,13 @@ async def generate_3d_model_triposr(image_data: Optional[str] = None, image_url:
             elif response.status_code == 403:
                 print(f"[TripoSR] 💡 403 Forbidden - API key may not have TripoSR access")
             elif response.status_code == 404:
-                print(f"[TripoSR] 💡 404 Not Found - Check if image URL is accessible")
-                print(f"[TripoSR] 💡 Image URL: {image_url}")
-                print(f"[TripoSR] 💡 Try accessing the URL in browser to verify it works")
+                if image_url:
+                    print(f"[TripoSR] 💡 404 Not Found - Check if image URL is accessible")
+                    print(f"[TripoSR] 💡 Image URL: {image_url}")
+                    print(f"[TripoSR] 💡 Try accessing the URL in browser to verify it works")
+                else:
+                    print(f"[TripoSR] 💡 404 Not Found - Text-to-3D endpoint may not be available")
+                    print(f"[TripoSR] 💡 Check AIMLAPI documentation for text-to-3D support")
             elif response.status_code == 429:
                 print(f"[TripoSR] 💡 429 Rate Limited - Wait a minute and try again")
             elif response.status_code >= 500:

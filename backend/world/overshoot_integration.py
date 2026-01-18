@@ -337,18 +337,27 @@ async def scan_entire_scene_with_vision(image_data: str, use_overshoot: bool = T
             messages=[
                 {
                     "role": "system",
-                    "content": """You are a 3D scene description API for generating photorealistic 3D models. Describe the ENTIRE visible scene in extreme detail for 3D reconstruction. Return ONLY JSON.
+                    "content": """You are a 3D scene description API for TripoSR 3D model reconstruction. Your description will be fed directly into TripoSR to generate a complete 3D model of the entire visible scene. Return ONLY JSON.
 
-CRITICAL MISSION:
-Your description will be used to generate a complete 3D model of everything visible in the image. Be EXTREMELY detailed and precise. This is not object detection - this is full scene reconstruction.
+CRITICAL MISSION - FOR TRIPOSR 3D RECONSTRUCTION:
+Your description will be used by TripoSR (an AI 3D model generator) to reconstruct the ENTIRE visible scene as a 3D model. TripoSR uses this text description along with the image to understand what 3D structures to create. Be EXTREMELY detailed and precise about what you see - this directly affects the quality of 3D reconstruction.
+
+IMPORTANT: Describe what TripoSR needs to know to reconstruct this scene in 3D:
+- What objects exist and their 3D shapes (boxes, cylinders, complex forms)
+- Spatial positions and relationships (what's in front, behind, left, right, above, below)
+- Materials and surface textures (metal, wood, fabric, stone, etc.)
+- Colors in hex format (#RRGGBB) for accurate color reconstruction
+- Lighting conditions and shadows (helps with 3D depth perception)
+- Scale and dimensions (relative sizes help TripoSR create accurate proportions)
+- Background elements (walls, floors, ceiling, sky) that form the 3D environment
 
 RULES:
 1. Output ONLY pure JSON - no markdown, no explanations
-2. ALL colors in hex format (#RRGGBB)
-3. IGNORE humans/people - focus on environment only
-4. Describe spatial relationships, positions, and scales
-5. Include ALL visible elements (walls, floor, ceiling, background, objects)
-6. Be specific about materials, textures, and surface details
+2. ALL colors in hex format (#RRGGBB) - TripoSR needs exact colors for texture generation
+3. IGNORE humans/people - focus on environment and inanimate objects only
+4. Describe spatial relationships in 3D terms (depth, height, width, positions)
+5. Include ALL visible elements that TripoSR should reconstruct (walls, floor, ceiling, background, objects)
+6. Be specific about materials, textures, and surface details - TripoSR uses this for realistic rendering
 
 REQUIRED JSON STRUCTURE:
 {
@@ -390,14 +399,16 @@ REQUIRED JSON STRUCTURE:
   "colors": {"palette": ["#HEX", "#HEX", "#HEX", "#HEX", "#HEX"]}
 }
 
-REMEMBER: Your description will be fed directly into Tripo3D to generate a complete 3D model. The more detailed and precise you are, the better the 3D reconstruction will be. Include EVERYTHING visible - objects, walls, floors, backgrounds, textures, materials, positions, and scales."""
+REMEMBER: Your description will be fed directly into TripoSR (AIMLAPI) to generate a complete 3D model via image-to-3D reconstruction. TripoSR uses your text description along with the image to understand what 3D structures to create. The more detailed and precise you are about what you see, the better TripoSR's 3D reconstruction will be. 
+
+Describe everything visible as if you're explaining to a 3D modeler what needs to be built: objects, their 3D shapes, spatial positions, materials, textures, colors (hex), lighting, and scales. Include EVERYTHING visible - objects, walls, floors, ceilings, backgrounds, textures, materials, positions, depth, and dimensions. This description guides TripoSR's 3D reconstruction process."""
                 },
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": f"Describe this ENTIRE scene in extreme detail for 3D model generation. Include everything visible: objects, walls, floors, ceiling, background, materials, textures, colors (in hex), spatial positions, scale, and lighting. This description will create a complete 3D environment. Be as detailed as possible.{openrouter_prompt_addition}"
+                            "text": f"Describe what you see in this image in extreme detail for TripoSR 3D reconstruction. TripoSR will use your description along with this image to generate a complete 3D model of the entire scene. Describe everything visible: objects and their 3D shapes, walls, floors, ceiling, background, materials, textures, colors (in hex format #RRGGBB), spatial positions and relationships (what's in front/behind/left/right), scale, dimensions, and lighting. Be extremely detailed - describe what TripoSR needs to know to accurately reconstruct this scene in 3D.{openrouter_prompt_addition}"
                         },
                         {
                             "type": "image_url",

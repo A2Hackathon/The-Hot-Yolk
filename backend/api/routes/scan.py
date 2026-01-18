@@ -62,7 +62,8 @@ async def get_temp_image(image_id: str):
 async def scan_world(request: ScanRequest) -> Dict:
     """
     NEW: Analyze ENTIRE scene and generate complete 3D world from it.
-    Uses OpenAI Vision to describe scene → TripoSR (via AIMLAPI) to generate full 3D model.
+    Uses OpenAI Vision to describe scene → TripoSR (image-to-3D) to generate full 3D model.
+    TripoSR uses the OpenAI description as a prompt to guide 3D reconstruction from the image.
     """
     print(f"\n{'='*60}", flush=True)
     print(f"[SCAN] =============================================================", flush=True)
@@ -100,66 +101,44 @@ async def scan_world(request: ScanRequest) -> Dict:
         print(f"[SCAN] Scene analyzed: {scene_description[:150]}...", flush=True)
         print(f"[SCAN] Full description length: {len(scene_description)} characters", flush=True)
         
-        # Step 2: Host image temporarily (for TripoSR - it needs a URL, not base64)
-        print("[SCAN] Hosting image temporarily for TripoSR...", flush=True)
-        import hashlib
-        import time as time_module
+        # Step 2: Use TripoSR for text-to-3D generation using ONLY the description (no image_url needed)
+        print("[SCAN] Generating 3D world using TripoSR with description-only (text-to-3D)...", flush=True)
+        print(f"[SCAN] Scene description (used as prompt): {scene_description[:150]}...", flush=True)
+        print(f"[SCAN] Description length: {len(scene_description)} characters", flush=True)
+        print("[SCAN] Using TripoSR (AIMLAPI) for text-to-3D reconstruction from OpenAI description", flush=True)
         
-        # Generate unique image ID
-        image_base64_clean = request.image_data.split(',')[1] if ',' in request.image_data else request.image_data
-        image_hash = hashlib.md5(image_base64_clean.encode()).hexdigest()[:12]
-        image_id = f"{image_hash}_{int(time_module.time())}"
-        
-        # Store image in memory (expires after 5 minutes)
-        _temp_images[image_id] = (request.image_data, time_module.time())
-        
-        # Generate image URL
-        backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
-        image_url = f"{backend_url}/api/temp-image/{image_id}"
-        
-        print(f"[SCAN] Image hosted at: {image_url[:80]}...", flush=True)
-        
-        # Step 3: Use TripoSR to generate 3D model - NOW SUPPORTS TEXT-TO-3D!
-        print("[SCAN] Generating complete 3D world using TripoSR...", flush=True)
-        print(f"[SCAN] Scene description: {scene_description[:100]}...", flush=True)
         from models.generators import generate_3d_model_triposr
         
-        # NEW: Use text-to-3D mode with scene description (NO IMAGE URL NEEDED!)
-        # This solves the localhost issue - we can use the description from OpenRouter Vision!
-        print("[SCAN] Using TEXT-TO-3D mode with scene description (no image URL needed!)", flush=True)
-        print(f"[SCAN] Sending to TripoSR:", flush=True)
-        print(f"[SCAN]    - Prompt length: {len(scene_description)} chars", flush=True)
-        print(f"[SCAN]    - Prompt preview: {scene_description[:200]}...", flush=True)
-        print(f"[SCAN]    - AIML_API_KEY: {'SET' if os.getenv('AIML_API_KEY') or os.getenv('TRIPOSR_API_KEY') or os.getenv('AIMLAPI_KEY') else 'NOT SET'}", flush=True)
-        
+        # Use TripoSR with ONLY the description (prompt) - no image_url needed
         model_url = await generate_3d_model_triposr(
-            prompt=scene_description,  # Use description from OpenRouter Vision - text-to-3D!
-            image_data=request.image_data,  # Optional: can use as reference if ImgBB works
-            image_url=image_url,  # Optional: can use as reference if publicly accessible
-            object_name="scanned_environment"
+            object_name="scanned_environment",
+            prompt=scene_description  # OpenAI description - TripoSR reconstructs 3D from this text only
         )
         
         print(f"[SCAN] TripoSR returned: {model_url if model_url else 'None (generation failed)'}", flush=True)
         
         if not model_url:
             # Check if API key is set
-            api_key = os.getenv("AIML_API_KEY") or os.getenv("TRIPOSR_API_KEY") or os.getenv("AIMLAPI_KEY")
+            api_key = os.getenv("TRIPOSR_API_KEY") or os.getenv("AIMLAPI_KEY") or os.getenv("AIML_API_KEY")
             api_key_status = "SET" if api_key else "NOT SET"
             api_key_preview = f"{api_key[:10]}..." if api_key else "N/A"
             
-            error_msg = f"TripoSR generation failed - check backend logs above for detailed error."
+            # Determine error message
+            error_msg = f"TripoSR text-to-3D generation failed - check backend logs above for detailed error."
+            
             print(f"[SCAN] {error_msg}", flush=True)
             print(f"[SCAN] Diagnosis:", flush=True)
             print(f"[SCAN]    - API Key Status: {api_key_status}", flush=True)
             print(f"[SCAN]    - API Key Preview: {api_key_preview}", flush=True)
-            print(f"[SCAN]    - Scene Description Length: {len(scene_description)} chars", flush=True)
+            print(f"[SCAN]    - Scene Description Length: {len(scene_description)} characters", flush=True)
             print(f"[SCAN]    - Scene Description Preview: {scene_description[:200]}...", flush=True)
             print(f"[SCAN] Look at TripoSR error messages ABOVE to see exact failure reason", flush=True)
             print(f"[SCAN] Common issues:", flush=True)
-            print(f"[SCAN]    1. AIML_API_KEY not set or invalid (check backend/.env file)", flush=True)
-            print(f"[SCAN]    2. No credits in AIMLAPI account (visit https://aimlapi.com/)", flush=True)
+            print(f"[SCAN]    1. AIML_API_KEY/TRIPOSR_API_KEY not set (check backend/.env file)", flush=True)
+            print(f"[SCAN]    2. No credits in AIMLAPI account", flush=True)
             print(f"[SCAN]    3. API endpoint changed or network error", flush=True)
-            print(f"[SCAN]    4. Invalid prompt format (though text-to-3D should work)", flush=True)
+            print(f"[SCAN]    4. Generation timeout", flush=True)
+            print(f"[SCAN] Note: TripoSR uses description-only (prompt) for text-to-3D reconstruction", flush=True)
             
             # Fallback: return scan data without 3D model (new format)
             return {

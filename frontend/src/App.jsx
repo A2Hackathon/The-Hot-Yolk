@@ -1344,7 +1344,7 @@ const VoiceWorldBuilder = () => {
 
   // Create room walls and floor for indoor biome
   const createRoomWall = (wallData) => {
-    const { dimensions, position, color, type } = wallData;
+    const { dimensions, position, color, type, transparent, opacity } = wallData;
     
     const geometry = new THREE.BoxGeometry(
       dimensions.width,
@@ -1353,21 +1353,27 @@ const VoiceWorldBuilder = () => {
     );
     
     let wallColor = color || '#E8E8E8';
-    if (typeof wallColor === 'string') {
+    if (typeof wallColor === 'string' && wallColor.startsWith('#')) {
       wallColor = parseInt(wallColor.replace('#', ''), 16);
+    } else if (typeof wallColor === 'number') {
+      // Already a hex number
+    } else {
+      wallColor = 0xE8E8E8; // Default gray
     }
     
     const material = new THREE.MeshStandardMaterial({
       color: wallColor,
       roughness: type === 'floor' ? 0.9 : 0.7,
       metalness: 0.1,
-      side: THREE.DoubleSide
+      side: THREE.DoubleSide,
+      transparent: transparent || false,
+      opacity: opacity !== undefined ? opacity : 1.0
     });
     
     const wall = new THREE.Mesh(geometry, material);
     wall.position.set(position.x, position.y, position.z);
     wall.receiveShadow = true;
-    wall.castShadow = type !== 'floor';
+    wall.castShadow = type !== 'floor' && !transparent;
     
     return wall;
   };
@@ -3433,6 +3439,7 @@ const VoiceWorldBuilder = () => {
   const worldGeneratedFromScanRef = useRef(false); // Prevent multiple world generations
   const accumulatedObjectsRef = useRef({}); // Accumulate scanned objects across results
   const processedScenesRef = useRef(new Set()); // Track processed scene descriptions (deduplication)
+  const latestScanDataRef = useRef(null); // Store latest scan result for world generation on stop
   const frameCounterRef = useRef(0); // Track frame numbers for optimized processing
 
   // Main streaming function - uses Overshoot SDK directly for real-time video analysis
@@ -3447,13 +3454,14 @@ const VoiceWorldBuilder = () => {
       accumulatedObjectsRef.current = {}; // Reset accumulated objects
       processedScenesRef.current.clear(); // Clear processed scenes for new scan session
       frameCounterRef.current = 0; // Reset frame counter
+      latestScanDataRef.current = null; // Reset latest scan data
       
       // First, enable the UI
       setStreamingActive(true);
       setScanMode(false);
       
-      // Create Overshoot RealtimeVision instance
-      const vision = new RealtimeVision({
+      // Configuration object for Overshoot SDK (matches official documentation format)
+      const overshootConfig = {
         apiUrl: OVERSHOOT_API_URL,
         apiKey: OVERSHOOT_API_KEY,
         prompt: `Describe the ENTIRE visible scene in extreme detail for 3D model generation. Return JSON with:
@@ -3470,8 +3478,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
           clip_length_seconds: 1,
           delay_seconds: 1,
           fps: 30,
-          // Optimized: Process every 30th frame = 1 frame per second (as per guide recommendation)
-          sampling_ratio: 1/30 // ~0.033 (1 frame per second at 30fps)
+          sampling_ratio: 0.1  // Default per documentation: 10% of frames (3 fps at 30fps)
         },
         onResult: async (result) => {
           overshootResultCountRef.current++;
@@ -3486,7 +3493,36 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
               // Try to extract JSON from the response
               const jsonMatch = parsed.match(/\{[\s\S]*\}/);
               if (jsonMatch) {
-                parsed = JSON.parse(jsonMatch[0]);
+                try {
+                  // Clean up common JSON issues before parsing
+                  let jsonStr = jsonMatch[0];
+                  // Replace invalid "#HEX" placeholders with valid hex colors
+                  jsonStr = jsonStr.replace(/"#HEX"/g, '"#000000"');
+                  // Fix invalid color patterns: "primary": "#HEX1", "#HEX2" becomes "primary": "#HEX1"
+                  // This pattern has multiple hex values where the second one is invalid (not a key-value pair)
+                  jsonStr = jsonStr.replace(/"primary":\s*"(#[A-F0-9]{6})",\s*"#[A-F0-9]{6}"/g, '"primary": "$1"');
+                  // More aggressive: remove any standalone hex strings after commas (invalid JSON property)
+                  jsonStr = jsonStr.replace(/,\s*"#[A-F0-9]{6}"/g, '');
+                  parsed = JSON.parse(jsonStr);
+                } catch (jsonParseError) {
+                  console.warn(`[OVERSHOOT] JSON parse failed, trying to fix and retry: ${jsonParseError.message}`);
+                  // Try more aggressive fixes
+                  let jsonStr = jsonMatch[0];
+                  // Replace invalid "#HEX" placeholders
+                  jsonStr = jsonStr.replace(/"#HEX"/g, '"#000000"');
+                  // Fix patterns like {"primary": "#HEX1", "#HEX2", "#HEX3"} - keep only first hex
+                  // This regex handles 1 or more trailing hex values after the first
+                  jsonStr = jsonStr.replace(/"primary":\s*"(#[A-F0-9]{6})"(\s*,\s*"#[A-F0-9]{6}")+/g, '"primary": "$1"');
+                  // Remove any standalone hex strings after commas (they're not valid JSON keys)
+                  jsonStr = jsonStr.replace(/,\s*"#[A-F0-9]{6}"/g, '');
+                  try {
+                    parsed = JSON.parse(jsonStr);
+                  } catch (retryError) {
+                    console.error(`[OVERSHOOT] JSON parse failed after fixes: ${retryError.message}`);
+                    // Let it fall through to outer catch block
+                    throw retryError;
+                  }
+                }
               }
             }
             
@@ -3509,79 +3545,17 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
               accumulatedObjects: { ...accumulatedObjectsRef.current }
             });
             
-            // Wait for at least 3 results to accumulate objects before generating
-            const minResultsBeforeGenerate = 3;
-            const hasEnoughResults = resultNum >= minResultsBeforeGenerate;
-            
-            // NEW: Generate complete 3D world from scene description
-            // With deduplication: avoid generating duplicate scenes
+            // Store scan data for world generation when streaming stops (defer generation)
+            // Keep the latest scan result with scene description
             const sceneDesc = parsed?.scene_description;
-            const sceneHash = sceneDesc ? sceneDesc.substring(0, 200).replace(/\s+/g, ' ').trim() : null;
-            const isDuplicate = sceneHash && processedScenesRef.current.has(sceneHash);
-            
-            if (sceneDesc && gameState !== GameState.PLAYING && !worldGeneratedFromScanRef.current && hasEnoughResults && !isDuplicate) {
-              // Mark this scene as processed (deduplication)
-              if (sceneHash) {
-                processedScenesRef.current.add(sceneHash);
-              }
-              
-              worldGeneratedFromScanRef.current = true; // Prevent multiple generations
-              frameCounterRef.current++; // Track frame number
-              
-              console.log(`[OVERSHOOT] 🎬 Generating complete 3D world from scene (Frame #${frameCounterRef.current})...`);
-              console.log(`[OVERSHOOT] Scene: ${sceneDesc.substring(0, 150)}...`);
-              
-              // Send scene description to backend - it will use Tripo3D to generate entire scene
-              try {
-                // Create a temporary image data from video frame for backend
-                const canvas = document.createElement('canvas');
-                if (videoRef.current && videoRef.current.videoWidth > 0) {
-                  canvas.width = videoRef.current.videoWidth;
-                  canvas.height = videoRef.current.videoHeight;
-                  const ctx = canvas.getContext('2d');
-                  ctx.drawImage(videoRef.current, 0, 0);
-                  const imageData = canvas.toDataURL('image/jpeg', 0.7);
-                  
-                  // Send to scan-world endpoint which now generates entire scene
-                  const res = await fetch(`${API_BASE}/scan-world`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                      image_data: imageData
-                    }),
-                  });
-                  
-                  if (res.ok) {
-                    const worldData = await res.json();
-                    console.log(`[OVERSHOOT] ✅ Complete 3D world generated!`);
-                    console.log(`[OVERSHOOT] Model URL:`, worldData.world?.model_url);
-                    
-                    // Check if backend returned an error (Tripo3D failure)
-                    if (worldData.error) {
-                      console.error(`[OVERSHOOT] ⚠️ Backend Error: ${worldData.error}`);
-                      console.error(`[OVERSHOOT] 💡 SOLUTION: Check your backend terminal/console for detailed Tripo3D error logs`);
-                      console.error(`[OVERSHOOT] 💡 Common causes: API timeout (>2min), rate limit, invalid API key, network error`);
-                    }
-                    
-                    if (!worldData.world?.model_url) {
-                      console.warn(`[OVERSHOOT] ⚠️ No model URL received from backend - falling back to legacy generation`);
-                      console.warn(`[OVERSHOOT] 💡 This means Tripo3D failed to generate the 3D model`);
-                      console.warn(`[OVERSHOOT] 💡 Check backend logs for detailed error message`);
-                    }
-                    
-                    // Load the complete scanned world
-                    await loadWorldFromScan(worldData);
-                    setGameState(GameState.PLAYING);
-                  } else {
-                    const errText = await res.text();
-                    console.error('[OVERSHOOT] World generation failed:', errText);
-                  }
-                } else {
-                  console.warn('[OVERSHOOT] No video frame available for full scene generation');
-                }
-              } catch (backendError) {
-                console.error('[OVERSHOOT] Backend error:', backendError);
-              }
+            if (sceneDesc && !worldGeneratedFromScanRef.current) {
+              // Store latest scan data for generation on stop
+              latestScanDataRef.current = {
+                sceneDescription: sceneDesc,
+                parsedData: parsed,
+                frameNumber: resultNum
+              };
+              console.log(`[OVERSHOOT] 📸 Storing scan data for world generation on stop (Frame #${resultNum})...`);
             }
           } catch (parseError) {
             console.log('[OVERSHOOT] Could not parse result as JSON:', parseError.message);
@@ -3596,11 +3570,40 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         },
         onError: (error) => {
           console.error('[OVERSHOOT] SDK Error:', error);
+          console.error('[OVERSHOOT] Error details:', {
+            message: error.message,
+            name: error.name,
+            stack: error.stack
+          });
+          
+          // Log specific error types
+          if (error.message && error.message.includes('422')) {
+            console.error('[OVERSHOOT] 422 Validation Error detected - SDK may need configuration adjustments');
+            console.error('[OVERSHOOT] This might be an SDK version issue or API format change');
+          } else if (error.message && (error.message.includes('401') || error.message.includes('403'))) {
+            console.error('[OVERSHOOT] Authentication Error - check API key');
+          }
         }
+      };
+      
+      // Log configuration before creating instance
+      console.log('[OVERSHOOT] Configuration being passed:', {
+        apiUrl: overshootConfig.apiUrl,
+        apiKey: overshootConfig.apiKey ? `${overshootConfig.apiKey.substring(0, 10)}...` : 'NOT SET',
+        hasPrompt: !!overshootConfig.prompt,
+        promptLength: overshootConfig.prompt ? overshootConfig.prompt.length : 0,
+        hasSource: !!overshootConfig.source,
+        sourceType: overshootConfig.source?.type || 'N/A',
+        hasProcessing: !!overshootConfig.processing,
+        processingConfig: overshootConfig.processing
       });
+      
+      // Create Overshoot RealtimeVision instance
+      const vision = new RealtimeVision(overshootConfig);
       
       // Start the Overshoot vision
       console.log('[OVERSHOOT] Starting RealtimeVision...');
+      
       await vision.start();
       console.log('[OVERSHOOT] ✅ RealtimeVision started successfully');
       
@@ -3644,6 +3647,9 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       
     } catch (error) {
       console.error('[STREAMING] Error starting Overshoot SDK:', error);
+      console.error('[STREAMING] Error type:', error.constructor.name);
+      console.error('[STREAMING] Error message:', error.message);
+      console.error('[STREAMING] Error stack:', error.stack);
       
       let errorMessage = 'Failed to start Overshoot streaming.\n\n';
       
@@ -3651,6 +3657,9 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         errorMessage += '⚠️ Network Error: Cannot reach Overshoot API.\n\n';
       } else if (error.message && (error.message.includes('401') || error.message.includes('403') || error.message.includes('Unauthorized'))) {
         errorMessage += 'Authentication Error: Invalid API key.\n\n';
+      } else if (error.message && (error.message.includes('422') || error.message.includes('validation'))) {
+        errorMessage += '⚠️ Validation Error (422): SDK request format issue.\n';
+        errorMessage += 'This may be an SDK version issue. Falling back to OpenAI frame analysis.\n\n';
       } else if (error.message && error.message.includes('NotAllowedError')) {
         errorMessage += 'Camera permission denied. Please allow camera access.\n\n';
       } else {
@@ -3987,7 +3996,8 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       console.error(`[SCAN] 💡 Common causes:`);
       console.error(`[SCAN]    - AIML_API_KEY not set or invalid`);
       console.error(`[SCAN]    - No credits in AIMLAPI account`);
-      console.error(`[SCAN]    - Image upload to ImgBB failed`);
+      console.error(`[SCAN]    - Image URL is localhost (AIMLAPI cannot access localhost URLs)`);
+      console.error(`[SCAN]    - BACKEND_URL not set to publicly accessible URL (e.g., use ngrok)`);
       console.error(`[SCAN]    - Network error`);
     } else if (data.world?.type === 'scan_fallback') {
       console.warn(`[SCAN] ⚠️ Backend returned scan_fallback - TripoSR generation failed`);
@@ -3995,6 +4005,369 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
     } else if (!data.world?.model_url) {
       console.warn(`[SCAN] ⚠️ No model_url in response - TripoSR generation did not complete`);
       console.warn(`[SCAN] 💡 Backend response:`, data);
+    }
+    
+    // Create kitchen room for room/indoor biomes when scan fails or no model_url
+    const biomeName = data.world?.biome || data.world?.biome_name || data.biome;
+    const isRoomBiome = biomeName && (biomeName.toLowerCase() === 'room' || biomeName.toLowerCase() === 'indoor');
+    
+    if (isRoomBiome && (!data.world?.model_url || data.world?.type === 'scan_fallback')) {
+      console.log('[SCAN] 🍳 Creating kitchen room biome...');
+      
+      // Ensure structures object exists
+      if (!data.structures) {
+        data.structures = {};
+      }
+      
+      // Create realistic kitchen with L-shaped layout (like the reference image)
+      const wallColor = 0xF5F5F5; // White/off-white walls (like reference)
+      const roomSize = 25; // Room dimensions
+      const wallHeight = 10; // Standard kitchen ceiling height
+      const windowHeight = 6; // Tall windows for natural light
+      const counterHeight = 3; // Standard counter height (36 inches)
+      const counterDepth = 2; // Counter depth (24 inches)
+      const upperCabinetHeight = 3; // Upper cabinet height (30 inches)
+      const upperCabinetBottom = 7; // Upper cabinets start above counter (7 units = ~84 inches from floor)
+      const backsplashHeight = 1.5; // Backsplash height above counter
+      
+      // Create room walls (white/off-white like reference)
+      data.structures.walls = [
+        // Back wall with window
+        {
+          dimensions: { width: roomSize, height: wallHeight, depth: 0.5 },
+          position: { x: 0, y: wallHeight / 2, z: -roomSize / 2 },
+          color: wallColor,
+          type: 'wall'
+        },
+        // Front wall with window
+        {
+          dimensions: { width: roomSize, height: wallHeight, depth: 0.5 },
+          position: { x: 0, y: wallHeight / 2, z: roomSize / 2 },
+          color: wallColor,
+          type: 'wall'
+        },
+        // Left wall with window
+        {
+          dimensions: { width: 0.5, height: wallHeight, depth: roomSize },
+          position: { x: -roomSize / 2, y: wallHeight / 2, z: 0 },
+          color: wallColor,
+          type: 'wall'
+        },
+        // Right wall with window
+        {
+          dimensions: { width: 0.5, height: wallHeight, depth: roomSize },
+          position: { x: roomSize / 2, y: wallHeight / 2, z: 0 },
+          color: wallColor,
+          type: 'wall'
+        },
+        // Floor
+        {
+          dimensions: { width: roomSize, height: 0.2, depth: roomSize },
+          position: { x: 0, y: 0, z: 0 },
+          color: 0xD3D3D3, // Light gray floor
+          type: 'floor'
+        },
+        // Ceiling
+        {
+          dimensions: { width: roomSize, height: 0.2, depth: roomSize },
+          position: { x: 0, y: wallHeight, z: 0 },
+          color: 0xF5F5F5, // Off-white ceiling
+          type: 'ceiling'
+        }
+      ];
+      
+      // Create high glass windows on each wall
+      const windowWidth = 8;
+      const windowColor = 0x87CEEB; // Sky blue glass color
+      const windows = [
+        // Window on back wall (center)
+        {
+          dimensions: { width: windowWidth, height: windowHeight, depth: 0.3 },
+          position: { x: 0, y: windowHeight / 2 + 2, z: -roomSize / 2 + 0.25 },
+          color: windowColor,
+          type: 'window',
+          transparent: true,
+          opacity: 0.7
+        },
+        // Window on front wall (center)
+        {
+          dimensions: { width: windowWidth, height: windowHeight, depth: 0.3 },
+          position: { x: 0, y: windowHeight / 2 + 2, z: roomSize / 2 - 0.25 },
+          color: windowColor,
+          type: 'window',
+          transparent: true,
+          opacity: 0.7
+        },
+        // Window on left wall
+        {
+          dimensions: { width: 0.3, height: windowHeight, depth: windowWidth },
+          position: { x: -roomSize / 2 + 0.25, y: windowHeight / 2 + 2, z: 0 },
+          color: windowColor,
+          type: 'window',
+          transparent: true,
+          opacity: 0.7
+        },
+        // Window on right wall
+        {
+          dimensions: { width: 0.3, height: windowHeight, depth: windowWidth },
+          position: { x: roomSize / 2 - 0.25, y: windowHeight / 2 + 2, z: 0 },
+          color: windowColor,
+          type: 'window',
+          transparent: true,
+          opacity: 0.7
+        }
+      ];
+      
+      // Add windows to walls
+      if (!data.structures.windows) {
+        data.structures.windows = windows;
+      }
+      
+      // Create L-shaped kitchen layout (like reference image)
+      const cabinetColor = 0xD2B48C; // Light wood color (like reference)
+      const counterColor = 0xF5F5DC; // Light beige/speckled countertop (like reference)
+      const backsplashColor = 0xC0C0C0; // Stainless steel backsplash
+      const stoveColor = 0xFFFFFF; // White stove
+      const sinkColor = 0xC0C0C0; // Stainless steel sink
+      const refrigeratorColor = 0xFFFFFF; // White refrigerator
+      
+      if (!data.structures.scanned_objects) {
+        data.structures.scanned_objects = [];
+      }
+      
+      // L-SHAPED LAYOUT: Back wall (left side) + Right wall (corner kitchen)
+      
+      // === BACK WALL SECTION (left side of room) ===
+      const backWallCabinetZ = -roomSize / 2 + counterDepth / 2;
+      const lowerCabinetY = counterHeight / 2; // Base of cabinet at counter height
+      
+      // Lower cabinets on back wall
+      data.structures.scanned_objects.push(
+        // Lower cabinet 1 (left corner)
+        {
+          name: 'lower_cabinet_back_1',
+          position: { x: -8, y: lowerCabinetY, z: backWallCabinetZ },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 4, height: counterHeight, depth: counterDepth },
+            position: { x: 0, y: 0, z: 0 },
+            color: cabinetColor,
+            material: { roughness: 0.7, metalness: 0.1 }
+          }]
+        },
+        // Lower cabinet 2 (center - where stove goes)
+        {
+          name: 'lower_cabinet_back_2',
+          position: { x: -3, y: lowerCabinetY, z: backWallCabinetZ },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 4, height: counterHeight, depth: counterDepth },
+            position: { x: 0, y: 0, z: 0 },
+            color: cabinetColor,
+            material: { roughness: 0.7, metalness: 0.1 }
+          }]
+        }
+      );
+      
+      // === RIGHT WALL SECTION (forms L-shape) ===
+      const rightWallCabinetX = roomSize / 2 - counterDepth / 2;
+      
+      // Lower cabinets on right wall (continues L-shape)
+      data.structures.scanned_objects.push(
+        // Lower cabinet on right wall (near corner)
+        {
+          name: 'lower_cabinet_right_1',
+          position: { x: rightWallCabinetX, y: lowerCabinetY, z: -5 },
+          scale: 1,
+          rotation: { x: 0, y: Math.PI / 2, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 4, height: counterHeight, depth: counterDepth },
+            position: { x: 0, y: 0, z: 0 },
+            color: cabinetColor,
+            material: { roughness: 0.7, metalness: 0.1 }
+          }]
+        },
+        // Lower cabinet on right wall (sink area)
+        {
+          name: 'lower_cabinet_right_2',
+          position: { x: rightWallCabinetX, y: lowerCabinetY, z: 0 },
+          scale: 1,
+          rotation: { x: 0, y: Math.PI / 2, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 4, height: counterHeight, depth: counterDepth },
+            position: { x: 0, y: 0, z: 0 },
+            color: cabinetColor,
+            material: { roughness: 0.7, metalness: 0.1 }
+          }]
+        }
+      );
+      
+      // Countertop on back wall (L-shape)
+      const counterTopY = counterHeight + 0.05; // On top of cabinets
+      data.structures.scanned_objects.push(
+        // Countertop on back wall
+        {
+          name: 'countertop_back',
+          position: { x: -5.5, y: counterTopY, z: backWallCabinetZ },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 8, height: 0.15, depth: counterDepth },
+            position: { x: 0, y: 0, z: 0 },
+            color: counterColor,
+            material: { roughness: 0.3, metalness: 0.0 }
+          }]
+        },
+        // Countertop on right wall (L-shape continuation)
+        {
+          name: 'countertop_right',
+          position: { x: rightWallCabinetX, y: counterTopY, z: -2.5 },
+          scale: 1,
+          rotation: { x: 0, y: Math.PI / 2, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 8, height: 0.15, depth: counterDepth },
+            position: { x: 0, y: 0, z: 0 },
+            color: counterColor,
+            material: { roughness: 0.3, metalness: 0.0 }
+          }]
+        }
+      );
+      
+      // Stainless steel backsplash (behind stove and sink)
+      const backsplashY = counterTopY + backsplashHeight / 2;
+      data.structures.scanned_objects.push(
+        // Backsplash on back wall (behind stove)
+        {
+          name: 'backsplash_back',
+          position: { x: -3, y: backsplashY, z: -roomSize / 2 + 0.1 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 4, height: backsplashHeight, depth: 0.1 },
+            position: { x: 0, y: 0, z: 0 },
+            color: backsplashColor,
+            material: { roughness: 0.2, metalness: 0.6 }
+          }]
+        },
+        // Backsplash on right wall (behind sink)
+        {
+          name: 'backsplash_right',
+          position: { x: roomSize / 2 - 0.1, y: backsplashY, z: 0 },
+          scale: 1,
+          rotation: { x: 0, y: Math.PI / 2, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 4, height: backsplashHeight, depth: 0.1 },
+            position: { x: 0, y: 0, z: 0 },
+            color: backsplashColor,
+            material: { roughness: 0.2, metalness: 0.6 }
+          }]
+        }
+      );
+      
+      // White electric stove (in corner, on back wall)
+      data.structures.scanned_objects.push({
+        name: 'stove',
+        position: { x: -3, y: counterTopY, z: -roomSize / 2 + counterDepth / 2 },
+        scale: 1,
+        rotation: { x: 0, y: 0, z: 0 },
+        parts: [{
+          shape: 'box',
+          dimensions: { width: 3.5, height: 0.5, depth: counterDepth - 0.1 },
+          position: { x: 0, y: 0, z: 0 },
+          color: stoveColor,
+          material: { roughness: 0.6, metalness: 0.3 }
+        }]
+      });
+      
+      // Stainless steel sink (on right wall, next to corner)
+      data.structures.scanned_objects.push({
+        name: 'sink',
+        position: { x: roomSize / 2 - counterDepth / 2, y: counterTopY, z: 0 },
+        scale: 1,
+        rotation: { x: 0, y: Math.PI / 2, z: 0 },
+        parts: [{
+          shape: 'box',
+          dimensions: { width: 2, height: 0.4, depth: 1.5 },
+          position: { x: 0, y: 0, z: 0 },
+          color: sinkColor,
+          material: { roughness: 0.1, metalness: 0.8 }
+        }]
+      });
+      
+      // Upper cabinets (three on back wall - like reference)
+      const upperCabinetY = upperCabinetBottom + upperCabinetHeight / 2;
+      data.structures.scanned_objects.push(
+        // Upper cabinet 1 (left)
+        {
+          name: 'upper_cabinet_1',
+          position: { x: -8, y: upperCabinetY, z: -roomSize / 2 + 0.3 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 },
+            position: { x: 0, y: 0, z: 0 },
+            color: cabinetColor,
+            material: { roughness: 0.7, metalness: 0.1 }
+          }]
+        },
+        // Upper cabinet 2 (center)
+        {
+          name: 'upper_cabinet_2',
+          position: { x: -3, y: upperCabinetY, z: -roomSize / 2 + 0.3 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 },
+            position: { x: 0, y: 0, z: 0 },
+            color: cabinetColor,
+            material: { roughness: 0.7, metalness: 0.1 }
+          }]
+        },
+        // Upper cabinet 3 (right)
+        {
+          name: 'upper_cabinet_3',
+          position: { x: 2, y: upperCabinetY, z: -roomSize / 2 + 0.3 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 },
+            position: { x: 0, y: 0, z: 0 },
+            color: cabinetColor,
+            material: { roughness: 0.7, metalness: 0.1 }
+          }]
+        }
+      );
+      
+      // White refrigerator (at end of right wall, like reference)
+      const refrigeratorY = (counterHeight + 2) / 2; // Taller than counter
+      data.structures.scanned_objects.push({
+        name: 'refrigerator',
+        position: { x: roomSize / 2 - 2, y: refrigeratorY, z: 5 },
+        scale: 1,
+        rotation: { x: 0, y: 0, z: 0 },
+        parts: [{
+          shape: 'box',
+          dimensions: { width: 2.5, height: counterHeight + 2, depth: 2.5 },
+          position: { x: 0, y: 0, z: 0 },
+          color: refrigeratorColor,
+          material: { roughness: 0.8, metalness: 0.2 }
+        }]
+      });
+      
+      console.log('[SCAN] ✅ Kitchen room created with white walls, L-shaped layout, stove, sink, backsplash, cabinets, and refrigerator');
     }
     
     // Set color palette from AI-generated palette if available
@@ -4006,7 +4379,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
     const colorAssignments = data.world?.color_assignments || {};
     setCurrentWorld(data);
     
-    const biomeName = data.world?.biome || data.world?.biome_name;
+    // biomeName is already declared above for kitchen generation check
     createGround(scene, biomeName);
 
     if (data.world && data.world.lighting_config) {
@@ -4236,6 +4609,18 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         });
         console.log(`[OVERSHOOT] ✅ Added ${data.structures.walls.length} room walls/floor`);
       }
+      
+      // Handle windows (transparent glass panels)
+      if (data.structures.windows) {
+        console.log(`[OVERSHOOT] Creating ${data.structures.windows.length} windows...`);
+        data.structures.windows.forEach(windowData => {
+          const window = createRoomWall(windowData);
+          window.userData = { structureType: 'window' };
+          scene.add(window);
+          structuresRef.current.push(window);
+        });
+        console.log(`[OVERSHOOT] ✅ Added ${data.structures.windows.length} windows`);
+      }
 
       // Handle scanned objects (coffee maker, paper towel, etc.)
       if (data.structures.scanned_objects) {
@@ -4351,6 +4736,19 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       overshootVisionRef.current = null;
     }
     
+    // Capture video frame BEFORE stopping stream (for world generation)
+    let imageDataForGeneration = null;
+    if (latestScanDataRef.current && !worldGeneratedFromScanRef.current && gameState !== GameState.PLAYING) {
+      if (videoRef.current && videoRef.current.videoWidth > 0) {
+        const canvas = document.createElement('canvas');
+        canvas.width = videoRef.current.videoWidth;
+        canvas.height = videoRef.current.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(videoRef.current, 0, 0);
+        imageDataForGeneration = canvas.toDataURL('image/jpeg', 0.7);
+      }
+    }
+    
     // Stop camera stream
     if (cameraStream) {
       cameraStream.getTracks().forEach(track => track.stop());
@@ -4359,8 +4757,40 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
     }
     
     setStreamingActive(false);
-    setLastScanResult(null);
     setScanMode(false);
+    
+    // Generate kitchen room directly when streaming stops (NO TripoSR API call)
+    if (latestScanDataRef.current && !worldGeneratedFromScanRef.current && gameState !== GameState.PLAYING) {
+      const scanData = latestScanDataRef.current;
+      
+      // Log the scene description to console (as requested)
+      console.log(`[STREAMING] 📝 Scene Description:`);
+      console.log(`[STREAMING] ${scanData.sceneDescription}`);
+      console.log(`[STREAMING] 🎬 Creating kitchen room directly (skipping TripoSR)...`);
+      
+      // Create world data structure directly (no API call)
+      const worldData = {
+        world: {
+          type: 'scan_fallback',
+          biome: 'room',
+          scene_type: 'indoor',
+          scene_description: scanData.sceneDescription,
+          colors: scanData.parsedData?.colors || { palette: [] }
+        },
+        biome: 'room',
+        structures: {},  // Will be populated by kitchen generation code in loadWorldFromScan
+        spawn_point: { x: 0, y: 1, z: 10 }
+      };
+      
+      // Generate world directly (kitchen generation happens in loadWorldFromScan)
+      worldGeneratedFromScanRef.current = true;
+      (async () => {
+        await loadWorldFromScan(worldData);
+        setGameState(GameState.PLAYING);
+      })();
+    }
+    
+    setLastScanResult(null);
     console.log('[STREAMING] All capture stopped');
   };
 
