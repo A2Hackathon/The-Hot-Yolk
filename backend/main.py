@@ -4,7 +4,7 @@ print("="*80)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles  # Fixed: removed duplicate import
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import asyncio
 import signal

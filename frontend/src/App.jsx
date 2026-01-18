@@ -13,31 +13,6 @@ const OVERSHOOT_API_KEY = 'ovs_2d4ab5e6aa5d635976e707712176fe5b';
 
 const API_BASE = 'http://localhost:8000/api';
 
-// Helper function to handle backend connection errors
-const handleBackendConnectionError = (error, context = '') => {
-  const isConnectionError = error instanceof TypeError && 
-    (error.message.includes('Failed to fetch') || 
-     error.message.includes('NetworkError') ||
-     error.message.includes('ERR_CONNECTION_REFUSED'));
-  
-  if (isConnectionError) {
-    const errorMsg = `❌ Backend server is not running!\n\n` +
-      `Please start the backend server with:\n` +
-      `cd backend && python -m uvicorn main:app --reload\n\n` +
-      `Or if using npm:\n` +
-      `cd backend && npm start\n\n` +
-      `Context: ${context || 'API request'}`;
-    
-    console.error('[BACKEND] Connection Error:', errorMsg);
-    console.error('[BACKEND] Full error:', error);
-    
-    // Show user-friendly alert
-    alert(errorMsg);
-    return true; // Indicates connection error was handled
-  }
-  return false; // Not a connection error
-};
-
 const GameState = {
   IDLE: 'idle',
   LISTENING: 'listening',
@@ -3568,16 +3543,15 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
                   const imageData = canvas.toDataURL('image/jpeg', 0.7);
                   
                   // Send to scan-world endpoint which now generates entire scene
-                  try {
-                    const res = await fetch(`${API_BASE}/scan-world`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ 
-                        image_data: imageData
-                      }),
-                    });
-                    
-                    if (res.ok) {
+                  const res = await fetch(`${API_BASE}/scan-world`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                      image_data: imageData
+                    }),
+                  });
+                  
+                  if (res.ok) {
                     const worldData = await res.json();
                     console.log(`[OVERSHOOT] ✅ Complete 3D world generated!`);
                     console.log(`[OVERSHOOT] Model URL:`, worldData.world?.model_url);
@@ -3602,18 +3576,11 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
                     const errText = await res.text();
                     console.error('[OVERSHOOT] World generation failed:', errText);
                   }
-                  } catch (fetchError) {
-                    if (!handleBackendConnectionError(fetchError, 'OVERSHOOT scan-world request')) {
-                      console.error('[OVERSHOOT] Backend error:', fetchError);
-                    }
-                  }
                 } else {
                   console.warn('[OVERSHOOT] No video frame available for full scene generation');
                 }
               } catch (backendError) {
-                if (!handleBackendConnectionError(backendError, 'OVERSHOOT world generation')) {
-                  console.error('[OVERSHOOT] Backend error:', backendError);
-                }
+                console.error('[OVERSHOOT] Backend error:', backendError);
               }
             }
           } catch (parseError) {
@@ -3768,14 +3735,13 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
           
           console.log(`[FALLBACK/OPENAI] 📸 Frame #${frameCount} → backend/scan-world`);
           
-          try {
-            const res = await fetch(`${API_BASE}/scan-world`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ image_data: imageData }),
-            });
-            
-            if (res.ok) {
+          const res = await fetch(`${API_BASE}/scan-world`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_data: imageData }),
+          });
+          
+          if (res.ok) {
             const data = await res.json();
             console.log(`[FALLBACK/OPENAI] ✅ Frame #${frameCount} analyzed - Biome: ${data.biome || 'unknown'}`);
             
@@ -3805,15 +3771,8 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
             const errorText = await res.text();
             console.error(`[FALLBACK/OPENAI] ❌ Request failed: ${res.status} - ${errorText}`);
           }
-          } catch (fetchError) {
-            if (!handleBackendConnectionError(fetchError, `FALLBACK/OPENAI Frame #${frameCount} scan-world request`)) {
-              console.error('[FALLBACK/OPENAI] Frame error:', fetchError);
-            }
-          }
         } catch (error) {
-          if (!handleBackendConnectionError(error, 'FALLBACK/OPENAI frame capture')) {
-            console.error('[FALLBACK/OPENAI] Frame error:', error);
-          }
+          console.error('[FALLBACK/OPENAI] Frame error:', error);
         }
         
         isAnalyzing = false;
@@ -3845,41 +3804,34 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       console.log('[OVERSHOOT] Processing streaming result:', analysis);
       
       // Send to backend to generate world from streaming analysis
-      try {
-        const res = await fetch(`${API_BASE}/scan-world`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            streaming_analysis: analysis,
-            use_streaming: true 
-          }),
-        });
+      const res = await fetch(`${API_BASE}/scan-world`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          streaming_analysis: analysis,
+          use_streaming: true 
+        }),
+      });
 
-        if (!res.ok) {
-          const errorText = await res.text();
-          console.error('[OVERSHOOT] Backend error:', errorText);
-          return;
-        }
-
-        const data = await res.json();
-        
-        // Only update world if we're not already playing (to avoid interruptions)
-        if (gameState !== GameState.PLAYING) {
-          console.log('[OVERSHOOT] Updating world from streaming analysis...');
-          await loadWorldFromScan(data);
-        } else {
-          // If already playing, we could do incremental updates
-          console.log('[OVERSHOOT] World already active, skipping update');
-        }
-      } catch (fetchError) {
-        if (!handleBackendConnectionError(fetchError, 'OVERSHOOT processStreamingResult scan-world request')) {
-          console.error('[OVERSHOOT] Error processing result:', fetchError);
-        }
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('[OVERSHOOT] Backend error:', errorText);
+        return;
       }
+
+      const data = await res.json();
+      
+      // Only update world if we're not already playing (to avoid interruptions)
+      if (gameState !== GameState.PLAYING) {
+        console.log('[OVERSHOOT] Updating world from streaming analysis...');
+        await loadWorldFromScan(data);
+      } else {
+        // If already playing, we could do incremental updates
+        console.log('[OVERSHOOT] World already active, skipping update');
+      }
+      
     } catch (error) {
-      if (!handleBackendConnectionError(error, 'OVERSHOOT processStreamingResult')) {
-        console.error('[OVERSHOOT] Error processing result:', error);
-      }
+      console.error('[OVERSHOOT] Error processing result:', error);
     }
   };
 
@@ -4445,31 +4397,30 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
     stopCameraCapture();
     
     try {
-      try {
-        const res = await fetch(`${API_BASE}/scan-world`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_data: imageData }),
-        });
+      const res = await fetch(`${API_BASE}/scan-world`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_data: imageData }),
+      });
+      
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('[SCAN] API Error Response:', errorText);
         
-        
-        if (!res.ok) {
-          const errorText = await res.text();
-          console.error('[SCAN] API Error Response:', errorText);
-          
-          // Try to parse as JSON for better error message
-          let errorDetail = errorText;
-          try {
-            const errorJson = JSON.parse(errorText);
-            errorDetail = errorJson.detail || errorText;
-          } catch (e) {
-            // Not JSON, use as-is
-          }
-          
-          throw new Error(`Scan failed: ${res.status}\n\n${errorDetail}`);
+        // Try to parse as JSON for better error message
+        let errorDetail = errorText;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorDetail = errorJson.detail || errorText;
+        } catch (e) {
+          // Not JSON, use as-is
         }
         
-        const data = await res.json();
+        throw new Error(`Scan failed: ${res.status}\n\n${errorDetail}`);
+      }
+      
+      const data = await res.json();
       console.log('[SCAN] World generated from scan:', data);
       
       // Set color palette from AI-generated palette if available
@@ -4767,16 +4718,9 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       }
       
       setGameState(GameState.PLAYING);
-        } catch (fetchError) {
-          if (!handleBackendConnectionError(fetchError, 'captureAndScanWorld scan-world request')) {
-            throw fetchError; // Re-throw if not a connection error
-          }
-          setGameState(GameState.IDLE);
-          return; // Exit early if connection error
-        }
+      
     } catch (error) {
-      if (!handleBackendConnectionError(error, 'captureAndScanWorld')) {
-        console.error('[SCAN ERROR]:', error);
+      console.error('[SCAN ERROR]:', error);
       
       let errorMessage = 'Failed to generate world from scan.\n\n';
       
@@ -4810,20 +4754,19 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
   const generateWorld = async (promptText) => {
     setGameState(GameState.GENERATING);
     try {
-      try {
-        const res = await fetch(`${API_BASE}/generate-world`, {
+      const res = await fetch(`${API_BASE}/generate-world`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: promptText }),
       });
 
-        if (!res.ok) {
-          const errorText = await res.text();
-          console.error('API Error Response:', errorText);
-          throw new Error(`API error: ${res.status} - ${errorText}`);
-        }
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('API Error Response:', errorText);
+        throw new Error(`API error: ${res.status} - ${errorText}`);
+      }
 
-        const data = await res.json();
+      const data = await res.json();
       console.log("=== FRONTEND: Full API response ===");
       console.log(JSON.stringify(data, null, 2));
 
@@ -5305,18 +5248,9 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         setEnemyCount(enemiesRef.current.length);
       }
       setGameState(GameState.PLAYING);
-      } catch (fetchError) {
-        if (!handleBackendConnectionError(fetchError, 'generateWorld generate-world request')) {
-          throw fetchError; // Re-throw if not a connection error
-        }
-        setGameState(GameState.IDLE);
-        return; // Exit early if connection error
-      }
     } catch (err) {
-      if (!handleBackendConnectionError(err, 'generateWorld')) {
-        console.error("World generation error:", err);
-        alert("Failed to generate world. Check console.");
-      }
+      console.error("World generation error:", err);
+      alert("Failed to generate world. Check console.");
       setGameState(GameState.IDLE);
     }
   };
@@ -5373,16 +5307,15 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/ab4e53c8-3e02-4665-bb8e-bc913babc9ea',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:5322',message:'Direct modification request',data:{method:'PATCH',payload:payload},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
       // #endregion
-      try {
-        const res = await fetch(`${API_BASE}/modify-world`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
+      const res = await fetch(`${API_BASE}/modify-world`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-        console.log("API response status:", res.status);
+      console.log("API response status:", res.status);
 
-        if (!res.ok) throw new Error(`API error: ${res.status}`);
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
       const data = await res.json();
       console.log("=== FRONTEND: Modify response ===", data);
       console.log("=== FRONTEND: Trees in response ===", data.structures?.trees);
@@ -5850,18 +5783,10 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         setUploadedImage(null);
         setImagePreview(null);
       }
-        } catch (fetchError) {
-          if (!handleBackendConnectionError(fetchError, 'modifyWorld modify-world PATCH request')) {
-            throw fetchError; // Re-throw if not a connection error
-          }
-          setGameState(GameState.PLAYING); // Return to playing state even on connection error
-          return; // Exit early if connection error
-        }
     } catch (err) {
-      if (!handleBackendConnectionError(err, 'modifyWorld')) {
-        console.error("Modify-world error:", err);
-        // Add error message to the last conversation session if it exists
-        setChatHistory(prev => {
+      console.error("Modify-world error:", err);
+      // Add error message to the last conversation session if it exists
+      setChatHistory(prev => {
         const updated = [...prev];
         const lastItem = updated[updated.length - 1];
         if (lastItem && lastItem.type === 'conversation' && lastItem.session) {
@@ -5945,22 +5870,21 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       console.log('[COLOR PICKER] Biome:', biome, 'Structures:', structure_counts);
       
       // Call backend to regenerate terrain with new colors
-      try {
-        const res = await fetch(`${API_BASE}/update-colors`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            biome: biome,
-            structures: structure_counts,
-            color_palette: palette
-          })
-        });
+      const res = await fetch(`${API_BASE}/update-colors`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          biome: biome,
+          structures: structure_counts,
+          color_palette: palette
+        })
+      });
 
-        if (!res.ok) {
-          throw new Error(`API error: ${res.status}`);
-        }
+      if (!res.ok) {
+        throw new Error(`API error: ${res.status}`);
+      }
 
-        const terrainData = await res.json();
+      const terrainData = await res.json();
       
       // Extract color assignments from response
       const colorAssignments = terrainData.color_assignments || {};
@@ -6282,17 +6206,9 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
           colorMap: !!terrainData.colour_map_array
         });
       }
-      } catch (fetchError) {
-        if (!handleBackendConnectionError(fetchError, 'applyColorPaletteToWorld update-colors request')) {
-          throw fetchError; // Re-throw if not a connection error
-        }
-        return; // Exit early if connection error
-      }
     } catch (error) {
-      if (!handleBackendConnectionError(error, 'applyColorPaletteToWorld')) {
-        console.error('[COLOR PICKER] Error applying color palette:', error);
-        alert(`Failed to apply color palette: ${error.message}`);
-      }
+      console.error('[COLOR PICKER] Error applying color palette:', error);
+      alert(`Failed to apply color palette: ${error.message}`);
     }
   };
 
@@ -6570,19 +6486,18 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/ab4e53c8-3e02-4665-bb8e-bc913babc9ea',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:5322',message:'Chat modification request',data:{method:'POST',body:{messages: newMessages, current_world: currentWorld}},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
       // #endregion
-      try {
-        const res = await fetch(`${API_BASE}/modify-world`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            messages: newMessages,
-            current_world: currentWorld,
-            player_position: playerPos,
-            player_direction: playerDirection
-          }),
-        });
+      const res = await fetch(`${API_BASE}/modify-world`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          messages: newMessages,
+          current_world: currentWorld,
+          player_position: playerPos,
+          player_direction: playerDirection
+        }),
+      });
 
-        if (!res.ok) throw new Error(`API error: ${res.status}`);
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
 
       const data = await res.json();
       
@@ -6590,29 +6505,14 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       const updatedMessages = [...newMessages, { role: 'assistant', content: data.message }];
       setChatConversation(updatedMessages);
 
-        setIsWaitingForAI(false);
-      } catch (fetchError) {
-        if (!handleBackendConnectionError(fetchError, 'sendChatMessageForModify modify-world POST request')) {
-          throw fetchError; // Re-throw if not a connection error
-        }
-        setIsWaitingForAI(false);
-        setChatConversation(prev => [...prev, { 
-          role: 'assistant', 
-          content: 'Sorry, the backend server is not running. Please start it and try again.' 
-        }]);
-        return; // Exit early if connection error
-      }
+      setIsWaitingForAI(false);
     } catch (error) {
-      if (!handleBackendConnectionError(error, 'sendChatMessageForModify')) {
-        console.error('Chat error:', error);
-        setIsWaitingForAI(false);
-        setChatConversation(prev => [...prev, { 
-          role: 'assistant', 
-          content: 'Sorry, I encountered an error. Please try again.' 
-        }]);
-      } else {
-        setIsWaitingForAI(false);
-      }
+      console.error('Chat error:', error);
+      setIsWaitingForAI(false);
+      setChatConversation(prev => [...prev, { 
+        role: 'assistant', 
+        content: 'Sorry, I encountered an error. Please try again.' 
+      }]);
     }
   };
 
