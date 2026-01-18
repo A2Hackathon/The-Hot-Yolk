@@ -125,15 +125,15 @@ const ColorPicker = ({ onColorPaletteChange, initialPalette = null, disabled = f
   return (
     <div style={{
       position: 'fixed',
-      top: '290px',
-      right: '95px',
+      top: '225px',
+      right: '65px',
       zIndex: 200,
       pointerEvents: 'none',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'flex-end'
     }}>
-      {/* Toggle Button - positioned in Nintendo Switch layout (bottom of cluster) */}
+      {/* Toggle Button - Bottom row left position in pyramid layout */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
@@ -175,12 +175,14 @@ const ColorPicker = ({ onColorPaletteChange, initialPalette = null, disabled = f
           maxHeight: 'calc(100vh - 200px)',
           boxShadow: '-4px 0 10px rgba(0,0,0,0.5)',
           borderRadius: '8px',
-          transform: isOpen ? 'translateY(0)' : 'translateY(-120%)',
+          position: 'absolute',
+          right: '70px',
+          top: '0',
+          transform: isOpen ? 'translateX(0)' : 'translateX(120%)',
           opacity: isOpen ? 1 : 0,
           transition: 'all 0.3s ease-in-out',
           pointerEvents: isOpen ? 'auto' : 'none',
-          overflowY: 'auto',
-          marginTop: '12px'
+          overflowY: 'auto'
         }}
       >
         <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>

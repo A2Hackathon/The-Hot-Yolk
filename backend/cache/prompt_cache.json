@@ -25,8 +25,8 @@
       }
     },
     "timestamp": 1768503305.3205974,
-    "hit_count": 0,
-    "last_accessed": 1768503305.3205974,
+    "hit_count": 3,
+    "last_accessed": 1768702672.7731135,
     "prompt_preview": "arctic world"
   },
   "d8d271c2be86ead6": {
@@ -1514,8 +1514,8 @@
       ]
     },
     "timestamp": 1768650129.9334798,
-    "hit_count": 0,
-    "last_accessed": 1768650129.9334807,
+    "hit_count": 3,
+    "last_accessed": 1768691123.8611228,
     "prompt_preview": "arctic"
   },
   "b7bc28f0c3cbd471": {
@@ -1604,5 +1604,1282 @@
     "hit_count": 0,
     "last_accessed": 1768673107.287474,
     "prompt_preview": "create a lava world"
+  },
+  "9fa52d9bf4475df4": {
+    "params": {
+      "biome": "lava",
+      "biome_description": "A world of molten lava and fire, with volcanic landscapes and burning skies",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 0,
+        "rock": 40,
+        "mountain": 10,
+        "building": 0,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "lava_fountain",
+          "position": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.5,
+          "parts": [
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "radius": 1.0,
+              "height": 2.0,
+              "color": "#FF9900"
+            }
+          ]
+        },
+        {
+          "name": "magma_pool",
+          "position": {
+            "x": -15.0,
+            "y": 0.0,
+            "z": 30.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 45,
+            "z": 0
+          },
+          "scale": 2.0,
+          "parts": [
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "radius": 1.5,
+              "color": "#FF6600"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#FF9900",
+        "#FF6600",
+        "#FF3300",
+        "#CC0000"
+      ],
+      "special_effects": [
+        "glow",
+        "smoke"
+      ]
+    },
+    "timestamp": 1768687255.4458718,
+    "hit_count": 0,
+    "last_accessed": 1768687255.4458728,
+    "prompt_preview": "lava world"
+  },
+  "fd4d94de4a357ac8": {
+    "params": {
+      "biome": "arctic world with mountains",
+      "biome_description": "A frozen, icy world with towering snow-capped mountains and vast expanses of snow",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "double_jump",
+      "structure": {
+        "tree": 30,
+        "rock": 25,
+        "mountain": 10,
+        "building": 0,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "igloo",
+          "position": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "radius": 2.0,
+              "color": "#FFFFFF"
+            }
+          ]
+        },
+        {
+          "name": "snowmobile",
+          "position": {
+            "x": -15.0,
+            "y": 0.0,
+            "z": 30.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 45,
+            "z": 0
+          },
+          "scale": 1.2,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 2.0,
+                "height": 0.8,
+                "depth": 4.0
+              },
+              "color": "#CCCCCC"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#FFFFFF",
+        "#CCCCCC",
+        "#AAAAAA",
+        "#888888"
+      ],
+      "special_effects": [
+        "snowfall",
+        "frost"
+      ]
+    },
+    "timestamp": 1768687556.7114942,
+    "hit_count": 0,
+    "last_accessed": 1768687556.7114952,
+    "prompt_preview": "arctic world with mountains"
+  },
+  "9ef7215a38fca836": {
+    "params": {
+      "biome": "arctic",
+      "biome_description": "A cold, icy world with snow-covered mountains and frozen tundras",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 10,
+        "rock": 20,
+        "mountain": 15,
+        "building": 0,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "igloo",
+          "position": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "radius": 2.0,
+              "color": "#FFFFFF"
+            }
+          ]
+        },
+        {
+          "name": "polar_bear",
+          "position": {
+            "x": -15.0,
+            "y": 0.0,
+            "z": 30.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 45,
+            "z": 0
+          },
+          "scale": 1.2,
+          "parts": [
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 1.0,
+                "height": 2.0
+              },
+              "color": "#FFFFF0"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#45A0E6",
+        "#6495ED",
+        "#ACC5E5",
+        "#ADD8E6"
+      ],
+      "special_effects": [
+        "snowfall",
+        "frost"
+      ]
+    },
+    "timestamp": 1768688485.1088986,
+    "hit_count": 0,
+    "last_accessed": 1768688485.1088998,
+    "prompt_preview": "give me an arctic"
+  },
+  "11a62c23412b7747": {
+    "params": {
+      "biome": "city",
+      "biome_description": "A bustling metropolis with towering skyscrapers and vibrant city life",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 10,
+        "rock": 5,
+        "mountain": 0,
+        "building": 25,
+        "street_lamp": 10
+      },
+      "creative_objects": [
+        {
+          "name": "skyscraper",
+          "position": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.5,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 4.0,
+                "height": 10.0,
+                "depth": 4.0
+              },
+              "color": "#808080"
+            }
+          ]
+        },
+        {
+          "name": "taxi",
+          "position": {
+            "x": -15.0,
+            "y": 0.0,
+            "z": 30.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 45,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 2.0,
+                "height": 1.0,
+                "depth": 4.0
+              },
+              "color": "#FFFF00"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#808080",
+        "#AAAAAA",
+        "#CCCCCC",
+        "#FFFFFF"
+      ],
+      "special_effects": [
+        "city_lights",
+        "traffic_noise"
+      ]
+    },
+    "timestamp": 1768690151.9322112,
+    "hit_count": 0,
+    "last_accessed": 1768690151.9322116,
+    "prompt_preview": "city"
+  },
+  "ddbd636464302bc9": {
+    "params": {
+      "biome": "arctic",
+      "biome_description": "A frozen, icy world under the dark night sky, with snow-covered mountains and glaciers as far as the eye can see",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 10,
+        "rock": 20,
+        "mountain": 5,
+        "building": 0,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "iceberg",
+          "position": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.5,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 4.0,
+                "height": 2.0,
+                "depth": 6.0
+              },
+              "color": "#ADD8E6"
+            }
+          ]
+        },
+        {
+          "name": "polar_bear",
+          "position": {
+            "x": -15.0,
+            "y": 0.0,
+            "z": 30.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 45,
+            "z": 0
+          },
+          "scale": 1.2,
+          "parts": [
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "radius": 1.0,
+              "color": "#FFFFFF"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#ADD8E6",
+        "#87CEEB",
+        "#6495ED",
+        "#4682B4"
+      ],
+      "special_effects": [
+        "snowfall",
+        "aurora_borealis"
+      ]
+    },
+    "timestamp": 1768691289.3797843,
+    "hit_count": 0,
+    "last_accessed": 1768691289.3797858,
+    "prompt_preview": "arctic world at night"
+  },
+  "588d3b19cf558bbf": {
+    "params": {
+      "biome": "arctic",
+      "biome_description": "A cold and icy world, set at night with the aurora borealis dancing in the sky",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 10,
+        "rock": 20,
+        "mountain": 5,
+        "building": 0,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "igloo",
+          "position": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "radius": 2.0,
+              "color": "#FFFFFF"
+            }
+          ]
+        },
+        {
+          "name": "polar_bear",
+          "position": {
+            "x": -15.0,
+            "y": 0.0,
+            "z": 30.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 45,
+            "z": 0
+          },
+          "scale": 1.2,
+          "parts": [
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 1.0,
+                "height": 2.0
+              },
+              "color": "#FFFFFF"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#45A0E6",
+        "#8B9467",
+        "#6495ED",
+        "#ACCBEA"
+      ],
+      "special_effects": [
+        "aurora_borealis",
+        "snowfall"
+      ]
+    },
+    "timestamp": 1768691632.1635737,
+    "hit_count": 0,
+    "last_accessed": 1768691632.1635747,
+    "prompt_preview": "arctic at night"
+  },
+  "2be8c922a27aadeb": {
+    "params": {
+      "biome": "underwater",
+      "key_feature": null,
+      "biome_description": "Dive into a mesmerizing underwater world filled with vibrant marine life, colorful coral reefs, and a serene atmosphere. Sunlight filters through the water, creating dancing patterns on the sandy ocean floor. Schools of fish swim gracefully among the corals, and the environment is alive with the sounds of the sea.",
+      "time": "noon",
+      "enemy_count": 0,
+      "weapon": "none",
+      "structure": {
+        "tree": 0,
+        "rock": 30,
+        "mountain": 5,
+        "building": 0,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "coral_reef",
+          "position": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 3.0,
+                "height": 1.0,
+                "depth": 3.0
+              },
+              "color": "#FF7F50"
+            }
+          ]
+        },
+        {
+          "name": "submarine",
+          "position": {
+            "x": -15.0,
+            "y": 0.0,
+            "z": 30.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 45,
+            "z": 0
+          },
+          "scale": 1.2,
+          "parts": [
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "radius": 0.5,
+              "color": "#4682B4"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#ADD8E6",
+        "#FF4500",
+        "#FFD700",
+        "#20B2AA",
+        "#87CEFA"
+      ],
+      "special_effects": []
+    },
+    "timestamp": 1768697891.2574658,
+    "hit_count": 0,
+    "last_accessed": 1768697891.2574663,
+    "prompt_preview": "give me an \"under the water\" world"
+  },
+  "237ab3365842e475": {
+    "params": {
+      "biome": "desert",
+      "key_feature": null,
+      "biome_description": "A vast and arid desert landscape stretches endlessly under the bright sun, with rolling sand dunes and occasional rocky outcrops. The atmosphere is dry and hot, with a shimmering heat haze rising from the ground.",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 0,
+        "rock": 10,
+        "mountain": 5,
+        "building": 0,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "sandstorm",
+          "position": {
+            "x": 20.0,
+            "y": 0.0,
+            "z": -15.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.5,
+          "parts": [
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 2.0,
+                "height": 5.0
+              },
+              "color": "#D2B48C"
+            }
+          ]
+        },
+        {
+          "name": "cactus",
+          "position": {
+            "x": -30.0,
+            "y": 0.0,
+            "z": 10.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "cone",
+              "position": {
+                "x": 0,
+                "y": 1.5,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 0.5,
+                "height": 3.0
+              },
+              "color": "#228B22"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#EDC9AF",
+        "#C2B280",
+        "#D2B48C",
+        "#A0522D",
+        "#87CEEB"
+      ],
+      "plant_type": "cactus",
+      "special_effects": [
+        "heat_haze",
+        "sand_particles"
+      ]
+    },
+    "timestamp": 1768698400.5899494,
+    "hit_count": 0,
+    "last_accessed": 1768698400.5899498,
+    "prompt_preview": "desert"
+  },
+  "9a6b2bdcb0b6bf90": {
+    "params": {
+      "biome": "room",
+      "key_feature": "egg yolk",
+      "biome_description": "A whimsical and surreal world inspired by the vibrant colors and textures of egg yolks. The terrain is soft and smooth, resembling a giant egg yolk, while the atmosphere is warm and inviting, filled with playful shapes and structures.",
+      "time": "noon",
+      "enemy_count": 0,
+      "weapon": "none",
+      "structure": {
+        "tree": 0,
+        "rock": 0,
+        "mountain": 0,
+        "building": 10,
+        "street_lamp": 5
+      },
+      "creative_objects": [
+        {
+          "name": "whisk",
+          "position": {
+            "x": 15.0,
+            "y": 0.0,
+            "z": -10.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.5,
+          "parts": [
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 0.3,
+                "height": 3.0
+              },
+              "color": "#FFD700"
+            }
+          ]
+        },
+        {
+          "name": "egg cup",
+          "position": {
+            "x": -20.0,
+            "y": 0.0,
+            "z": 20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "torus",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 1.0,
+                "tube_radius": 0.3
+              },
+              "color": "#FFFACD"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#FFD700",
+        "#FFFACD",
+        "#FFEB3B",
+        "#F5DEB3",
+        "#FFFFE0"
+      ],
+      "plant_type": "none",
+      "special_effects": []
+    },
+    "timestamp": 1768698667.7733521,
+    "hit_count": 0,
+    "last_accessed": 1768698667.7733526,
+    "prompt_preview": "\"egg yolk\" world"
+  },
+  "d0186b0942c7ef72": {
+    "params": {
+      "biome": "tokyo",
+      "key_feature": "cyberpunk",
+      "biome_description": "A vibrant, neon-lit Tokyo cityscape filled with futuristic technology and bustling streets. The atmosphere is electric, with holographic advertisements and towering skyscrapers casting colorful reflections on the wet pavement.",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 0,
+        "rock": 0,
+        "mountain": 0,
+        "building": 30,
+        "street_lamp": 10
+      },
+      "creative_objects": [
+        {
+          "name": "neon_sign",
+          "position": {
+            "x": 15.0,
+            "y": 0.0,
+            "z": -20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 3.0,
+                "height": 1.0,
+                "depth": 0.1
+              },
+              "color": "#FF00FF"
+            }
+          ]
+        },
+        {
+          "name": "vending_machine",
+          "position": {
+            "x": -10.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 90,
+            "z": 0
+          },
+          "scale": 1.2,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 1.0,
+                "height": 2.0,
+                "depth": 0.5
+              },
+              "color": "#00FFFF"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#1A1A2E",
+        "#16213E",
+        "#0F3460",
+        "#E94560",
+        "#00A8E1"
+      ],
+      "plant_type": "none",
+      "special_effects": [
+        "neon_glow",
+        "holographic_projection"
+      ]
+    },
+    "timestamp": 1768698954.2708547,
+    "hit_count": 0,
+    "last_accessed": 1768698954.270855,
+    "prompt_preview": "tokyo city cyperpunk"
+  },
+  "b197aebcf32ef807": {
+    "params": {
+      "biome": "tokyo",
+      "key_feature": null,
+      "biome_description": "A vibrant and bustling cityscape filled with neon lights, crowded streets, and towering skyscrapers. The atmosphere is electrifying, reflecting the dynamic culture of Tokyo.",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 3,
+        "rock": 5,
+        "mountain": 0,
+        "building": 30,
+        "street_lamp": 10
+      },
+      "creative_objects": [
+        {
+          "name": "neon_sign",
+          "position": {
+            "x": 20.0,
+            "y": 0.0,
+            "z": -15.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 2.0,
+                "height": 0.5,
+                "depth": 0.1
+              },
+              "color": "#FF00FF"
+            }
+          ]
+        },
+        {
+          "name": "vending_machine",
+          "position": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 10.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 90,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 1.0,
+                "height": 2.0,
+                "depth": 0.5
+              },
+              "color": "#00FFFF"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#2A2A2A",
+        "#FF00FF",
+        "#00FFFF",
+        "#FFFFFF",
+        "#000000"
+      ],
+      "plant_type": "tree",
+      "special_effects": [
+        "glow",
+        "dynamic_lights"
+      ]
+    },
+    "timestamp": 1768699278.1643574,
+    "hit_count": 1,
+    "last_accessed": 1768702451.3291554,
+    "prompt_preview": "city in tokyo"
+  },
+  "5febf79c9c7dc555": {
+    "params": {
+      "biome": "arctic",
+      "key_feature": null,
+      "biome_description": "A vast, icy expanse with frozen landscapes and shimmering glaciers. The terrain is covered in snow, with occasional ice formations jutting out, creating a serene yet harsh environment. The atmosphere is crisp and cold, with a sense of tranquility amidst the stark beauty of the arctic wilderness.",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "none",
+      "structure": {
+        "tree": 0,
+        "rock": 20,
+        "mountain": 5,
+        "building": 0,
+        "street_lamp": 0
+      },
+      "creative_objects": [
+        {
+          "name": "iceberg",
+          "position": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 3.0,
+                "height": 2.0,
+                "depth": 3.0
+              },
+              "color": "#A3D1E5"
+            }
+          ]
+        },
+        {
+          "name": "polar_bear_statue",
+          "position": {
+            "x": -15.0,
+            "y": 0.0,
+            "z": 30.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 45,
+            "z": 0
+          },
+          "scale": 1.2,
+          "parts": [
+            {
+              "shape": "sphere",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "radius": 0.5,
+              "color": "#FFFFFF"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#E0F4FF",
+        "#B0E0FF",
+        "#FFFFFF",
+        "#A3D1E5",
+        "#87CEEB"
+      ],
+      "plant_type": "none",
+      "special_effects": []
+    },
+    "timestamp": 1768701167.7057385,
+    "hit_count": 1,
+    "last_accessed": 1768701347.4526544,
+    "prompt_preview": "arctic terrain"
+  },
+  "e09c8aa052e61822": {
+    "params": {
+      "biome": "city",
+      "key_feature": null,
+      "biome_description": "A vibrant urban landscape illuminated by the glow of streetlights and neon signs, bustling with life and activity even in the dark of night. Skyscrapers tower above, their windows reflecting the city lights, while the streets below are alive with cars and pedestrians.",
+      "time": "night",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 5,
+        "rock": 3,
+        "mountain": 0,
+        "building": 20,
+        "street_lamp": 10
+      },
+      "creative_objects": [
+        {
+          "name": "neon_sign",
+          "position": {
+            "x": 20.0,
+            "y": 0.0,
+            "z": -15.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 2.0,
+                "height": 0.5,
+                "depth": 0.1
+              },
+              "color": "#FF00FF"
+            }
+          ]
+        },
+        {
+          "name": "street_performer",
+          "position": {
+            "x": -10.0,
+            "y": 0.0,
+            "z": 25.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 90,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "cylinder",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "radius": 0.3,
+                "height": 1.5
+              },
+              "color": "#FFD700"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#2D2D2D",
+        "#4A4A4A",
+        "#FFFFFF",
+        "#1F1F1F",
+        "#000033"
+      ],
+      "plant_type": "tree",
+      "special_effects": [
+        "glow",
+        "shimmer"
+      ]
+    },
+    "timestamp": 1768701564.9366112,
+    "hit_count": 0,
+    "last_accessed": 1768701564.9366114,
+    "prompt_preview": "city at night"
+  },
+  "efb3fbdb540cc119": {
+    "params": {
+      "biome": "city",
+      "key_feature": null,
+      "biome_description": "A vibrant and bustling cityscape filled with modern architecture, busy streets, and a lively atmosphere under the bright noon sun.",
+      "time": "noon",
+      "enemy_count": 5,
+      "weapon": "dash",
+      "structure": {
+        "tree": 5,
+        "rock": 3,
+        "mountain": 0,
+        "building": 25,
+        "street_lamp": 10
+      },
+      "creative_objects": [
+        {
+          "name": "park_bench",
+          "position": {
+            "x": 15.0,
+            "y": 0.0,
+            "z": -20.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 4.0,
+                "height": 0.5,
+                "depth": 1.0
+              },
+              "color": "#8B4513"
+            }
+          ]
+        },
+        {
+          "name": "bus_stop",
+          "position": {
+            "x": -10.0,
+            "y": 0.0,
+            "z": 30.0
+          },
+          "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": 1.0,
+          "parts": [
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 1.0,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 3.0,
+                "height": 2.0,
+                "depth": 0.1
+              },
+              "color": "#FFD700"
+            },
+            {
+              "shape": "box",
+              "position": {
+                "x": 0,
+                "y": 0.5,
+                "z": 0
+              },
+              "dimensions": {
+                "width": 0.1,
+                "height": 1.0,
+                "depth": 1.0
+              },
+              "color": "#000000"
+            }
+          ]
+        }
+      ],
+      "color_palette": [
+        "#D3D3D3",
+        "#228B22",
+        "#A9A9A9",
+        "#808080",
+        "#87CEEB"
+      ],
+      "plant_type": "tree",
+      "special_effects": [
+        "none"
+      ]
+    },
+    "timestamp": 1768702816.2088995,
+    "hit_count": 0,
+    "last_accessed": 1768702816.2089012,
+    "prompt_preview": "city at noon"
   }
 }

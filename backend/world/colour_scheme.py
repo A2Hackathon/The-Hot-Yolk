@@ -84,69 +84,71 @@ def assign_palette_to_elements(color_palette: List[str]) -> Dict[str, str]:
     assignments["ground_light"] = rgb_to_hex(adjust_shade(ground_base, lighten=0.15, saturate=0.1))
     assignments["ground_dark"] = rgb_to_hex(adjust_shade(ground_base, darken=0.15, desaturate=0.1))
     
-    # Trees (second color - or use first if only one color)
-    tree_color_idx = min(1, len(color_palette) - 1)
-    tree_base = hex_to_rgb(color_palette[tree_color_idx])
-    assignments["tree_leaves"] = rgb_to_hex(adjust_shade(tree_base, saturate=0.2))  # More vibrant for leaves
-    assignments["tree_leaves_light"] = rgb_to_hex(adjust_shade(tree_base, lighten=0.2, saturate=0.15))
-    assignments["tree_leaves_dark"] = rgb_to_hex(adjust_shade(tree_base, darken=0.2, saturate=0.1))
+    # Trees (Color 1 - MANDATORY)
+    # Palette MUST have at least 5 colors, so index 1 should always exist
+    if len(color_palette) >= 2:
+        tree_base = hex_to_rgb(color_palette[1])
+        assignments["tree_leaves"] = rgb_to_hex(adjust_shade(tree_base, saturate=0.2))  # More vibrant for leaves
+        assignments["tree_leaves_light"] = rgb_to_hex(adjust_shade(tree_base, lighten=0.2, saturate=0.15))
+        assignments["tree_leaves_dark"] = rgb_to_hex(adjust_shade(tree_base, darken=0.2, saturate=0.1))
+        # Tree trunks (darker, desaturated version of tree color)
+        assignments["tree_trunk"] = rgb_to_hex(adjust_shade(tree_base, darken=0.5, desaturate=0.4))
+    else:
+        # FALLBACK: Should not happen if AI follows instructions
+        print(f"[COLOR SCHEME] ⚠️ WARNING: Palette too small for trees, using ground color")
+        tree_base = ground_base
+        assignments["tree_leaves"] = rgb_to_hex(adjust_shade(tree_base, saturate=0.2))
+        assignments["tree_leaves_light"] = rgb_to_hex(adjust_shade(tree_base, lighten=0.2, saturate=0.15))
+        assignments["tree_leaves_dark"] = rgb_to_hex(adjust_shade(tree_base, darken=0.2, saturate=0.1))
+        assignments["tree_trunk"] = rgb_to_hex(adjust_shade(tree_base, darken=0.5, desaturate=0.4))
     
-    # Tree trunks (darker, desaturated version of tree color)
-    assignments["tree_trunk"] = rgb_to_hex(adjust_shade(tree_base, darken=0.5, desaturate=0.4))
-    
-    # Buildings (third color - or use second if only two colors)
+    # Buildings (Color 2 - MANDATORY)
+    # Palette MUST have at least 5 colors, so index 2 should always exist
     if len(color_palette) >= 3:
         building_base = hex_to_rgb(color_palette[2])
         assignments["building"] = rgb_to_hex(building_base)
         assignments["building_light"] = rgb_to_hex(adjust_shade(building_base, lighten=0.25))
         assignments["building_dark"] = rgb_to_hex(adjust_shade(building_base, darken=0.15))
-    elif len(color_palette) >= 2:
-        # Use tree color but lighter/desaturated for buildings
-        building_base = adjust_shade(tree_base, lighten=0.3, desaturate=0.2)
+    else:
+        # FALLBACK: Should not happen if AI follows instructions
+        print(f"[COLOR SCHEME] ⚠️ WARNING: Palette too small for buildings, using tree color")
+        building_base = tree_base if 'tree_base' in locals() else ground_base
+        building_base = adjust_shade(building_base, lighten=0.3, desaturate=0.2) if isinstance(building_base, tuple) else adjust_shade(hex_to_rgb(assignments.get("tree_leaves", color_palette[0])), lighten=0.3, desaturate=0.2)
         assignments["building"] = rgb_to_hex(building_base)
         assignments["building_light"] = rgb_to_hex(adjust_shade(building_base, lighten=0.2))
         assignments["building_dark"] = rgb_to_hex(adjust_shade(building_base, darken=0.15))
-    else:
-        # Use ground color with more variation
-        building_base = adjust_shade(ground_base, lighten=0.2, desaturate=0.1)
-        assignments["building"] = rgb_to_hex(building_base)
-        assignments["building_light"] = rgb_to_hex(adjust_shade(building_base, lighten=0.25))
-        assignments["building_dark"] = rgb_to_hex(adjust_shade(building_base, darken=0.15))
     
-    # Mountains/Peaks (fourth color - or use first if only one)
+    # Mountains/Peaks (Color 3 - MANDATORY)
+    # Palette MUST have at least 5 colors, so index 3 should always exist
     if len(color_palette) >= 4:
         mountain_base = hex_to_rgb(color_palette[3])
         assignments["mountain"] = rgb_to_hex(mountain_base)
         assignments["mountain_light"] = rgb_to_hex(adjust_shade(mountain_base, lighten=0.3))
         assignments["mountain_dark"] = rgb_to_hex(adjust_shade(mountain_base, darken=0.2))
     else:
-        # Use ground color but darker/desaturated
+        # FALLBACK: Should not happen if AI follows instructions
+        print(f"[COLOR SCHEME] ⚠️ WARNING: Palette too small for mountains, using ground color")
         mountain_base = adjust_shade(ground_base, darken=0.2, desaturate=0.2)
         assignments["mountain"] = rgb_to_hex(mountain_base)
         assignments["mountain_light"] = rgb_to_hex(adjust_shade(mountain_base, lighten=0.2))
         assignments["mountain_dark"] = rgb_to_hex(adjust_shade(mountain_base, darken=0.2))
     
-    # Rocks (fifth color - or use mountain if only 4 colors)
-    if len(color_palette) >= 5:
-        rock_base = hex_to_rgb(color_palette[4])
-        assignments["rock"] = rgb_to_hex(adjust_shade(rock_base, darken=0.1, desaturate=0.15))
-    else:
-        # Use mountain color but darker
-        rock_base = adjust_shade(hex_to_rgb(assignments["mountain"]), darken=0.15, desaturate=0.2)
-        assignments["rock"] = rgb_to_hex(rock_base)
+    # Rocks (use mountain color variation - no dedicated color needed)
+    # Use mountain color but darker for rocks
+    rock_base = adjust_shade(hex_to_rgb(assignments["mountain"]), darken=0.15, desaturate=0.2)
+    assignments["rock"] = rgb_to_hex(rock_base)
     
-    # Sky/Background (fifth color - or lightened version of first)
+    # Sky/Background (MANDATORY - Color 4, index 4)
+    # CRITICAL: Palette MUST have at least 5 colors, with index 4 being sky
     if len(color_palette) >= 5:
+        # Use the dedicated sky color (index 4)
         sky_base = hex_to_rgb(color_palette[4])
-        assignments["sky"] = rgb_to_hex(adjust_shade(sky_base, lighten=0.6, saturate=0.1))
-        assignments["sky_dark"] = rgb_to_hex(adjust_shade(sky_base, lighten=0.4))
-    elif len(color_palette) >= 3:
-        # Use building color but very light
-        sky_base = hex_to_rgb(assignments["building"])
-        assignments["sky"] = rgb_to_hex(adjust_shade(sky_base, lighten=0.7, saturate=0.15))
-        assignments["sky_dark"] = rgb_to_hex(adjust_shade(sky_base, lighten=0.5))
+        assignments["sky"] = rgb_to_hex(adjust_shade(sky_base, lighten=0.1, saturate=0.05))  # Slight adjustment only
+        assignments["sky_dark"] = rgb_to_hex(adjust_shade(sky_base, darken=0.1))
     else:
-        # Lightened version of ground color
+        # FALLBACK: If palette is too small, generate sky from ground color
+        # This should NOT happen if AI follows instructions (minimum 5 colors)
+        print(f"[COLOR SCHEME] ⚠️ WARNING: Palette has only {len(color_palette)} colors, generating sky fallback")
         sky_base = hex_to_rgb(color_palette[0])
         assignments["sky"] = rgb_to_hex(adjust_shade(sky_base, lighten=0.7, saturate=0.2))
         assignments["sky_dark"] = rgb_to_hex(adjust_shade(sky_base, lighten=0.5))

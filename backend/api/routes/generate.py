@@ -7,6 +7,7 @@ from world.terrain import generate_heightmap, get_walkable_points
 from world.enemy_placer import place_enemies
 from world.lighting import get_lighting_preset, get_sky_color
 from world.physics_config import get_combined_config
+from world.colour_scheme import assign_palette_to_elements
 from models.generators import generate_object_template_with_ai
 
 router = APIRouter()
@@ -417,6 +418,13 @@ def generate_mountain_peaks(
             },
             "scale": 1.0
         })
+        # #region agent log
+        try:
+            import json
+            with open('c:\\Projects\\NexHacks26\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"location":"generate.py:420","message":"Mountain peak generated","data":{"x":world_x,"y":h*10,"z":world_z,"scale":1.0},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","hypothesisId":"H4"})+'\n')
+        except: pass
+        # #endregion
 
         placed_positions.append((world_x, world_z))
 
@@ -488,8 +496,57 @@ def place_trees_on_terrain(
                         valid_points.append((x, z))
 
     if not valid_points:
-        print("[TREE DEBUG] No valid points found for trees!")
-        return []
+        print("[TREE DEBUG] ⚠️ No valid points found for trees! Trying fallback...")
+        # Fallback: Try to find at least some points, even if conditions aren't perfect
+        # This ensures plants are always placed
+        for z in range(1, segments-1):
+            for x in range(1, segments-1):
+                if placement_mask[z][x] == 1:
+                    world_x = (x / segments) * terrain_size - terrain_size / 2
+                    world_z = (z / segments) * terrain_size - terrain_size / 2
+                    too_close_to_peak = False
+                    for peak in existing_peaks:
+                        peak_x = peak.get("position", {}).get("x", 0)
+                        peak_z = peak.get("position", {}).get("z", 0)
+                        peak_scale = peak.get("scale", 1.0)
+                        distance = math.sqrt((world_x - peak_x)**2 + (world_z - peak_z)**2)
+                        if distance < MIN_DISTANCE_FROM_PEAK * peak_scale:
+                            too_close_to_peak = True
+                            break
+                    if not too_close_to_peak:
+                        valid_points.append((x, z))
+                        if len(valid_points) >= tree_count:
+                            break
+            if len(valid_points) >= tree_count:
+                break
+        
+        if not valid_points:
+            print("[TREE DEBUG] ❌ Still no valid points after fallback! Using ultra-permissive placement...")
+            # Last resort: place plants anywhere placement_mask allows (ignore height restrictions)
+            for z in range(2, segments-2):
+                for x in range(2, segments-2):
+                    if placement_mask[z][x] == 1:
+                        world_x = (x / segments) * terrain_size - terrain_size / 2
+                        world_z = (z / segments) * terrain_size - terrain_size / 2
+                        too_close_to_peak = False
+                        for peak in existing_peaks:
+                            peak_x = peak.get("position", {}).get("x", 0)
+                            peak_z = peak.get("position", {}).get("z", 0)
+                            peak_scale = peak.get("scale", 1.0)
+                            distance = math.sqrt((world_x - peak_x)**2 + (world_z - peak_z)**2)
+                            if distance < MIN_DISTANCE_FROM_PEAK * peak_scale:
+                                too_close_to_peak = True
+                                break
+                        if not too_close_to_peak:
+                            valid_points.append((x, z))
+                            if len(valid_points) >= tree_count:
+                                break
+                if len(valid_points) >= tree_count:
+                    break
+        
+        if not valid_points:
+            print("[TREE DEBUG] ❌❌ CRITICAL: No valid points even with ultra-permissive placement!")
+            return []
 
     random.shuffle(valid_points)
     trees_to_place = min(tree_count, len(valid_points))
@@ -512,7 +569,9 @@ def place_trees_on_terrain(
             "rotation": float(rotation)
         })
 
-    print(f"[TREE DEBUG] Placed {len(trees)} trees (biome={biome}, leafless={is_winter})")
+    print(f"[TREE DEBUG] Placed {len(trees)} trees (requested: {tree_count}, biome={biome}, leafless={is_winter})")
+    if len(trees) == 0:
+        print(f"[TREE DEBUG] ⚠️ WARNING: No trees were placed! tree_count={tree_count}, valid_points={len(valid_points) if 'valid_points' in locals() else 0}")
     return trees
 
 def generate_room_walls(room_size: float = 30.0, wall_height: float = 8.0, wall_color: str = "#E8E8E8") -> List[Dict]:
@@ -828,18 +887,42 @@ async def generate_world(prompt: Dict) -> Dict:
         enemy_count = parsed_params.get("enemy_count", 5)
         weapon = parsed_params.get("weapon", "both")
         structure_counts = parsed_params.get("structure", {})
+        color_palette = parsed_params.get("color_palette", [])
+        plant_type = parsed_params.get("plant_type", "tree")  # Default to tree
 
-        print(f"[Backend] Final biome: '{biome}' | time: '{time_of_day}'")
+        print(f"[Backend] Final biome: '{biome}' | time: '{time_of_day}' | color_palette: {color_palette}")
 
-        # --- Generate terrain ---
-        terrain_data = generate_heightmap(biome, structure_counts)
+        # --- Generate terrain with color palette ---
+        terrain_data = generate_heightmap(biome, structure_counts, color_palette=color_palette)
         heightmap_raw = terrain_data["heightmap_raw"]
         placement_mask = terrain_data["placement_mask"]
 
         # --- Generate 3D structures ---
-        # Default tree count: 25 for arctic, 10 for others
-        base_tree_count = 25 if biome.lower() in ["arctic", "winter", "icy"] else 10
-        tree_count = structure_counts.get("tree", base_tree_count)
+        # Default tree/plant count: 25 for arctic, 15 for desert (cacti), 15 for others (increased from 10)
+        # Plants should always be present (cactus for desert, trees for others, etc.)
+        if biome.lower() in ["desert", "sandy"]:
+            base_tree_count = 15  # Cacti for desert
+        elif biome.lower() in ["arctic", "winter", "icy"]:
+            base_tree_count = 25  # Trees for arctic
+        elif biome.lower() == "city":
+            base_tree_count = 0  # City biomes can have 0 trees (or use building_count instead)
+        else:
+            base_tree_count = 15  # Default trees/plants (increased from 10)
+        
+        # Use base_tree_count if AI returned a low value (below minimum) or if not specified
+        ai_tree_count = structure_counts.get("tree")
+        if ai_tree_count is None:
+            tree_count = base_tree_count
+        else:
+            # For desert, ensure at least base_tree_count (15) even if AI suggests fewer
+            if biome.lower() in ["desert", "sandy"]:
+                tree_count = max(ai_tree_count, base_tree_count)
+            else:
+                tree_count = ai_tree_count
+        
+        # Ensure minimum plant count (plants are always present in any biome)
+        tree_count = max(tree_count, 5)  # Minimum 5 plants in any world
+        print(f"[Backend] Tree/plant count: {tree_count} (from structure_counts: {structure_counts.get('tree', 'not set')}, base: {base_tree_count})")
 
         base_rock_count = 15 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
         rock_count = structure_counts.get("rock", base_rock_count)
@@ -900,10 +983,27 @@ async def generate_world(prompt: Dict) -> Dict:
         lighting_config = get_lighting_preset(time_of_day, biome)
         sky_colour = get_sky_color(time_of_day, biome)
         
+        # --- Generate color assignments from palette ---
+        color_assignments = {}
+        if color_palette and isinstance(color_palette, list) and len(color_palette) > 0:
+            print(f"[Backend] Color palette received: {color_palette} (length: {len(color_palette)})")
+            color_assignments = assign_palette_to_elements(color_palette)
+            print(f"[Backend] Generated color assignments from palette: {len(color_assignments)} elements")
+            print(f"[Backend] Color assignments keys: {list(color_assignments.keys())}")
+            if "sky" in color_assignments:
+                print(f"[Backend] ✅ Sky color from assignments: {color_assignments['sky']}")
+            else:
+                print(f"[Backend] ⚠️ WARNING: 'sky' not found in color_assignments!")
+        else:
+            print(f"[Backend] ⚠️ WARNING: No color_palette provided, using default colors")
+        
         print(f"[Backend] Lighting config: {lighting_config}")
         print(f"[Backend] Sky color: {sky_colour}")
         print("="*60 + "\n")
 
+        # --- Get plant_type from parsed params ---
+        plant_type = parsed_params.get("plant_type", "tree")  # Default to tree if not specified
+        
         # --- Build response ---
         response = {
             "world": {
@@ -914,7 +1014,10 @@ async def generate_world(prompt: Dict) -> Dict:
                 "texture_url": terrain_data.get("texture_url"),
                 "lighting_config": lighting_config,
                 "sky_colour": sky_colour,
-                "colour_map_array": terrain_data.get('colour_map_array')
+                "colour_map_array": terrain_data.get('colour_map_array'),
+                "color_palette": color_palette,
+                "color_assignments": color_assignments,
+                "plant_type": plant_type
             },
             "structures": structures,
             "combat": {

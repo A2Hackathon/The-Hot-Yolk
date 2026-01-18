@@ -219,22 +219,46 @@ def summarize_world(world: Dict) -> Dict:
     }
 
 
-def generate_new_buildings(count: int, biome: str, existing_buildings: list, terrain_size: float = 256.0) -> list:
-    """Generate new building objects with proper positions"""
+def generate_new_buildings(count: int, biome: str, existing_buildings: list, terrain_size: float = 256.0, force_type: Optional[str] = None) -> list:
+    """Generate new building objects with proper positions and types (skyscraper/house)"""
+    if not biome or not isinstance(biome, str):
+        print(f"[VOICE] ⚠️ Invalid biome: {biome} (type: {type(biome)})")
+        return []
     if biome.lower() != "city":
         return []
     
     buildings = []
-    building_types = [
-        {"height": 25, "width": 8, "depth": 8, "color": 0x666666},
-        {"height": 18, "width": 10, "depth": 7, "color": 0x888888},
-        {"height": 15, "width": 7, "depth": 10, "color": 0x777777},
-        {"height": 35, "width": 8, "depth": 8, "color": 0x555555},
-        {"height": 28, "width": 9, "depth": 9, "color": 0x444444},
-    ]
+    # Use same building types as generate_buildings in generate.py
+    if force_type == "skyscraper":
+        # Only generate skyscrapers
+        building_types = [
+            {"type": "skyscraper", "height": 70, "width": 10, "depth": 10, "color": 0x666666},
+            {"type": "skyscraper", "height": 50, "width": 8, "depth": 8, "color": 0x555555},
+            {"type": "skyscraper", "height": 60, "width": 9, "depth": 9, "color": 0x444444},
+        ]
+    elif force_type == "house":
+        # Only generate houses
+        building_types = [
+            {"type": "house", "height": 40, "width": 7, "depth": 10, "color": 0x777777},
+            {"type": "house", "height": 20, "width": 10, "depth": 7, "color": 0x888888},
+            {"type": "house", "height": 30, "width": 8, "depth": 9, "color": 0x999999},
+        ]
+    else:
+        # Mix of both (default)
+        building_types = [
+            {"type": "skyscraper", "height": 70, "width": 10, "depth": 10, "color": 0x666666},
+            {"type": "house", "height": 40, "width": 7, "depth": 10, "color": 0x777777},
+            {"type": "skyscraper", "height": 50, "width": 8, "depth": 8, "color": 0x555555},
+            {"type": "house", "height": 20, "width": 10, "depth": 7, "color": 0x888888},
+        ]
     
-    # Extract existing positions
-    existing_positions = [(b["position"]["x"], b["position"]["z"]) for b in existing_buildings]
+    # Extract existing positions (handle missing position data gracefully)
+    existing_positions = []
+    for b in existing_buildings:
+        if isinstance(b, dict) and "position" in b:
+            pos = b["position"]
+            if isinstance(pos, dict) and "x" in pos and "z" in pos:
+                existing_positions.append((pos["x"], pos["z"]))
     min_distance = 25
     
     attempts = 0
@@ -258,12 +282,12 @@ def generate_new_buildings(count: int, biome: str, existing_buildings: list, ter
         if too_close:
             continue
         
-        # Choose random building type
+        # Choose random building type (includes both skyscrapers and houses)
         building_type = random.choice(building_types)
         rotation = random.choice([0, math.pi/2, math.pi, 3*math.pi/2])
         
         building = {
-            "type": "building",
+            "type": building_type["type"],  # "skyscraper" or "house", not "building"
             "height": building_type["height"],
             "width": building_type["width"],
             "depth": building_type["depth"],
@@ -275,7 +299,9 @@ def generate_new_buildings(count: int, biome: str, existing_buildings: list, ter
         buildings.append(building)
         existing_positions.append((world_x, world_z))
     
-    print(f"[VOICE] Generated {len(buildings)} new buildings")
+    skyscraper_count = sum(1 for b in buildings if b["type"] == "skyscraper")
+    house_count = sum(1 for b in buildings if b["type"] == "house")
+    print(f"[VOICE] Generated {len(buildings)} new buildings ({skyscraper_count} skyscrapers, {house_count} houses)")
     return buildings
 
 
@@ -413,6 +439,22 @@ def detect_and_remove_blocking_structures(diff: Dict, current_world: Dict, colli
                                     else:
                                         diff["remove"][struct_type] = diff["remove"].get(struct_type, 0) + 1
                                     print(f"[COLLISION] Auto-removing blocking {struct_type} for peak placement")
+            
+            # Ensure peaks have varied heights (scales) for visual variety
+            if len(peaks_to_add) > 1:
+                scales = [p.get("scale", 1.0) for p in peaks_to_add]
+                # Check if all scales are the same (or missing)
+                if len(set(scales)) == 1:
+                    print(f"[PEAKS] All peaks have same scale ({scales[0]}), varying heights...")
+                    # Generate varied scales between 0.7 and 1.5
+                    for i, peak in enumerate(peaks_to_add):
+                        # Create varied scale: 0.7 to 1.5 with some randomness
+                        base_scale = 0.7 + (i % 3) * 0.3  # 0.7, 1.0, 1.3, 0.7, 1.0, 1.3...
+                        variation = random.uniform(-0.15, 0.15)  # ±0.15 variation
+                        peak["scale"] = max(0.6, min(1.6, base_scale + variation))
+                        print(f"[PEAKS] Peak {i+1} scale set to {peak['scale']:.2f}")
+                else:
+                    print(f"[PEAKS] Peaks already have varied scales: {scales}")
     
     return diff
 
@@ -731,6 +773,9 @@ TREE/ROCK/PEAK GENERATION:
 - Trees need: type, leafless, position {x, y, z}, scale, rotation
 - Rocks need: type, position {x, y, z}, scale, rotation
 - Peaks need: type, position {x, y, z}, scale
+- CRITICAL FOR PEAKS: When adding multiple peaks/mountains, use VARIED scales (0.7 to 1.5) so they have different heights
+  - Example: If adding 3 peaks, use scales like [0.8, 1.2, 1.0] or [1.1, 0.9, 1.3] - NOT all 1.0
+  - This creates visual variety with mountains of different heights
 
 TREE STYLING FROM IMAGES:
 - If an image is provided with the command, analyze the tree(s) in the image
@@ -793,10 +838,13 @@ AUTOMATIC COLLISION REMOVAL:
 
 BUILDING/ENEMY/STREET_LAMP GENERATION:
 - Just return count as number, backend handles generation
-- Example: "add 5 buildings" → {"add": {"buildings": 5}}
+- Example: "add 5 buildings" → {"add": {"buildings": 5}}  // Backend will generate mix of houses and skyscrapers
+- Example: "add 10 buildings and skyscrapers" → {"add": {"buildings": 10}}  // Same as above - backend generates mix
+- Example: "add 5 skyscrapers" → {"add": {"skyscrapers": 5}}  // Backend will generate only skyscrapers
 - Example: "add 3 enemies" → {"add": {"enemies": 3}}
 - Example: "add 10 street lamps" → {"add": {"street_lamps": 10}}
 - Example: "add street lamps" or "streetlamps" → {"add": {"street_lamps": 10}}
+- IMPORTANT: When user says "buildings and skyscrapers", treat as "buildings" (backend generates mix automatically)
 
 CREATIVE OBJECT CREATION (USE THIS FOR ANY CUSTOM OBJECT):
 You can create ANY object creatively using "creative_objects" field. This allows you to build objects from basic shapes.
@@ -1159,6 +1207,13 @@ IMPORTANT: If command involves REPLACING objects, use the positions listed above
         # Try to parse JSON
         try:
             diff = json.loads(raw)
+            # #region agent log
+            try:
+                import json as json_log
+                with open('c:\\Projects\\NexHacks26\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(json_log.dumps({"location":"voice.py:1162","message":"AI response parsed diff","data":{"peaks":diff.get("add", {}).get("peaks", [])},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","hypothesisId":"H3"})+'\n')
+            except: pass
+            # #endregion
             print(f"[VOICE] ✓ Successfully parsed JSON")
         except json.JSONDecodeError as e:
             print(f"[VOICE] JSON parsing error: {e}")
@@ -1403,13 +1458,66 @@ IMPORTANT: If command involves REPLACING objects, use the positions listed above
                         # Don't remove it, just log warning - let the AI's decision stand for now
         
         # Handle building additions - generate actual building objects
-        if diff.get("add", {}).get("buildings"):
-            count = diff["add"]["buildings"]
-            if isinstance(count, int):
-                existing_buildings = current_world.get("structures", {}).get("buildings", [])
-                new_buildings = generate_new_buildings(count, current_biome, existing_buildings)
-                diff["add"]["buildings"] = new_buildings
-                print(f"[VOICE] Converted building count {count} to {len(new_buildings)} objects")
+        try:
+            if "add" not in diff:
+                diff["add"] = {}
+            if not isinstance(diff["add"], dict):
+                print(f"[VOICE] ⚠️ diff['add'] is not a dict, resetting to empty dict")
+                diff["add"] = {}
+            
+            existing_buildings = current_world.get("structures", {}).get("buildings", [])
+            if not isinstance(existing_buildings, list):
+                existing_buildings = []
+            all_new_buildings = []
+            
+            print(f"[VOICE] Building addition check - diff['add']: {diff.get('add', {})}")
+            print(f"[VOICE] Current biome: {current_biome}, existing buildings: {len(existing_buildings)}")
+            
+            # First handle "skyscrapers" if specified separately
+            if diff["add"].get("skyscrapers"):
+                skyscraper_count = diff["add"]["skyscrapers"]
+                print(f"[VOICE] Found skyscrapers in diff: {skyscraper_count} (type: {type(skyscraper_count)})")
+                if isinstance(skyscraper_count, int) and skyscraper_count > 0:
+                    # Generate only skyscrapers
+                    new_skyscrapers = generate_new_buildings(skyscraper_count, current_biome, existing_buildings, force_type="skyscraper")
+                    all_new_buildings.extend(new_skyscrapers)
+                    existing_buildings.extend(new_skyscrapers)  # Update for next check
+                    print(f"[VOICE] ✅ Converted skyscraper count {skyscraper_count} to {len(new_skyscrapers)} skyscrapers")
+                # Remove the separate skyscrapers field (we merged it into buildings)
+                del diff["add"]["skyscrapers"]
+            
+            # Handle "buildings" (general buildings - mix of houses and skyscrapers)
+            if diff["add"].get("buildings"):
+                count = diff["add"]["buildings"]
+                print(f"[VOICE] Found buildings in diff: {count} (type: {type(count)})")
+                if isinstance(count, int) and count > 0:
+                    # Generate mix of houses and skyscrapers
+                    new_buildings = generate_new_buildings(count, current_biome, existing_buildings)
+                    all_new_buildings.extend(new_buildings)
+                    print(f"[VOICE] ✅ Converted building count {count} to {len(new_buildings)} objects")
+                elif isinstance(count, list):
+                    # Already a list of building objects (shouldn't happen, but handle gracefully)
+                    print(f"[VOICE] ⚠️ Buildings already a list ({len(count)} items), using as-is")
+                    all_new_buildings.extend(count)
+            
+            # Set the final buildings array
+            if all_new_buildings:
+                diff["add"]["buildings"] = all_new_buildings
+                skyscraper_count = sum(1 for b in all_new_buildings if b.get("type") == "skyscraper")
+                house_count = sum(1 for b in all_new_buildings if b.get("type") == "house")
+                print(f"[VOICE] ✅ Total buildings to add: {len(all_new_buildings)} ({skyscraper_count} skyscrapers, {house_count} houses)")
+            else:
+                print(f"[VOICE] ⚠️ No buildings generated - check if biome is city and counts are valid")
+        except Exception as e:
+            print(f"[VOICE] ❌ Error in building generation: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail the whole request - just log and continue
+        except Exception as e:
+            print(f"[VOICE] ❌ Error in building generation: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail the whole request - just log and continue
         
         # Handle street lamp additions - generate actual street lamp objects if count provided
         if diff.get("add", {}).get("street_lamps"):
