@@ -162,7 +162,8 @@ def get_from_cache(prompt: str) -> dict:
             "paris": ["paris", "france"],
             "spiderman_world": ["spider", "spiderman"],
             "lava": ["lava", "magma", "volcanic", "volcano", "molten"],
-            "arctic": ["arctic", "snow", "ice", "frozen", "winter", "icy"]
+            "arctic": ["arctic", "snow", "ice", "frozen", "winter", "icy"],
+            "park": ["park"]
         }
         
         for target_biome, keywords in force_mappings.items():
@@ -259,7 +260,8 @@ def parse_prompt(prompt: str) -> dict:
             "venice": ["venice", "italy"],
             "paris": ["paris", "france"],
             "spiderman_world": ["spider", "spiderman"],
-            "arctic": ["arctic", "snow", "ice", "frozen", "winter", "icy"]
+            "arctic": ["arctic", "snow", "ice", "frozen", "winter", "icy"],
+            "park": ["park"]
         }
         
         corrected = False
@@ -356,7 +358,8 @@ def parse_prompt(prompt: str) -> dict:
             "paris": ["paris", "france"],
             "spiderman_world": ["spider", "spiderman"],
             "lava": ["lava", "magma", "volcanic", "volcano", "molten"],
-            "arctic": ["arctic", "snow", "ice", "frozen", "winter", "icy"]
+            "arctic": ["arctic", "snow", "ice", "frozen", "winter", "icy"],
+            "park": ["park"]
         }
         
         target_biome = None
@@ -1229,7 +1232,7 @@ def fallback_parse(prompt: str) -> dict:
     elif re.search(r'\btrees\b', prompt_lower):
         # If "trees" (plural) is mentioned without a number, use biome-specific default
         # Arctic: 25, Others: 10
-        if biome == "arctic":
+        if biome in ["arctic", "park"]:
             structure["tree"] = 25
         else:
             structure["tree"] = 10

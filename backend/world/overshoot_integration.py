@@ -1146,6 +1146,9 @@ def map_terrain_to_biome(terrain_type: Optional[str], weather: Optional[str]) ->
     if "snow" in weather_lower or "winter" in terrain_lower or "arctic" in terrain_lower:
         return "arctic"
     
+    if "park" in terrain_lower:
+        return "park"
+    
     if "mountain" in terrain_lower or "elevated" in terrain_lower:
         return "arctic"
     

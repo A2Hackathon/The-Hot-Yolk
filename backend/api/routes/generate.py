@@ -26,7 +26,7 @@ def generate_trees(
     
     # CRITICAL: Check if biome is winter/arctic/icy
     biome_lower = biome.lower()
-    is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen"]
+    is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen", "park"]
     
     print(f"[TREE DEBUG] Biome: '{biome}' | Is Winter: {is_winter}")
     
@@ -38,6 +38,14 @@ def generate_trees(
             "max_height": 1.0,
             "scale_boost": 3.0,  # Larger trees in arctic
             "leafless": True  # No leaves in winter/arctic
+        },
+        "park": {  # Park biome (copy of arctic)
+            "types": ["pine", "spruce"], 
+            "density": 0.7, 
+            "min_height": 0.3, 
+            "max_height": 1.0,
+            "scale_boost": 3.0,
+            "leafless": True
         },
         "city": {
             "types": ["oak", "maple"], 
@@ -119,6 +127,7 @@ def generate_rocks(
     
     rock_config = {
         "arctic": {"types": ["ice_rock", "boulder"], "density": 1.2, "min_height": 0.3},
+        "park": {"types": ["ice_rock", "boulder"], "density": 1.2, "min_height": 0.3},  # Park biome (copy of arctic)
         "city": {"types": ["decorative_rock"], "density": 0.2, "min_height": 0.2},
         "default": {"types": ["boulder", "rock"], "density": 1.0, "min_height": 0.3}
     }
@@ -254,8 +263,8 @@ def generate_buildings(
     buildings = []
     biome_lower = biome.lower()
     
-    if biome_lower not in ["city", "arctic"]:
-        return []  # Only generate buildings for city or arctic
+    if biome_lower not in ["city", "arctic", "park"]:
+        return []  # Only generate buildings for city, arctic, or park
     
     segments = len(heightmap_raw) - 1
     
@@ -267,7 +276,7 @@ def generate_buildings(
             {"type": "skyscraper", "height": 50, "width": 8, "depth": 8, "color": 0x555555},
             {"type": "house", "height": 20, "width": 10, "depth": 7, "color": 0x888888},
         ]
-    elif biome_lower == "arctic":
+    elif biome_lower in ["arctic", "park"]:
         building_types = [
             {"type": "igloo", "height": 3, "width": 5, "depth": 5, "color": 0xFFFFFF},
         ]
@@ -292,8 +301,8 @@ def generate_buildings(
                                 break
                         if is_flat:
                             valid_points.append((x, z))
-                elif biome_lower == "arctic":
-                    # Arctic igloos can be on slightly sloped terrain
+                elif biome_lower in ["arctic", "park"]:
+                    # Arctic/park igloos can be on slightly sloped terrain
                     if 0.0 <= h <= 0.7:
                         valid_points.append((x, z))
     
@@ -355,7 +364,7 @@ def generate_mountain_peaks(
     if max_peaks == 0:
         return []
     
-    if biome.lower() not in ["arctic", "winter", "icy", "snow", "frozen"]:
+    if biome.lower() not in ["arctic", "winter", "icy", "snow", "frozen", "park"]:
         return []
 
     segments = len(heightmap_raw) - 1
@@ -456,10 +465,11 @@ def place_trees_on_terrain(
         existing_peaks = []
 
     biome_lower = biome.lower()
-    is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen"]
+    is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen", "park"]
 
     tree_types = {
         "arctic": ["pine", "spruce"],
+        "park": ["pine", "spruce"],  # Park biome (copy of arctic)
         "city": ["oak", "maple"],
         "default": ["oak", "pine", "birch"]
     }
@@ -965,8 +975,8 @@ async def generate_world(prompt: Dict) -> Dict:
         # Plants should always be present (cactus for desert, trees for others, etc.)
         if biome.lower() in ["desert", "sandy"]:
             base_tree_count = 15  # Cacti for desert
-        elif biome.lower() in ["arctic", "winter", "icy"]:
-            base_tree_count = 25  # Trees for arctic
+        elif biome.lower() in ["arctic", "winter", "icy", "park"]:
+            base_tree_count = 25  # Trees for arctic/park
         elif biome.lower() == "city":
             base_tree_count = 0  # City biomes can have 0 trees (or use building_count instead)
         else:
@@ -987,9 +997,9 @@ async def generate_world(prompt: Dict) -> Dict:
         tree_count = max(tree_count, 5)  # Minimum 5 plants in any world
         print(f"[Backend] Tree/plant count: {tree_count} (from structure_counts: {structure_counts.get('tree', 'not set')}, base: {base_tree_count})")
 
-        base_rock_count = 15 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
+        base_rock_count = 15 if biome.lower() in ["arctic", "winter", "icy", "park"] else 10 if biome.lower() == "city" else 20
         rock_count = structure_counts.get("rock", base_rock_count)
-        mountain_count = structure_counts.get("mountain", 3 if biome.lower() in ["arctic", "winter", "icy"] else 0)
+        mountain_count = structure_counts.get("mountain", 3 if biome.lower() in ["arctic", "winter", "icy", "park"] else 0)
         
         # Building count for city biome
         building_count = structure_counts.get("building", 15 if biome.lower() == "city" else 0)

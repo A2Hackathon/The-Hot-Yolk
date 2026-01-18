@@ -76,8 +76,8 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
     config = presets.get(time, presets["noon"]).copy()
     
     # Apply biome-specific modifications for arctic/icy/winter environments
-    is_winter = biome.lower() in ["arctic", "winter", "icy"]
-    is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen"]
+    is_winter = biome.lower() in ["arctic", "winter", "icy", "park"]
+    is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen", "park"]
     is_lava = biome.lower() in ["lava", "volcanic", "volcano", "magma"]
     
     # Arctic biome time-specific lighting (don't override time-based settings)
@@ -260,8 +260,8 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
             config["directional"]["intensity"] = 0.3
             config["directional"]["position"] = {"x": 50, "y": 80, "z": 50}
     
-    # Add northern lights flag for arctic biomes
-    config["northern_lights"] = is_arctic
+    # Add northern lights flag for arctic biomes (but not park)
+    config["northern_lights"] = is_arctic and biome.lower() != "park"
     
     return config
 
@@ -277,7 +277,7 @@ def get_sky_color(time: str, biome: str = "city") -> str:
     Returns:
         Hex color string
     """
-    if biome == "arctic":
+    if biome in ["arctic", "park"]:
         colors = {
             "noon": "#CCE5FF",    # Icy blue
             "sunset": "#B3D9FF",  # Cool sunset
@@ -325,7 +325,7 @@ def interpolate_lighting(from_time: str, to_time: str, progress: float, biome: s
         return f"#{r:02x}{g:02x}{b:02x}"
     
     # Northern lights flag doesn't interpolate - it's based on biome
-    is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen"]
+    is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen", "park"]
     
     return {
         "ambient": {
@@ -347,7 +347,7 @@ def interpolate_lighting(from_time: str, to_time: str, progress: float, biome: s
             "far": lerp(from_preset["fog"]["far"], to_preset["fog"]["far"], progress)
         },
         "background": lerp_color(from_preset["background"], to_preset["background"], progress),
-        "northern_lights": is_arctic
+        "northern_lights": is_arctic and biome.lower() != "park"
     }
 
 

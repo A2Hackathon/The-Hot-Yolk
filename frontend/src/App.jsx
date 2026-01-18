@@ -248,6 +248,7 @@ const VoiceWorldBuilder = () => {
     const animate = () => {
       updateEnemyHealthBars();
       animateNorthernLights(sceneRef.current);
+      animateSnowfall(sceneRef.current, playerRef.current?.position);
       
       // Editing mode: Handle structure dragging
       if (editingModeRef.current && isDraggingRef.current && selectedStructureRef.current && cameraRef.current && rendererRef.current) {
@@ -1821,7 +1822,7 @@ const VoiceWorldBuilder = () => {
   };
 
   const getBuildingTypeForBiome = (biomeName, index) => {
-    if (biomeName === 'arctic') {
+    if (biomeName === 'arctic' || biomeName === 'park') {
       return 'igloo';
     }
 
@@ -2328,7 +2329,7 @@ const VoiceWorldBuilder = () => {
   const createMountainPeak = (peakData, biome = null) => {
   const group = new THREE.Group();
   const baseHeight = 80;
-  const isArctic = biome && (biome.toLowerCase() === 'arctic' || biome.toLowerCase() === 'winter' || biome.toLowerCase() === 'icy' || biome.toLowerCase() === 'snow' || biome.toLowerCase() === 'frozen');
+  const isArctic = biome && (biome.toLowerCase() === 'arctic' || biome.toLowerCase() === 'winter' || biome.toLowerCase() === 'icy' || biome.toLowerCase() === 'snow' || biome.toLowerCase() === 'frozen' || biome.toLowerCase() === 'park');
   
   // Create main mountain with more detailed geometry for jagged peaks
   const mainGeometry = new THREE.ConeGeometry(40, baseHeight, 16, 1); // Increased segments for more detail
@@ -3360,7 +3361,149 @@ const VoiceWorldBuilder = () => {
     const pulse = Math.sin(time * 0.5 + layer) * 0.05;
     aurora.material.opacity = baseOpacity - layer * 0.05 + pulse;
   });
-};
+  };
+
+  // Snowfall particle system for arctic biomes
+  const createSnowfall = (scene) => {
+    console.log('[SNOWFALL] Creating snowfall particle system...');
+    
+    // Remove any existing snowfall
+    const existingSnow = scene.children.find(c => c.userData?.isSnowfall);
+    if (existingSnow) {
+      scene.remove(existingSnow);
+    }
+    
+    // Create particle geometry
+    const particleCount = 15000; // Dense snowfall
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const velocities = new Float32Array(particleCount * 3);
+    const sizes = new Float32Array(particleCount);
+    
+    const spreadX = 400; // Area width
+    const spreadZ = 400; // Area depth  
+    const heightRange = 200; // How high snow spawns
+    
+    for (let i = 0; i < particleCount; i++) {
+      const i3 = i * 3;
+      
+      // Random position in a large area around the player
+      positions[i3] = (Math.random() - 0.5) * spreadX;
+      positions[i3 + 1] = Math.random() * heightRange + 10; // Height from 10 to 210
+      positions[i3 + 2] = (Math.random() - 0.5) * spreadZ;
+      
+      // Random velocities for wind drift effect
+      velocities[i3] = (Math.random() - 0.5) * 0.3; // Slight horizontal drift
+      velocities[i3 + 1] = -(0.5 + Math.random() * 1.0); // Fall speed (negative Y)
+      velocities[i3 + 2] = (Math.random() - 0.5) * 0.3; // Slight horizontal drift
+      
+      // Random sizes for depth perception
+      sizes[i] = 0.3 + Math.random() * 0.7;
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('velocity', new THREE.BufferAttribute(velocities, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    
+    // Create snowflake texture using canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = 32;
+    canvas.height = 32;
+    const ctx = canvas.getContext('2d');
+    
+    // Draw soft circular snowflake
+    const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.8)');
+    gradient.addColorStop(0.6, 'rgba(230, 240, 255, 0.4)');
+    gradient.addColorStop(1, 'rgba(200, 220, 255, 0)');
+    
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(16, 16, 16, 0, Math.PI * 2);
+    ctx.fill();
+    
+    const snowTexture = new THREE.CanvasTexture(canvas);
+    
+    // Shader material for soft, glowing snowflakes
+    const material = new THREE.PointsMaterial({
+      size: 1.5,
+      map: snowTexture,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexColors: false,
+      color: 0xffffff,
+      sizeAttenuation: true,
+    });
+    
+    const snowParticles = new THREE.Points(geometry, material);
+    snowParticles.userData.isSnowfall = true;
+    snowParticles.userData.spreadX = spreadX;
+    snowParticles.userData.spreadZ = spreadZ;
+    snowParticles.userData.heightRange = heightRange;
+    
+    scene.add(snowParticles);
+    console.log(`[SNOWFALL] Created ${particleCount} snowflakes`);
+    
+    return snowParticles;
+  };
+  
+  // Animate snowfall particles
+  const animateSnowfall = (scene, playerPosition = null) => {
+    const snowParticles = scene?.children?.find(c => c.userData?.isSnowfall);
+    if (!snowParticles) return;
+    
+    const positions = snowParticles.geometry.attributes.position.array;
+    const velocities = snowParticles.geometry.attributes.velocity.array;
+    const { spreadX, spreadZ, heightRange } = snowParticles.userData;
+    
+    // Get player position for centering snow around player
+    const centerX = playerPosition?.x || 0;
+    const centerZ = playerPosition?.z || 0;
+    
+    const time = Date.now() * 0.001;
+    
+    for (let i = 0; i < positions.length / 3; i++) {
+      const i3 = i * 3;
+      
+      // Add wind effect that changes over time
+      const windX = Math.sin(time * 0.3 + i * 0.01) * 0.1;
+      const windZ = Math.cos(time * 0.2 + i * 0.01) * 0.1;
+      
+      // Update position with velocity and wind
+      positions[i3] += velocities[i3] + windX;
+      positions[i3 + 1] += velocities[i3 + 1];
+      positions[i3 + 2] += velocities[i3 + 2] + windZ;
+      
+      // Reset snowflake if it falls below ground or drifts too far
+      if (positions[i3 + 1] < 0) {
+        positions[i3] = centerX + (Math.random() - 0.5) * spreadX;
+        positions[i3 + 1] = heightRange + Math.random() * 20;
+        positions[i3 + 2] = centerZ + (Math.random() - 0.5) * spreadZ;
+      }
+      
+      // Wrap horizontally to keep snow centered around player
+      const halfSpreadX = spreadX / 2;
+      const halfSpreadZ = spreadZ / 2;
+      
+      if (positions[i3] > centerX + halfSpreadX) {
+        positions[i3] = centerX - halfSpreadX + Math.random() * 10;
+      } else if (positions[i3] < centerX - halfSpreadX) {
+        positions[i3] = centerX + halfSpreadX - Math.random() * 10;
+      }
+      
+      if (positions[i3 + 2] > centerZ + halfSpreadZ) {
+        positions[i3 + 2] = centerZ - halfSpreadZ + Math.random() * 10;
+      } else if (positions[i3 + 2] < centerZ - halfSpreadZ) {
+        positions[i3 + 2] = centerZ + halfSpreadZ - Math.random() * 10;
+      }
+    }
+    
+    snowParticles.geometry.attributes.position.needsUpdate = true;
+  };
+
   // Camera capture functions for Overshoot AI scanning
   const startCameraCapture = async () => {
     try {
@@ -6973,7 +7116,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
     // Handle northern lights based on lighting config or biome (arctic biomes always have northern lights)
     const hasLights = scene.children.some(c => c.userData?.isNorthernLights);
     const biomeName = currentWorld?.world?.biome || currentWorld?.world?.biome_name || '';
-    const arcticBiomes = ['arctic', 'winter', 'icy', 'snow', 'frozen'];
+    const arcticBiomes = ['arctic', 'winter', 'icy', 'snow', 'frozen', 'park'];
     const isArctic = arcticBiomes.includes(biomeName.toLowerCase());
     const shouldHaveLights = lightingConfig.northern_lights === true || isArctic;
     
@@ -6984,6 +7127,19 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       console.log('[FRONTEND LIGHTING] Removing northern lights (not in lighting config and not arctic)');
       const lights = scene.children.filter(c => c.userData?.isNorthernLights);
       lights.forEach(light => scene.remove(light));
+    }
+    
+    // Handle snowfall for arctic biomes
+    const hasSnow = scene.children.some(c => c.userData?.isSnowfall);
+    const shouldHaveSnow = lightingConfig.snowfall === true || isArctic;
+    
+    if (shouldHaveSnow && !hasSnow) {
+      console.log('[FRONTEND LIGHTING] Creating snowfall (arctic biome or config flag)');
+      createSnowfall(scene);
+    } else if (!shouldHaveSnow && hasSnow) {
+      console.log('[FRONTEND LIGHTING] Removing snowfall (not arctic biome)');
+      const snow = scene.children.find(c => c.userData?.isSnowfall);
+      if (snow) scene.remove(snow);
     }
         
     // Update gradient sky sphere with time-of-day aware gradients
