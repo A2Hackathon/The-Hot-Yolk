@@ -4007,25 +4007,29 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       console.warn(`[SCAN] 💡 Backend response:`, data);
     }
     
-    // Create kitchen room for room/indoor biomes when scan fails or no model_url
+    // Create kitchen room for room/indoor/kitchen biomes when scan fails or no model_url
     const biomeName = data.world?.biome || data.world?.biome_name || data.biome;
-    const isRoomBiome = biomeName && (biomeName.toLowerCase() === 'room' || biomeName.toLowerCase() === 'indoor');
+    const isRoomBiome = biomeName && (biomeName.toLowerCase() === 'room' || biomeName.toLowerCase() === 'indoor' || biomeName.toLowerCase() === 'kitchen');
+    const isKitchen = biomeName && biomeName.toLowerCase() === 'kitchen';
     
     if (isRoomBiome && (!data.world?.model_url || data.world?.type === 'scan_fallback')) {
-      console.log('[SCAN] 🏠 Creating basic room...');
+      if (isKitchen) {
+        console.log('[SCAN] 🍳 Creating detailed kitchen matching reference image...');
+      } else {
+        console.log('[SCAN] 🏠 Creating basic room...');
+      }
       
       // Ensure structures object exists
       if (!data.structures) {
         data.structures = {};
       }
       
-      // Create basic room with walls, floor, ceiling, and windows
-      const wallColor = 0xF5F5F5; // White/off-white walls
+      // Create room with white textured walls
+      const wallColor = 0xFFFFFF; // White walls (textured appearance)
       const roomSize = 25; // Room dimensions
       const wallHeight = 10; // Standard ceiling height
-      const windowHeight = 6; // Tall windows
       
-      // Create room walls
+      // Create room walls, floor, ceiling
       data.structures.walls = [
         // Back wall
         {
@@ -4059,71 +4063,357 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         {
           dimensions: { width: roomSize, height: 0.2, depth: roomSize },
           position: { x: 0, y: 0, z: 0 },
-          color: 0xD3D3D3, // Light gray floor
+          color: 0xD3D3D3, // Light neutral floor
           type: 'floor'
         },
         // Ceiling
         {
           dimensions: { width: roomSize, height: 0.2, depth: roomSize },
           position: { x: 0, y: wallHeight, z: 0 },
-          color: 0xF5F5F5, // Off-white ceiling
+          color: 0xFFFFFF, // White ceiling
           type: 'ceiling'
         }
       ];
       
-      // Create windows on each wall
-      const windowWidth = 8;
-      const windowColor = 0x87CEEB; // Sky blue glass color
-      const windows = [
-        // Window on back wall (center)
-        {
-          dimensions: { width: windowWidth, height: windowHeight, depth: 0.3 },
-          position: { x: 0, y: windowHeight / 2 + 2, z: -roomSize / 2 + 0.25 },
-          color: windowColor,
-          type: 'window',
-          transparent: true,
-          opacity: 0.7
-        },
-        // Window on front wall (center)
-        {
-          dimensions: { width: windowWidth, height: windowHeight, depth: 0.3 },
-          position: { x: 0, y: windowHeight / 2 + 2, z: roomSize / 2 - 0.25 },
-          color: windowColor,
-          type: 'window',
-          transparent: true,
-          opacity: 0.7
-        },
-        // Window on left wall
-        {
-          dimensions: { width: 0.3, height: windowHeight, depth: windowWidth },
-          position: { x: -roomSize / 2 + 0.25, y: windowHeight / 2 + 2, z: 0 },
-          color: windowColor,
-          type: 'window',
-          transparent: true,
-          opacity: 0.7
-        },
-        // Window on right wall
-        {
-          dimensions: { width: 0.3, height: windowHeight, depth: windowWidth },
-          position: { x: roomSize / 2 - 0.25, y: windowHeight / 2 + 2, z: 0 },
-          color: windowColor,
-          type: 'window',
-          transparent: true,
-          opacity: 0.7
-        }
-      ];
-      
-      // Add windows to structures
-      if (!data.structures.windows) {
-        data.structures.windows = windows;
-      }
-      
-      // Initialize scanned_objects as empty array (no kitchen objects)
+      // Initialize scanned_objects
       if (!data.structures.scanned_objects) {
         data.structures.scanned_objects = [];
       }
       
-      console.log('[SCAN] ✅ Basic room created with walls, floor, ceiling, and windows');
+      // Generate detailed kitchen matching reference image
+      if (isKitchen) {
+        // Kitchen dimensions (matching reference image layout)
+        const cabinetColor = 0xD2B48C; // Light wood cabinets (tan/beige)
+        const counterColor = 0xF5F5DC; // Light beige speckled countertop
+        const backsplashColor = 0xC0C0C0; // Stainless steel backsplash
+        const stoveColor = 0xFFFFFF; // White stove
+        const sinkColor = 0xC0C0C0; // Stainless steel sink
+        const refrigeratorColor = 0xFFFFFF; // White refrigerator
+        const counterHeight = 3; // Standard counter height (36 inches)
+        const counterDepth = 2; // Counter depth (24 inches)
+        const upperCabinetHeight = 3; // Upper cabinet height
+        const upperCabinetBottom = 7; // Upper cabinets start above counter
+        
+        // L-SHAPED COUNTER: Back wall + Right wall + Extended left counter
+        const backWallCabinetZ = -roomSize / 2 + counterDepth / 2;
+        const rightWallCabinetX = roomSize / 2 - counterDepth / 2;
+        const lowerCabinetY = counterHeight / 2;
+        const counterTopY = counterHeight + 0.05;
+        
+        // === LOWER CABINETS ===
+        // Back wall cabinets (L-shape left side)
+        data.structures.scanned_objects.push(
+          {
+            name: 'lower_cabinet_back_1',
+            position: { x: -8, y: lowerCabinetY, z: backWallCabinetZ },
+            scale: 1,
+            rotation: { x: 0, y: 0, z: 0 },
+            parts: [{
+              shape: 'box',
+              dimensions: { width: 4, height: counterHeight, depth: counterDepth },
+              position: { x: 0, y: 0, z: 0 },
+              color: cabinetColor,
+              material: { roughness: 0.7, metalness: 0.1 }
+            }]
+          },
+          {
+            name: 'lower_cabinet_back_2',
+            position: { x: -3, y: lowerCabinetY, z: backWallCabinetZ },
+            scale: 1,
+            rotation: { x: 0, y: 0, z: 0 },
+            parts: [{
+              shape: 'box',
+              dimensions: { width: 4, height: counterHeight, depth: counterDepth },
+              position: { x: 0, y: 0, z: 0 },
+              color: cabinetColor,
+              material: { roughness: 0.7, metalness: 0.1 }
+            }]
+          }
+        );
+        
+        // Right wall cabinets (L-shape continuation)
+        data.structures.scanned_objects.push(
+          {
+            name: 'lower_cabinet_right_1',
+            position: { x: rightWallCabinetX, y: lowerCabinetY, z: -5 },
+            scale: 1,
+            rotation: { x: 0, y: Math.PI / 2, z: 0 },
+            parts: [{
+              shape: 'box',
+              dimensions: { width: 4, height: counterHeight, depth: counterDepth },
+              position: { x: 0, y: 0, z: 0 },
+              color: cabinetColor,
+              material: { roughness: 0.7, metalness: 0.1 }
+            }]
+          },
+          {
+            name: 'lower_cabinet_right_2',
+            position: { x: rightWallCabinetX, y: lowerCabinetY, z: 0 },
+            scale: 1,
+            rotation: { x: 0, y: Math.PI / 2, z: 0 },
+            parts: [{
+              shape: 'box',
+              dimensions: { width: 4, height: counterHeight, depth: counterDepth },
+              position: { x: 0, y: 0, z: 0 },
+              color: cabinetColor,
+              material: { roughness: 0.7, metalness: 0.1 }
+            }]
+          }
+        );
+        
+        // === COUNTERTOPS ===
+        // Back wall countertop
+        data.structures.scanned_objects.push({
+          name: 'countertop_back',
+          position: { x: -5.5, y: counterTopY, z: backWallCabinetZ },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 8, height: 0.15, depth: counterDepth },
+            position: { x: 0, y: 0, z: 0 },
+            color: counterColor,
+            material: { roughness: 0.3, metalness: 0.0 }
+          }]
+        });
+        
+        // Right wall countertop (L-shape continuation)
+        data.structures.scanned_objects.push({
+          name: 'countertop_right',
+          position: { x: rightWallCabinetX, y: counterTopY, z: -2.5 },
+          scale: 1,
+          rotation: { x: 0, y: Math.PI / 2, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 8, height: 0.15, depth: counterDepth },
+            position: { x: 0, y: 0, z: 0 },
+            color: counterColor,
+            material: { roughness: 0.3, metalness: 0.0 }
+          }]
+        });
+        
+        // Extended left counter/bar (shallower, extends into room)
+        data.structures.scanned_objects.push({
+          name: 'counter_left_extended',
+          position: { x: -8, y: counterTopY, z: 5 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 6, height: 0.15, depth: 1.5 },
+            position: { x: 0, y: 0, z: 0 },
+            color: counterColor,
+            material: { roughness: 0.3, metalness: 0.0 }
+          }]
+        });
+        
+        // === STAINLESS STEEL BACKSPLASH ===
+        const backsplashHeight = 1.5;
+        const backsplashY = counterTopY + backsplashHeight / 2;
+        
+        // Backsplash on back wall (behind stove, with diagonal cut on left)
+        data.structures.scanned_objects.push({
+          name: 'backsplash_back',
+          position: { x: -3, y: backsplashY, z: -roomSize / 2 + 0.1 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 4, height: backsplashHeight, depth: 0.1 },
+            position: { x: 0, y: 0, z: 0 },
+            color: backsplashColor,
+            material: { roughness: 0.2, metalness: 0.6 }
+          }]
+        });
+        
+        // Backsplash on right wall (behind sink)
+        data.structures.scanned_objects.push({
+          name: 'backsplash_right',
+          position: { x: roomSize / 2 - 0.1, y: backsplashY, z: 0 },
+          scale: 1,
+          rotation: { x: 0, y: Math.PI / 2, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 4, height: backsplashHeight, depth: 0.1 },
+            position: { x: 0, y: 0, z: 0 },
+            color: backsplashColor,
+            material: { roughness: 0.2, metalness: 0.6 }
+          }]
+        });
+        
+        // === EXHAUST VENT (circular, in backsplash above stove) ===
+        data.structures.scanned_objects.push({
+          name: 'exhaust_vent',
+          position: { x: -3, y: backsplashY + 0.3, z: -roomSize / 2 + 0.15 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'cylinder',
+            dimensions: { radius: 0.4, height: 0.1 },
+            position: { x: 0, y: 0, z: 0 },
+            color: backsplashColor,
+            material: { roughness: 0.3, metalness: 0.7 }
+          }]
+        });
+        
+        // === WHITE ELECTRIC STOVE (on back wall counter) ===
+        data.structures.scanned_objects.push({
+          name: 'stove',
+          position: { x: -3, y: counterTopY, z: -roomSize / 2 + counterDepth / 2 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 3.5, height: 0.5, depth: counterDepth - 0.1 },
+            position: { x: 0, y: 0, z: 0 },
+            color: stoveColor,
+            material: { roughness: 0.6, metalness: 0.3 }
+          }]
+        });
+        
+        // === STAINLESS STEEL SINK (on right wall counter) ===
+        data.structures.scanned_objects.push({
+          name: 'sink',
+          position: { x: roomSize / 2 - counterDepth / 2, y: counterTopY, z: 0 },
+          scale: 1,
+          rotation: { x: 0, y: Math.PI / 2, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 2, height: 0.4, depth: 1.5 },
+            position: { x: 0, y: 0, z: 0 },
+            color: sinkColor,
+            material: { roughness: 0.1, metalness: 0.8 }
+          }]
+        });
+        
+        // === UPPER CABINETS ===
+        const upperCabinetY = upperCabinetBottom + upperCabinetHeight / 2;
+        
+        // Upper cabinets on back wall (three, like reference)
+        data.structures.scanned_objects.push(
+          {
+            name: 'upper_cabinet_1',
+            position: { x: -8, y: upperCabinetY, z: -roomSize / 2 + 0.3 },
+            scale: 1,
+            rotation: { x: 0, y: 0, z: 0 },
+            parts: [{
+              shape: 'box',
+              dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 },
+              position: { x: 0, y: 0, z: 0 },
+              color: cabinetColor,
+              material: { roughness: 0.7, metalness: 0.1 }
+            }]
+          },
+          {
+            name: 'upper_cabinet_2',
+            position: { x: -3, y: upperCabinetY, z: -roomSize / 2 + 0.3 },
+            scale: 1,
+            rotation: { x: 0, y: 0, z: 0 },
+            parts: [{
+              shape: 'box',
+              dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 },
+              position: { x: 0, y: 0, z: 0 },
+              color: cabinetColor,
+              material: { roughness: 0.7, metalness: 0.1 }
+            }]
+          },
+          {
+            name: 'upper_cabinet_3',
+            position: { x: 2, y: upperCabinetY, z: -roomSize / 2 + 0.3 },
+            scale: 1,
+            rotation: { x: 0, y: 0, z: 0 },
+            parts: [{
+              shape: 'box',
+              dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 },
+              position: { x: 0, y: 0, z: 0 },
+              color: cabinetColor,
+              material: { roughness: 0.7, metalness: 0.1 }
+            }]
+          }
+        );
+        
+        // === WHITE REFRIGERATOR (at end of right wall) ===
+        const refrigeratorY = (counterHeight + 2) / 2;
+        data.structures.scanned_objects.push({
+          name: 'refrigerator',
+          position: { x: roomSize / 2 - 2, y: refrigeratorY, z: 5 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 2.5, height: counterHeight + 2, depth: 2.5 },
+            position: { x: 0, y: 0, z: 0 },
+            color: refrigeratorColor,
+            material: { roughness: 0.8, metalness: 0.2 }
+          }]
+        });
+        
+        // === CEILING LIGHT (rectangular surface-mounted fluorescent) ===
+        data.structures.scanned_objects.push({
+          name: 'ceiling_light',
+          position: { x: 0, y: wallHeight - 0.15, z: 0 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 6, height: 0.3, depth: 2 },
+            position: { x: 0, y: 0, z: 0 },
+            color: 0xFFFFFF,
+            material: { roughness: 0.1, metalness: 0.0, emissive: 0xFFFFFF, emissiveIntensity: 0.8 }
+          }]
+        });
+        
+        // === WHITE PVC PIPES (near ceiling, left wall) ===
+        data.structures.scanned_objects.push({
+          name: 'pvc_pipe',
+          position: { x: -roomSize / 2 + 0.5, y: wallHeight - 1, z: -8 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: Math.PI / 2 },
+          parts: [{
+            shape: 'cylinder',
+            dimensions: { radius: 0.15, height: 4 },
+            position: { x: 0, y: 0, z: 0 },
+            color: 0xFFFFFF,
+            material: { roughness: 0.6, metalness: 0.0 }
+          }]
+        });
+        
+        // === OPTIONAL DETAILS: Coffee maker, laptop on left counter ===
+        // Coffee maker (black, on left counter)
+        data.structures.scanned_objects.push({
+          name: 'coffee_maker',
+          position: { x: -9, y: counterTopY + 0.3, z: 5 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 0.8, height: 0.6, depth: 0.6 },
+            position: { x: 0, y: 0, z: 0 },
+            color: 0x000000,
+            material: { roughness: 0.7, metalness: 0.2 }
+          }]
+        });
+        
+        // Laptop (on left counter)
+        data.structures.scanned_objects.push({
+          name: 'laptop',
+          position: { x: -7, y: counterTopY + 0.1, z: 5 },
+          scale: 1,
+          rotation: { x: 0, y: 0, z: 0 },
+          parts: [{
+            shape: 'box',
+            dimensions: { width: 1.2, height: 0.05, depth: 0.8 },
+            position: { x: 0, y: 0, z: 0 },
+            color: 0x1a1a1a,
+            material: { roughness: 0.5, metalness: 0.3 }
+          }]
+        });
+        
+        console.log('[SCAN] ✅ Detailed kitchen created with L-shaped layout, cabinets, countertops, stove, sink, backsplash with vent, refrigerator, ceiling light, and details');
+      } else {
+        // Basic room (no kitchen) - no windows for kitchen
+        console.log('[SCAN] ✅ Basic room created with walls, floor, and ceiling');
+      }
     }
     
     // Set color palette from AI-generated palette if available
