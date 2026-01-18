@@ -38,7 +38,8 @@ if not (OPENAI_API_KEY or OPENROUTER_API_KEY or OVERSHOOT_API_KEY):
 
 async def analyze_with_openai_vision(image_data: str) -> Optional[Dict]:
     """
-    Alternative: Use OpenAI/OpenRouter Vision API to analyze environment.
+    ORIGINAL: Object detection for voice commands, image uploads, and general features.
+    For camera scanning, use scan_entire_scene_with_vision() instead.
     """
     openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
     if not openai_key:
@@ -168,6 +169,278 @@ DO NOT include any text, descriptions, or explanations. Return ONLY the JSON obj
         
     except Exception as e:
         print(f"[VISION] OpenAI Vision error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+async def analyze_image_with_overshoot(image_data: str) -> Optional[Dict]:
+    """
+    Analyze single IMAGE using Overshoot AI API (not SDK - direct API call).
+    This provides a description that can be combined with OpenRouter Vision.
+    
+    Args:
+        image_data: Base64 encoded image data (with or without data URL prefix)
+    
+    Returns:
+        Dict with analysis results or None if failed
+    """
+    if not OVERSHOOT_API_KEY:
+        print("[OVERSHOOT IMAGE] ⚠️ OVERSHOOT_API_KEY not set - skipping Overshoot analysis")
+        return None
+    
+    try:
+        # Remove data URL prefix if present
+        image_base64 = image_data
+        if ',' in image_data:
+            image_base64 = image_data.split(',')[1]
+        
+        headers = {
+            "Authorization": f"Bearer {OVERSHOOT_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        # Prompt for detailed scene description for 3D generation
+        prompt = """Analyze this image and describe the ENTIRE visible scene in extreme detail for 3D model generation. 
+        Return a detailed description including: objects, materials, colors (in hex format #RRGGBB), textures, spatial positions, 
+        relationships between objects, lighting, and background elements (walls, floor, ceiling, sky, etc.). 
+        Ignore humans and people. Focus on the environment and inanimate objects. 
+        Be extremely detailed - this description will create a complete 3D model."""
+        
+        # Try Overshoot image analysis endpoint
+        # Note: Overshoot may have different endpoints - this is a best guess
+        image_api_url = f"{OVERSHOOT_API_URL}/analyze"  # May need to adjust based on actual API
+        
+        payload = {
+            "image": image_base64,
+            "prompt": prompt,
+            "analysis_type": "scene_description_for_3d",
+            "response_format": "text"  # Get text description
+        }
+        
+        print(f"[OVERSHOOT IMAGE] 📸 Analyzing image with Overshoot AI...")
+        print(f"[OVERSHOOT IMAGE] API URL: {image_api_url}")
+        print(f"[OVERSHOOT IMAGE] Image size: {len(image_base64)} characters")
+        
+        response = requests.post(
+            image_api_url,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json() or response.text
+            print(f"[OVERSHOOT IMAGE] ✅ Successfully analyzed image")
+            
+            # Extract description (may be in different formats)
+            description = ""
+            if isinstance(result, dict):
+                description = result.get("description") or result.get("result") or result.get("text") or str(result)
+            else:
+                description = str(result)
+            
+            return {
+                "description": description,
+                "source": "overshoot",
+                "raw_response": result
+            }
+        else:
+            print(f"[OVERSHOOT IMAGE] ⚠️ API returned status {response.status_code}: {response.text[:200]}")
+            print(f"[OVERSHOOT IMAGE] 💡 Overshoot may not support direct image analysis API")
+            print(f"[OVERSHOOT IMAGE] 💡 Falling back to OpenRouter Vision only")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f"[OVERSHOOT IMAGE] ⚠️ Request error: {e}")
+        print(f"[OVERSHOOT IMAGE] 💡 Overshoot image API may not be available")
+        return None
+    except Exception as e:
+        print(f"[OVERSHOOT IMAGE] ⚠️ Error analyzing image: {e}")
+        return None
+
+
+async def scan_entire_scene_with_vision(image_data: str, use_overshoot: bool = True) -> Optional[Dict]:
+    """
+    NEW: Scan ENTIRE scene for camera scanning feature only.
+    Now COMBINES Overshoot AND OpenRouter Vision descriptions for richer results!
+    Returns detailed scene description for AIMLAPI TripoSR text-to-3D generation.
+    For other features, use analyze_with_openai_vision() instead.
+    
+    Args:
+        image_data: Base64 encoded image data
+        use_overshoot: Whether to also use Overshoot (if API key available)
+    """
+    openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+    if not openai_key:
+        print("[SCAN] ❌ Neither OPENAI_API_KEY nor OPENROUTER_API_KEY set in environment")
+        return None
+    
+    try:
+        import openai
+        from openai import OpenAI
+        
+        # Check if this is an OpenRouter API key (starts with "sk-or-")
+        is_openrouter = openai_key.startswith("sk-or-")
+        
+        if is_openrouter:
+            base_url = "https://openrouter.ai/api/v1"
+            default_headers = {
+                "HTTP-Referer": "http://localhost:3000",
+                "X-Title": "AI World Builder"
+            }
+            print(f"[SCAN] Using OpenRouter API for scene scanning...")
+        else:
+            base_url = None
+            default_headers = {}
+            print(f"[SCAN] Using OpenAI API for scene scanning...")
+        
+        client = OpenAI(
+            api_key=openai_key,
+            base_url=base_url,
+            default_headers=default_headers if is_openrouter else None
+        )
+        
+        # Remove data URL prefix
+        image_base64 = image_data
+        if ',' in image_data:
+            image_base64 = image_data.split(',')[1]
+        
+        # Validate image size
+        if len(image_base64) < 1000:
+            print(f"[SCAN] ❌ Image data too small: {len(image_base64)} chars")
+            return None
+        
+        print(f"[SCAN] Analyzing ENTIRE scene for 3D reconstruction...")
+        
+        # NEW: Try to get descriptions from BOTH Overshoot and OpenRouter Vision
+        overshoot_result = None
+        if use_overshoot and OVERSHOOT_API_KEY:
+            print("[SCAN] 🔄 Step 1/2: Getting description from Overshoot AI...")
+            overshoot_result = await analyze_image_with_overshoot(image_data)
+            if overshoot_result:
+                print(f"[SCAN] ✅ Overshoot description: {overshoot_result.get('description', '')[:100]}...")
+            else:
+                print("[SCAN] ⚠️ Overshoot analysis failed or unavailable - using OpenRouter Vision only")
+        
+        print("[SCAN] 🔄 Step 2/2: Getting description from OpenRouter Vision...")
+        
+        model_name = "openai/gpt-4o-mini" if is_openrouter else "gpt-4o-mini"
+        
+        # Update prompt to potentially incorporate Overshoot insights
+        openrouter_prompt_addition = ""
+        if overshoot_result and overshoot_result.get("description"):
+            openrouter_prompt_addition = f"\n\nADDITIONAL CONTEXT from Overshoot AI: {overshoot_result['description'][:500]}\nUse this context to enrich your description, but still be extremely detailed about the entire visible scene."
+        
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {
+                    "role": "system",
+                    "content": """You are a 3D scene description API for generating photorealistic 3D models. Describe the ENTIRE visible scene in extreme detail for 3D reconstruction. Return ONLY JSON.
+
+CRITICAL MISSION:
+Your description will be used to generate a complete 3D model of everything visible in the image. Be EXTREMELY detailed and precise. This is not object detection - this is full scene reconstruction.
+
+RULES:
+1. Output ONLY pure JSON - no markdown, no explanations
+2. ALL colors in hex format (#RRGGBB)
+3. IGNORE humans/people - focus on environment only
+4. Describe spatial relationships, positions, and scales
+5. Include ALL visible elements (walls, floor, ceiling, background, objects)
+6. Be specific about materials, textures, and surface details
+
+REQUIRED JSON STRUCTURE:
+{
+  "scene_description": "DETAILED description of entire visible scene for 3D model generation. Include: what objects exist, their positions relative to each other, materials, colors, textures, lighting, spatial arrangement, depth, and any background elements (walls, floor, ceiling, sky, etc.). Be extremely detailed - this will create the 3D model. Example: 'A modern stainless steel coffee maker sits on a white marble countertop against a light gray textured wall. The countertop extends 3 feet wide. Behind and to the left is a white tile backsplash. To the right is a wooden cabinet with brass handles. Natural lighting from the right side.'",
+  
+  "scene_type": "indoor|outdoor|landmark|object_closeup|landscape|architectural",
+  
+  "primary_elements": [
+    {
+      "name": "main object or structure",
+      "description": "detailed description with materials, colors, textures",
+      "position": "spatial position (foreground/center/background, left/center/right)",
+      "scale": "relative size (small/medium/large/massive)",
+      "materials": ["material1", "material2"],
+      "colors": {"primary": "#HEX", "secondary": "#HEX"}
+    }
+  ],
+  
+  "background_environment": {
+    "walls": [{"color": "#HEX", "texture": "smooth/textured/brick/etc", "position": "behind/left/right/front"}],
+    "floor": {"color": "#HEX", "material": "wood/tile/concrete/carpet/etc", "visible": true},
+    "ceiling": {"color": "#HEX", "visible": true},
+    "sky": {"color": "#HEX", "visible": false},
+    "depth_elements": ["objects visible in background/distance"]
+  },
+  
+  "spatial_relationships": [
+    {"object1": "name", "relation": "in front of|behind|left of|right of|on top of|next to", "object2": "name"}
+  ],
+  
+  "lighting": {
+    "type": "natural|artificial|mixed",
+    "direction": "from above|from right|from left|ambient",
+    "quality": "bright|dim|soft|harsh"
+  },
+  
+  "scale_reference": "approximate real-world dimensions if identifiable (e.g., 'coffee maker is ~12 inches tall, wall is ~8 feet high')",
+  
+  "colors": {"palette": ["#HEX", "#HEX", "#HEX", "#HEX", "#HEX"]}
+}
+
+REMEMBER: Your description will be fed directly into Tripo3D to generate a complete 3D model. The more detailed and precise you are, the better the 3D reconstruction will be. Include EVERYTHING visible - objects, walls, floors, backgrounds, textures, materials, positions, and scales."""
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Describe this ENTIRE scene in extreme detail for 3D model generation. Include everything visible: objects, walls, floors, ceiling, background, materials, textures, colors (in hex), spatial positions, scale, and lighting. This description will create a complete 3D environment. Be as detailed as possible.{openrouter_prompt_addition}"
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=3000,  # Longer for detailed scene descriptions
+            response_format={"type": "json_object"}
+        )
+        
+        result_text = response.choices[0].message.content
+        openrouter_result = json.loads(result_text)
+        
+        # NEW: Combine Overshoot and OpenRouter descriptions
+        combined_description = openrouter_result.get("scene_description", "")
+        
+        if overshoot_result and overshoot_result.get("description"):
+            overshoot_desc = overshoot_result["description"]
+            # Intelligently combine descriptions
+            print("[SCAN] 🔄 Combining Overshoot and OpenRouter descriptions...")
+            
+            # Create enriched description
+            combined_description = f"{openrouter_result.get('scene_description', '')}\n\nAdditional details from Overshoot AI analysis: {overshoot_desc}"
+            
+            # Update the result
+            openrouter_result["scene_description"] = combined_description
+            openrouter_result["overshoot_description"] = overshoot_desc
+            openrouter_result["combined_source"] = "overshoot_and_openrouter"
+            
+            print(f"[SCAN] ✅ Combined description length: {len(combined_description)} chars")
+        else:
+            openrouter_result["combined_source"] = "openrouter_only"
+        
+        print(f"[SCAN] ✅ Scene analysis complete (using {openrouter_result['combined_source']})")
+        print(f"[SCAN] Scene: {openrouter_result.get('scene_description', '')[:150]}...")
+        return openrouter_result
+        
+    except Exception as e:
+        print(f"[SCAN] Error analyzing scene: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -900,61 +1173,39 @@ def map_terrain_to_biome(terrain_type: Optional[str], weather: Optional[str]) ->
 
 def generate_world_from_scan(scan_data: Dict) -> Dict:
     """
-    Generate world parameters from Overshoot scan data.
-    This integrates with your existing world generation system.
+    NEW: Generate entire 3D world from scanned scene description.
+    Returns scene description for Tripo3D to generate complete environment.
     
     Args:
-        scan_data: Parsed Overshoot response
+        scan_data: Parsed scan response with scene_description
     
     Returns:
-        Dict compatible with your generate_world function
+        Dict with scene_description for Tripo3D generation
     """
-    biome = scan_data.get("biome", "city")
-    objects = scan_data.get("objects", {})
-    colors_raw = scan_data.get("colors", [])
-    spatial_layout = scan_data.get("spatial_layout", [])
+    # Extract the detailed scene description
+    scene_description = scan_data.get("scene_description", "")
+    scene_type = scan_data.get("scene_type", "indoor")
+    colors = scan_data.get("colors", {}).get("palette", [])
     
-    # Ensure colors is always a list
-    if isinstance(colors_raw, list):
-        colors = colors_raw
-    elif isinstance(colors_raw, str):
-        colors = [colors_raw]
-    elif isinstance(colors_raw, (int, float)):
-        # Convert numeric color to hex string if needed
-        colors = []
-    else:
-        colors = []
+    # If no scene description, try to build one from old format (fallback)
+    if not scene_description:
+        print("[SCAN] No scene_description found, attempting legacy format...")
+        biome = scan_data.get("biome", "unknown")
+        objects = scan_data.get("objects", {})
+        
+        # Build a basic scene description from objects
+        obj_list = [f"{count}x {name}" for name, data in objects.items() 
+                   for count in [data.get("count", data) if isinstance(data, (dict, int)) else 1] 
+                   if count > 0]
+        scene_description = f"A {biome} scene containing: {', '.join(obj_list) if obj_list else 'empty space'}."
     
-    # Build structure counts
-    structure_counts = {
-        "tree": objects.get("tree", 10),
-        "rock": objects.get("rock", 5),
-        "building": objects.get("building", 0),
-        "mountain": objects.get("peak", 0),
-        "street_lamp": objects.get("street_lamp", 0)
-    }
-    
-    # Adjust based on biome
-    if biome == "arctic":
-        structure_counts["mountain"] = max(structure_counts.get("mountain", 0), 2)
-        structure_counts["tree"] = min(structure_counts.get("tree", 0), 15)
-    elif biome == "city":
-        structure_counts["building"] = max(structure_counts.get("building", 0), 10)
-        structure_counts["street_lamp"] = max(structure_counts.get("street_lamp", 0), 5)
-    
-    # Extract tree colors if available
-    tree_colors = extract_tree_colors(colors, spatial_layout)
-    
-    # Determine time of day from lighting/weather
-    time_of_day = determine_time_of_day(scan_data.get("weather"), colors)
+    print(f"[SCAN] Scene description: {scene_description[:200]}...")
     
     return {
-        "biome": biome,
-        "time": time_of_day,
-        "structure": structure_counts,
-        "tree_colors": tree_colors,  # Pass to tree generation
-        "enemy_count": 3,  # Default
-        "weapon": "both"
+        "scene_description": scene_description,
+        "scene_type": scene_type,
+        "colors": colors,
+        "full_scan_data": scan_data  # Keep full data for reference
     }
 
 

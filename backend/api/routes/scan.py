@@ -1,15 +1,24 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Dict, Optional
 import base64
 import json
+import os
+import tempfile
+import time
+from pathlib import Path
 from world.overshoot_integration import (
-    analyze_with_openai_vision,  # For single image/frame analysis
+    analyze_with_openai_vision,  # For single image/frame analysis (OTHER FEATURES)
+    scan_entire_scene_with_vision,  # For camera scanning ONLY (SCAN FEATURE)
     analyze_video_with_overshoot,  # For video analysis
     generate_world_from_scan
 )
 
 router = APIRouter()
+
+# Temporary image storage (in-memory, cleared on restart)
+_temp_images: Dict[str, tuple] = {}  # {image_id: (image_data, timestamp)}
 
 class ScanRequest(BaseModel):
     image_data: str
@@ -17,52 +26,207 @@ class ScanRequest(BaseModel):
 class VideoRequest(BaseModel):
     video_data: str  # Base64 encoded video
 
+@router.get("/temp-image/{image_id}")
+async def get_temp_image(image_id: str):
+    """
+    Temporary endpoint to serve images for TripoSR.
+    Images are stored in-memory and expire after 5 minutes.
+    """
+    if image_id not in _temp_images:
+        raise HTTPException(status_code=404, detail="Image not found or expired")
+    
+    image_data, timestamp = _temp_images[image_id]
+    
+    # Check if expired (5 minutes)
+    if time.time() - timestamp > 300:
+        del _temp_images[image_id]
+        raise HTTPException(status_code=404, detail="Image expired")
+    
+    # Decode base64
+    if ',' in image_data:
+        image_data = image_data.split(',')[1]
+    
+    image_bytes = base64.b64decode(image_data)
+    
+    # Detect content type from base64 prefix
+    content_type = "image/jpeg"
+    if image_data.startswith("iVBORw0KGgo"):  # PNG
+        content_type = "image/png"
+    elif image_data.startswith("/9j/"):  # JPEG
+        content_type = "image/jpeg"
+    
+    return Response(content=image_bytes, media_type=content_type)
+
+
 @router.post("/scan-world")
 async def scan_world(request: ScanRequest) -> Dict:
     """
-    Analyze an IMAGE/FRAME using OpenAI Vision API.
-    Frontend sends frames, backend sends to OpenAI.
+    NEW: Analyze ENTIRE scene and generate complete 3D world from it.
+    Uses OpenAI Vision to describe scene → TripoSR (via AIMLAPI) to generate full 3D model.
     """
+    print(f"\n{'='*60}", flush=True)
+    print(f"[SCAN] =============================================================", flush=True)
+    print(f"[SCAN] /scan-world ENDPOINT CALLED!", flush=True)
+    print(f"[SCAN] =============================================================\n", flush=True)
+    
     try:
-        print(f"[OPENAI] Received frame data length: {len(request.image_data)}")
+        print(f"[SCAN] Received request!", flush=True)
+        print(f"[SCAN] Image data length: {len(request.image_data)}", flush=True)
         
         # Validate image data
         if not request.image_data or len(request.image_data) < 100:
             raise HTTPException(status_code=400, detail="Invalid image data provided")
         
-        # Use OpenAI Vision for frame analysis
-        print("[OPENAI] Analyzing frame with OpenAI Vision...")
-        scan_result = await analyze_with_openai_vision(request.image_data)
+        # Step 1: Use scan-specific vision function to describe the ENTIRE scene
+        # NEW: Now uses BOTH Overshoot AND OpenRouter Vision for richer descriptions!
+        print("[SCAN] Analyzing entire scene for 3D generation...", flush=True)
+        print("[SCAN] Using BOTH Overshoot AI and OpenRouter Vision for richer descriptions!", flush=True)
+        scan_result = await scan_entire_scene_with_vision(request.image_data, use_overshoot=True)
         
         if not scan_result:
             raise HTTPException(
                 status_code=500, 
-                detail="Failed to analyze frame. Please ensure OPENAI_API_KEY is set in backend/.env file."
+                detail="Failed to analyze scene. Please ensure OPENAI_API_KEY is set in backend/.env file."
             )
         
-        print(f"[OPENAI] Vision analysis result: {scan_result}")
+        scene_description = scan_result.get("scene_description", "")
+        if not scene_description:
+            print(f"[SCAN] WARNING: No scene_description in scan_result!", flush=True)
+            print(f"[SCAN] scan_result keys: {list(scan_result.keys())}", flush=True)
+            print(f"[SCAN] scan_result: {str(scan_result)[:500]}", flush=True)
+            # Try to build description from other fields
+            scene_description = f"A {scan_result.get('scene_type', 'indoor')} scene with {len(scan_result.get('primary_elements', []))} primary elements."
         
-        # Generate world parameters from scan data
-        print("[OPENAI] Generating world from analysis...")
-        world_data = generate_world_from_scan(scan_result)
+        print(f"[SCAN] Scene analyzed: {scene_description[:150]}...", flush=True)
+        print(f"[SCAN] Full description length: {len(scene_description)} characters", flush=True)
         
-        if not world_data:
-            raise HTTPException(
-                status_code=500, 
-                detail="Failed to generate world from analysis"
-            )
+        # Step 2: Host image temporarily (for TripoSR - it needs a URL, not base64)
+        print("[SCAN] Hosting image temporarily for TripoSR...", flush=True)
+        import hashlib
+        import time as time_module
         
-        print(f"[OPENAI] World generated: {world_data.get('world', {}).get('biome', 'unknown')}")
+        # Generate unique image ID
+        image_base64_clean = request.image_data.split(',')[1] if ',' in request.image_data else request.image_data
+        image_hash = hashlib.md5(image_base64_clean.encode()).hexdigest()[:12]
+        image_id = f"{image_hash}_{int(time_module.time())}"
         
-        return world_data
+        # Store image in memory (expires after 5 minutes)
+        _temp_images[image_id] = (request.image_data, time_module.time())
+        
+        # Generate image URL
+        backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+        image_url = f"{backend_url}/api/temp-image/{image_id}"
+        
+        print(f"[SCAN] Image hosted at: {image_url[:80]}...", flush=True)
+        
+        # Step 3: Use TripoSR to generate 3D model - NOW SUPPORTS TEXT-TO-3D!
+        print("[SCAN] Generating complete 3D world using TripoSR...", flush=True)
+        print(f"[SCAN] Scene description: {scene_description[:100]}...", flush=True)
+        from models.generators import generate_3d_model_triposr
+        
+        # NEW: Use text-to-3D mode with scene description (NO IMAGE URL NEEDED!)
+        # This solves the localhost issue - we can use the description from OpenRouter Vision!
+        print("[SCAN] Using TEXT-TO-3D mode with scene description (no image URL needed!)", flush=True)
+        print(f"[SCAN] Sending to TripoSR:", flush=True)
+        print(f"[SCAN]    - Prompt length: {len(scene_description)} chars", flush=True)
+        print(f"[SCAN]    - Prompt preview: {scene_description[:200]}...", flush=True)
+        print(f"[SCAN]    - AIML_API_KEY: {'SET' if os.getenv('AIML_API_KEY') or os.getenv('TRIPOSR_API_KEY') or os.getenv('AIMLAPI_KEY') else 'NOT SET'}", flush=True)
+        
+        model_url = await generate_3d_model_triposr(
+            prompt=scene_description,  # Use description from OpenRouter Vision - text-to-3D!
+            image_data=request.image_data,  # Optional: can use as reference if ImgBB works
+            image_url=image_url,  # Optional: can use as reference if publicly accessible
+            object_name="scanned_environment"
+        )
+        
+        print(f"[SCAN] TripoSR returned: {model_url if model_url else 'None (generation failed)'}", flush=True)
+        
+        if not model_url:
+            # Check if API key is set
+            api_key = os.getenv("AIML_API_KEY") or os.getenv("TRIPOSR_API_KEY") or os.getenv("AIMLAPI_KEY")
+            api_key_status = "SET" if api_key else "NOT SET"
+            api_key_preview = f"{api_key[:10]}..." if api_key else "N/A"
+            
+            error_msg = f"TripoSR generation failed - check backend logs above for detailed error."
+            print(f"[SCAN] {error_msg}", flush=True)
+            print(f"[SCAN] Diagnosis:", flush=True)
+            print(f"[SCAN]    - API Key Status: {api_key_status}", flush=True)
+            print(f"[SCAN]    - API Key Preview: {api_key_preview}", flush=True)
+            print(f"[SCAN]    - Scene Description Length: {len(scene_description)} chars", flush=True)
+            print(f"[SCAN]    - Scene Description Preview: {scene_description[:200]}...", flush=True)
+            print(f"[SCAN] Look at TripoSR error messages ABOVE to see exact failure reason", flush=True)
+            print(f"[SCAN] Common issues:", flush=True)
+            print(f"[SCAN]    1. AIML_API_KEY not set or invalid (check backend/.env file)", flush=True)
+            print(f"[SCAN]    2. No credits in AIMLAPI account (visit https://aimlapi.com/)", flush=True)
+            print(f"[SCAN]    3. API endpoint changed or network error", flush=True)
+            print(f"[SCAN]    4. Invalid prompt format (though text-to-3D should work)", flush=True)
+            
+            # Fallback: return scan data without 3D model (new format)
+            return {
+                "world": {
+                    "type": "scan_fallback",
+                    "scene_description": scene_description,
+                    "scene_type": scan_result.get("scene_type", "indoor"),
+                    "colors": scan_result.get("colors", {}).get("palette", []),
+                    "error": error_msg
+                },
+                "model_url": None,
+                "scan_data": scan_result,
+                "error": error_msg,
+                # Keep old format for backward compatibility with frontend
+                "biome": scan_result.get("scene_type", "indoor")
+            }
+        
+        print(f"[SCAN] Complete 3D world generated: {model_url}", flush=True)
+        
+        # Step 3: Return world data with single GLB model
+        return {
+            "world": {
+                "type": "scanned_environment",
+                "scene_description": scene_description,
+                "scene_type": scan_result.get("scene_type", "indoor"),
+                "model_url": model_url,  # Single GLB for entire scene
+                "colors": scan_result.get("colors", {}).get("palette", []),
+                "lighting": scan_result.get("lighting", {}),
+                "scale_reference": scan_result.get("scale_reference", "")
+            },
+            "structures": {
+                "scene_model": {
+                    "type": "glb_model",
+                    "model_url": model_url,
+                    "position": {"x": 0, "y": 0, "z": 0},  # Center of world
+                    "scale": 1.0,
+                    "rotation": 0
+                }
+            },
+            "spawn_point": {"x": 0, "y": 1, "z": 10},  # Spawn in front of scene
+            "scan_data": scan_result
+        }
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[OPENAI] Error: {str(e)}")
+        print(f"[SCAN] CRITICAL ERROR in scan_world endpoint: {str(e)}", flush=True)
+        print(f"[SCAN] Error type: {type(e).__name__}", flush=True)
         import traceback
+        print(f"[SCAN] Full traceback:", flush=True)
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Frame analysis failed: {str(e)}")
+        
+        # Return fallback response in NEW format (with world key)
+        print(f"[SCAN] Returning fallback response (new format with world key)", flush=True)
+        return {
+            "world": {
+                "type": "scan_fallback",
+                "scene_description": "",
+                "scene_type": "indoor",
+                "colors": {"palette": []},
+                "error": f"Scan failed: {str(e)}"
+            },
+            "model_url": None,
+            "error": f"Scene scan failed: {str(e)}",
+            # Include biome for backward compatibility
+            "biome": "room"
+        }
 
 
 @router.post("/stream-video")

@@ -1375,9 +1375,101 @@ const VoiceWorldBuilder = () => {
   // Create scanned objects (coffee maker, paper towel, etc.)
   const createScannedObject = (objData) => {
     const group = new THREE.Group();
-    const { parts, position, scale, rotation, name } = objData;
+    const { parts, position, scale, rotation, name, type, model_url } = objData;
     
-    if (parts && Array.isArray(parts)) {
+    // Check if this is a GLB model from Tripo3D (Priority 1)
+    if (type === 'glb_model' && model_url) {
+      console.log(`[GLB] Loading Tripo3D model for '${name}': ${model_url}`);
+      
+      // Create placeholder box while loading
+      const placeholderGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+      const placeholderMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0x4A90E2,
+        transparent: true,
+        opacity: 0.5,
+        wireframe: true
+      });
+      const placeholder = new THREE.Mesh(placeholderGeometry, placeholderMaterial);
+      placeholder.position.y = 0.25;
+      group.add(placeholder);
+      
+      // Mark group as loading
+      group.userData.isLoading = true;
+      group.userData.modelUrl = model_url;
+      
+      // Load GLB model asynchronously
+      const loader = new GLTFLoader();
+      loader.load(
+        model_url,
+        (gltf) => {
+          // Success! Replace placeholder with actual model
+          console.log(`[GLB] ✅ Model loaded successfully for '${name}'`);
+          
+          // Remove placeholder
+          group.remove(placeholder);
+          
+          // Add loaded model
+          const model = gltf.scene;
+          
+          // Enable shadows for all meshes
+          model.traverse((child) => {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+          
+          // Scale model to reasonable size (Tripo3D models vary in size)
+          const bbox = new THREE.Box3().setFromObject(model);
+          const size = bbox.getSize(new THREE.Vector3());
+          const maxDim = Math.max(size.x, size.y, size.z);
+          
+          // Scale to approximately 1-2 units max dimension
+          if (maxDim > 0) {
+            const targetSize = 1.5;
+            const scaleAdjust = targetSize / maxDim;
+            model.scale.setScalar(scaleAdjust);
+          }
+          
+          // Center the model at origin
+          const center = bbox.getCenter(new THREE.Vector3());
+          model.position.sub(center.multiplyScalar(model.scale.x));
+          
+          // Ensure model sits on ground (y=0)
+          const newBbox = new THREE.Box3().setFromObject(model);
+          const minY = newBbox.min.y;
+          model.position.y -= minY;
+          
+          group.add(model);
+          group.userData.isLoading = false;
+          group.userData.modelLoaded = true;
+        },
+        (progress) => {
+          // Loading progress
+          if (progress.total > 0) {
+            const percent = (progress.loaded / progress.total * 100).toFixed(0);
+            if (percent % 25 === 0) {  // Log every 25%
+              console.log(`[GLB] Loading '${name}': ${percent}%`);
+            }
+          }
+        },
+        (error) => {
+          // Error loading model - fall back to placeholder
+          console.error(`[GLB] ❌ Failed to load model for '${name}':`, error);
+          console.log(`[GLB] Keeping placeholder box for '${name}'`);
+          
+          // Make placeholder solid and colored
+          placeholderMaterial.opacity = 1.0;
+          placeholderMaterial.wireframe = false;
+          placeholderMaterial.color.setHex(0x808080);
+          
+          group.userData.isLoading = false;
+          group.userData.loadFailed = true;
+        }
+      );
+    }
+    // Standard primitive shapes (Priority 2/3)
+    else if (parts && Array.isArray(parts)) {
       parts.forEach(part => {
         let geometry;
         let partColor = part.color || '#808080';
@@ -1428,7 +1520,7 @@ const VoiceWorldBuilder = () => {
         group.add(mesh);
       });
     } else {
-      // Fallback: create a simple box
+      // Fallback: create a simple box (Priority 4)
       const geometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
       const material = new THREE.MeshStandardMaterial({ color: 0x808080 });
       const mesh = new THREE.Mesh(geometry, material);
@@ -1438,7 +1530,10 @@ const VoiceWorldBuilder = () => {
     
     // Position and rotate the group
     group.position.set(position?.x || 0, position?.y || 0, position?.z || 0);
-    if (scale) group.scale.setScalar(scale);
+    if (scale && type !== 'glb_model') {
+      // Don't apply scale to GLB models (they handle their own scaling)
+      group.scale.setScalar(scale);
+    }
     if (rotation) group.rotation.y = rotation;
     
     // Add label for debugging
@@ -3337,6 +3432,8 @@ const VoiceWorldBuilder = () => {
   const overshootResultCountRef = useRef(0);
   const worldGeneratedFromScanRef = useRef(false); // Prevent multiple world generations
   const accumulatedObjectsRef = useRef({}); // Accumulate scanned objects across results
+  const processedScenesRef = useRef(new Set()); // Track processed scene descriptions (deduplication)
+  const frameCounterRef = useRef(0); // Track frame numbers for optimized processing
 
   // Main streaming function - uses Overshoot SDK directly for real-time video analysis
   const startStreamingCapture = async () => {
@@ -3348,6 +3445,8 @@ const VoiceWorldBuilder = () => {
       overshootResultCountRef.current = 0;
       worldGeneratedFromScanRef.current = false; // Allow new world generation
       accumulatedObjectsRef.current = {}; // Reset accumulated objects
+      processedScenesRef.current.clear(); // Clear processed scenes for new scan session
+      frameCounterRef.current = 0; // Reset frame counter
       
       // First, enable the UI
       setStreamingActive(true);
@@ -3357,21 +3456,22 @@ const VoiceWorldBuilder = () => {
       const vision = new RealtimeVision({
         apiUrl: OVERSHOOT_API_URL,
         apiKey: OVERSHOOT_API_KEY,
-        prompt: `Analyze this video and identify the environment. Return JSON with:
+        prompt: `Describe the ENTIRE visible scene in extreme detail for 3D model generation. Return JSON with:
 {
-  "biome": "arctic|forest|desert|city|room|default",
-  "objects": {"tree": 5, "rock": 3, "building": 2},
-  "terrain": "flat|hilly|mountainous|indoor",
-  "weather": "clear|cloudy|rainy|snowy|foggy",
-  "colors": ["#HEX1", "#HEX2", "#HEX3"]
+  "scene_description": "Detailed description of everything visible: objects, walls, floor, ceiling, background, their positions, materials, colors (hex), textures, lighting, scale. Example: 'A black coffee maker sits on a white marble countertop. Behind it is a light gray wall extending 4 feet wide. Natural light from the right. The countertop is 36 inches high.'",
+  "scene_type": "indoor|outdoor|landmark|object_closeup",
+  "primary_elements": [{"name": "object", "description": "details", "position": "center", "materials": ["material"], "colors": {"primary": "#HEX"}}],
+  "colors": {"palette": ["#HEX", "#HEX", "#HEX"]},
+  "scale_reference": "real-world dimensions if identifiable"
 }
-Focus on environment, not people. All colors must be hex format.`,
+Ignore people. Include ALL visible elements - this will create the complete 3D world.`,
         source: { type: 'camera', cameraFacing: 'environment' },
         processing: {
           clip_length_seconds: 1,
           delay_seconds: 1,
           fps: 30,
-          sampling_ratio: 0.1
+          // Optimized: Process every 30th frame = 1 frame per second (as per guide recommendation)
+          sampling_ratio: 1/30 // ~0.033 (1 frame per second at 30fps)
         },
         onResult: async (result) => {
           overshootResultCountRef.current++;
@@ -3413,94 +3513,71 @@ Focus on environment, not people. All colors must be hex format.`,
             const minResultsBeforeGenerate = 3;
             const hasEnoughResults = resultNum >= minResultsBeforeGenerate;
             
-            // If we have valid data and not playing, generate world via backend (only once)
-            if (parsed?.biome && gameState !== GameState.PLAYING && !worldGeneratedFromScanRef.current && hasEnoughResults) {
+            // NEW: Generate complete 3D world from scene description
+            // With deduplication: avoid generating duplicate scenes
+            const sceneDesc = parsed?.scene_description;
+            const sceneHash = sceneDesc ? sceneDesc.substring(0, 200).replace(/\s+/g, ' ').trim() : null;
+            const isDuplicate = sceneHash && processedScenesRef.current.has(sceneHash);
+            
+            if (sceneDesc && gameState !== GameState.PLAYING && !worldGeneratedFromScanRef.current && hasEnoughResults && !isDuplicate) {
+              // Mark this scene as processed (deduplication)
+              if (sceneHash) {
+                processedScenesRef.current.add(sceneHash);
+              }
+              
               worldGeneratedFromScanRef.current = true; // Prevent multiple generations
+              frameCounterRef.current++; // Track frame number
               
-              // Use accumulated objects instead of just this result's objects
-              const objectsToUse = { ...accumulatedObjectsRef.current };
-              console.log(`[OVERSHOOT] Generating world with biome: ${parsed.biome}`);
-              console.log(`[OVERSHOOT] Accumulated objects after ${resultNum} results:`, objectsToUse);
+              console.log(`[OVERSHOOT] 🎬 Generating complete 3D world from scene (Frame #${frameCounterRef.current})...`);
+              console.log(`[OVERSHOOT] Scene: ${sceneDesc.substring(0, 150)}...`);
               
-              // Send to backend to generate full world structure
+              // Send scene description to backend - it will use Tripo3D to generate entire scene
               try {
-                // Use accumulated objects instead of just this result's objects
-                const scannedObjects = objectsToUse;
-                const isRoom = parsed.biome === 'room' || parsed.terrain === 'indoor';
-                
-                // Collect custom/indoor objects (not trees, rocks, etc.)
-                const customObjects = [];
-                const outdoorTypes = ['tree', 'rock', 'building', 'mountain', 'peak', 'street_lamp'];
-                
-                for (const [objName, count] of Object.entries(scannedObjects)) {
-                  const objLower = objName.toLowerCase().replace(/\s+/g, '_');
-                  // Skip standard outdoor objects
-                  if (outdoorTypes.includes(objLower)) continue;
-                  // Add custom objects like "coffee maker", "paper towel", "microwave", etc.
-                  const objCount = typeof count === 'number' ? count : 1;
-                  if (objCount > 0) {
-                    customObjects.push({ name: objName.replace(/_/g, ' '), count: objCount });
-                  }
-                }
-                
-                // For room biome, use special endpoint
-                if (isRoom) {
-                  console.log(`[OVERSHOOT] 🏠 ROOM detected! Sending to generate-room endpoint`);
-                  console.log(`[OVERSHOOT] Custom objects:`, customObjects);
-                  console.log(`[OVERSHOOT] Colors:`, parsed.colors);
+                // Create a temporary image data from video frame for backend
+                const canvas = document.createElement('canvas');
+                if (videoRef.current && videoRef.current.videoWidth > 0) {
+                  canvas.width = videoRef.current.videoWidth;
+                  canvas.height = videoRef.current.videoHeight;
+                  const ctx = canvas.getContext('2d');
+                  ctx.drawImage(videoRef.current, 0, 0);
+                  const imageData = canvas.toDataURL('image/jpeg', 0.7);
                   
-                  const res = await fetch(`${API_BASE}/generate-room`, {
+                  // Send to scan-world endpoint which now generates entire scene
+                  const res = await fetch(`${API_BASE}/scan-world`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      biome: 'room',
-                      objects: scannedObjects,
-                      custom_objects: customObjects,
-                      colors: parsed.colors || [],
-                      terrain: parsed.terrain || 'indoor',
-                      weather: parsed.weather || 'clear'
+                    body: JSON.stringify({ 
+                      image_data: imageData
                     }),
                   });
                   
                   if (res.ok) {
                     const worldData = await res.json();
-                    console.log(`[OVERSHOOT] ✅ Room generated:`, worldData.world?.biome);
+                    console.log(`[OVERSHOOT] ✅ Complete 3D world generated!`);
+                    console.log(`[OVERSHOOT] Model URL:`, worldData.world?.model_url);
+                    
+                    // Check if backend returned an error (Tripo3D failure)
+                    if (worldData.error) {
+                      console.error(`[OVERSHOOT] ⚠️ Backend Error: ${worldData.error}`);
+                      console.error(`[OVERSHOOT] 💡 SOLUTION: Check your backend terminal/console for detailed Tripo3D error logs`);
+                      console.error(`[OVERSHOOT] 💡 Common causes: API timeout (>2min), rate limit, invalid API key, network error`);
+                    }
+                    
+                    if (!worldData.world?.model_url) {
+                      console.warn(`[OVERSHOOT] ⚠️ No model URL received from backend - falling back to legacy generation`);
+                      console.warn(`[OVERSHOOT] 💡 This means Tripo3D failed to generate the 3D model`);
+                      console.warn(`[OVERSHOOT] 💡 Check backend logs for detailed error message`);
+                    }
+                    
+                    // Load the complete scanned world
                     await loadWorldFromScan(worldData);
                     setGameState(GameState.PLAYING);
-            } else {
+                  } else {
                     const errText = await res.text();
-                    console.error('[OVERSHOOT] Room generation failed:', errText);
+                    console.error('[OVERSHOOT] World generation failed:', errText);
                   }
-                  return; // Don't continue to normal world generation
-                }
-                
-                // For outdoor biomes, use normal generation
-                let promptText = `create a ${parsed.biome} world`;
-                const treeCount = scannedObjects.tree || 10;
-                const rockCount = scannedObjects.rock || 5;
-                if (treeCount > 0) promptText += ` with ${treeCount} trees`;
-                if (rockCount > 0) promptText += ` and ${rockCount} rocks`;
-                promptText += ` with 3 enemies`;
-                
-                console.log(`[OVERSHOOT] Sending outdoor world to backend: "${promptText}"`);
-                
-                const res = await fetch(`${API_BASE}/generate-world`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    prompt: promptText
-                  }),
-                });
-                
-                if (res.ok) {
-                  const worldData = await res.json();
-                  console.log(`[OVERSHOOT] ✅ World generated from scan:`, worldData.world?.biome);
-                  
-                  // Now load the full world
-                  await loadWorldFromScan(worldData);
-                  setGameState(GameState.PLAYING);
                 } else {
-                  console.error('[OVERSHOOT] Backend world generation failed:', await res.text());
+                  console.warn('[OVERSHOOT] No video frame available for full scene generation');
                 }
               } catch (backendError) {
                 console.error('[OVERSHOOT] Backend error:', backendError);
@@ -3668,16 +3745,31 @@ Focus on environment, not people. All colors must be hex format.`,
             const data = await res.json();
             console.log(`[FALLBACK/OPENAI] ✅ Frame #${frameCount} analyzed - Biome: ${data.biome || 'unknown'}`);
             
+            // Check for TripoSR generation result
+            if (data.world?.model_url) {
+              console.log(`[FALLBACK/OPENAI] ✅ TripoSR model generated: ${data.world.model_url}`);
+              console.log(`[FALLBACK/OPENAI] World type: ${data.world.type}`);
+            } else if (data.error) {
+              console.error(`[FALLBACK/OPENAI] ⚠️ Backend Error: ${data.error}`);
+              console.error(`[FALLBACK/OPENAI] 💡 TripoSR generation failed - check backend logs`);
+            } else if (data.world?.type === 'scan_fallback') {
+              console.warn(`[FALLBACK/OPENAI] ⚠️ TripoSR generation failed - using fallback world`);
+              console.warn(`[FALLBACK/OPENAI] 💡 This means AIML_API_KEY or TripoSR API is not working`);
+            }
+            
             setLastScanResult({
-              biome: data.biome || 'unknown',
+              biome: data.biome || data.world?.scene_type || 'unknown',
               timestamp: new Date().toLocaleTimeString(),
               frameCount: frameCount,
               source: 'openai-fallback'
             });
             
-            if (gameState !== GameState.PLAYING && data.biome) {
+            if (gameState !== GameState.PLAYING && (data.biome || data.world)) {
               await loadWorldFromScan(data);
             }
+          } else {
+            const errorText = await res.text();
+            console.error(`[FALLBACK/OPENAI] ❌ Request failed: ${res.status} - ${errorText}`);
           }
         } catch (error) {
           console.error('[FALLBACK/OPENAI] Frame error:', error);
@@ -3686,9 +3778,10 @@ Focus on environment, not people. All colors must be hex format.`,
         isAnalyzing = false;
       };
       
-      // Capture every 2 seconds
+      // Optimized frame rate: Capture every 1 second (as per guide: 1 frame per second)
+      // This balances API costs with scene coverage
       captureFrame();
-      streamingIntervalRef.current = setInterval(captureFrame, 2000);
+      streamingIntervalRef.current = setInterval(captureFrame, 1000); // 1 second = 1 frame/sec (guide recommendation)
       
       // Store stop function
       overshootVisionRef.current = {
@@ -3743,28 +3836,15 @@ Focus on environment, not people. All colors must be hex format.`,
   };
 
   const loadWorldFromScan = async (data) => {
-    // Set color palette from AI-generated palette if available
-    if (data.world?.color_palette && data.world.color_palette.length > 0) {
-      console.log('[OVERSHOOT] Setting AI-generated color palette:', data.world.color_palette);
-      setColorPalette(data.world.color_palette);
-    }
-    
-    // Get AI-generated color assignments for structures
-    const colorAssignments = data.world?.color_assignments || {};
-    
-    // This will reuse the same loading logic from captureAndScanWorld
-    setCurrentWorld(data);
+    console.log('[SCAN] Loading scanned world...', data);
     
     const scene = sceneRef.current;
     if (!scene) {
-      console.error('[OVERSHOOT] Scene not available');
+      console.error('[SCAN] Scene not available');
       return;
     }
 
-    const biomeName = data.world?.biome || data.world?.biome_name;
-    createGround(scene, biomeName);
-
-    // Clear existing objects
+    // Clear existing world
     const objectsToRemove = [];
     scene.children.forEach((child) => {
       if (!child.isLight && !child.userData?.isSky) objectsToRemove.push(child);
@@ -3776,8 +3856,160 @@ Focus on environment, not people. All colors must be hex format.`,
     structuresRef.current = [];
     occupiedCells.clear();
 
+    // NEW: Check if this is a complete scanned environment
+    if (data.world?.type === 'scanned_environment' && data.world?.model_url) {
+      console.log('[SCAN] 🎨 Loading complete scanned 3D environment...');
+      console.log('[SCAN] Model URL:', data.world.model_url);
+      console.log('[SCAN] Scene:', data.world.scene_description?.substring(0, 100));
+      
+      // Load the single GLB model that represents the entire scanned scene
+      const loader = new GLTFLoader();
+      
+      // Create loading placeholder
+      const placeholderGeometry = new THREE.BoxGeometry(2, 2, 2);
+      const placeholderMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0x4A90E2,
+        transparent: true,
+        opacity: 0.3,
+        wireframe: true
+      });
+      const placeholder = new THREE.Mesh(placeholderGeometry, placeholderMaterial);
+      placeholder.position.set(0, 1, 0);
+      scene.add(placeholder);
+      
+      console.log('[SCAN] ⏳ Loading 3D model... (this may take 10-30 seconds)');
+      
+      loader.load(
+        data.world.model_url,
+        (gltf) => {
+          // Success! Remove placeholder and add actual scene
+          scene.remove(placeholder);
+          
+          const sceneModel = gltf.scene;
+          console.log('[SCAN] ✅ 3D scene loaded successfully!');
+          
+          // Enable shadows for all meshes
+          sceneModel.traverse((child) => {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+          
+          // Calculate bounding box for scaling and positioning
+          const bbox = new THREE.Box3().setFromObject(sceneModel);
+          const size = bbox.getSize(new THREE.Vector3());
+          const center = bbox.getCenter(new THREE.Vector3());
+          
+          console.log('[SCAN] Scene size:', size);
+          console.log('[SCAN] Scene center:', center);
+          
+          // Position scene at origin
+          sceneModel.position.set(0, 0, 0);
+          
+          // Ensure scene sits on ground (y=0)
+          const minY = bbox.min.y;
+          sceneModel.position.y -= minY;
+          
+          // Add to scene
+          scene.add(sceneModel);
+          structuresRef.current.push(sceneModel);
+          
+          console.log('[SCAN] 🎉 Complete scanned environment loaded!');
+          
+          // Set spawn point in front of the scene
+          const spawnDistance = Math.max(size.z, 5) * 1.5;  // 1.5x scene depth or 5 units min
+          const spawnPoint = {
+            x: center.x,
+            y: 1.0,
+            z: center.z + spawnDistance
+          };
+          
+          // Create player
+          const playerMesh = createPlayer(
+            { x: spawnPoint.x, z: spawnPoint.z },
+            spawnPoint.y
+          );
+          scene.add(playerMesh);
+          
+          // Set player to look at scene center
+          if (cameraRef.current) {
+            const lookAtPoint = new THREE.Vector3(center.x, center.y + 1, center.z);
+            cameraRef.current.lookAt(lookAtPoint);
+          }
+          
+          console.log('[SCAN] Player spawned at:', spawnPoint);
+        },
+        (progress) => {
+          if (progress.total > 0) {
+            const percent = (progress.loaded / progress.total * 100).toFixed(0);
+            if (percent % 10 === 0) {  // Log every 10%
+              console.log(`[SCAN] Loading: ${percent}%`);
+            }
+          }
+        },
+        (error) => {
+          console.error('[SCAN] ❌ Failed to load scanned environment:', error);
+          scene.remove(placeholder);
+          
+          // Show error message to user
+          alert('Failed to load 3D scene. The model may be too large or corrupted. Try scanning again.');
+        }
+      );
+      
+      // Set appropriate lighting for scanned environment
+      const lighting = data.world.lighting || {};
+      const lightingConfig = {
+        ambient: {
+          color: "#FFFFFF",
+          intensity: 1.2  // Bright for scanning
+        },
+        directional: {
+          color: "#FFFFFF",
+          intensity: 0.8,
+          position: { x: 5, y: 10, z: 5 }
+        },
+        fog: null,
+        background: "#87CEEB"  // Light blue sky
+      };
+      updateLighting(lightingConfig, {});
+      
+      return;  // Done loading scanned environment
+    }
+    
+    // OLD: Legacy room/biome generation (fallback if scan fails)
+    console.warn('[SCAN] ⚠️ Using legacy world generation (scan may have failed)');
+    
+    // Check if TripoSR failed and log details
+    if (data.error) {
+      console.error(`[SCAN] ❌ TripoSR Error: ${data.error}`);
+      console.error(`[SCAN] 💡 Check backend logs for detailed TripoSR error message`);
+      console.error(`[SCAN] 💡 Common causes:`);
+      console.error(`[SCAN]    - AIML_API_KEY not set or invalid`);
+      console.error(`[SCAN]    - No credits in AIMLAPI account`);
+      console.error(`[SCAN]    - Image upload to ImgBB failed`);
+      console.error(`[SCAN]    - Network error`);
+    } else if (data.world?.type === 'scan_fallback') {
+      console.warn(`[SCAN] ⚠️ Backend returned scan_fallback - TripoSR generation failed`);
+      console.warn(`[SCAN] 💡 This means AIML_API_KEY or TripoSR API is not working properly`);
+    } else if (!data.world?.model_url) {
+      console.warn(`[SCAN] ⚠️ No model_url in response - TripoSR generation did not complete`);
+      console.warn(`[SCAN] 💡 Backend response:`, data);
+    }
+    
+    // Set color palette from AI-generated palette if available
+    if (data.world?.color_palette && data.world.color_palette.length > 0) {
+      console.log('[SCAN] Setting color palette:', data.world.color_palette);
+      setColorPalette(data.world.color_palette);
+    }
+    
+    const colorAssignments = data.world?.color_assignments || {};
+    setCurrentWorld(data);
+    
+    const biomeName = data.world?.biome || data.world?.biome_name;
+    createGround(scene, biomeName);
+
     if (data.world && data.world.lighting_config) {
-      // Pass color_assignments to updateLighting so sky uses AI-generated color
       updateLighting(data.world.lighting_config, data.world.color_assignments);
     }
 

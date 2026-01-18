@@ -8,7 +8,8 @@ from world.enemy_placer import place_enemies
 from world.lighting import get_lighting_preset, get_sky_color
 from world.physics_config import get_combined_config
 from world.colour_scheme import assign_palette_to_elements
-from models.generators import generate_object_template_with_ai
+from models.generators import generate_object_template_with_ai, generate_3d_model_tripo3d
+import os
 
 router = APIRouter()
 
@@ -623,10 +624,34 @@ def generate_room_walls(room_size: float = 30.0, wall_height: float = 8.0, wall_
     return walls
 
 
-async def generate_scanned_object(obj_name: str, count: int = 1, room_size: float = 30.0) -> List[Dict]:
-    """Generate 3D objects from scanned item names. Uses AI to generate templates for unknown objects."""
+async def generate_scanned_object(obj_name: str, count: int = 1, room_size: float = 30.0, use_tripo3d: bool = True) -> List[Dict]:
+    """
+    Generate 3D objects from scanned item names.
+    
+    Priority System:
+    1. Tripo3D API (if enabled and API key available) - Real 3D models ✅ BEST QUALITY
+    2. AI-Generated Primitives (GPT designs using shapes) - Good quality
+    3. Predefined Templates (20+ built-in objects) - Reliable fallback
+    4. Generic Box - Last resort
+    
+    Args:
+        obj_name: Name of the object to generate
+        count: Number of instances to create
+        room_size: Room dimensions for positioning
+        use_tripo3d: Whether to attempt Tripo3D generation (default: True)
+    
+    Returns:
+        List of object dictionaries ready for frontend rendering
+    """
     objects = []
     obj_lower = obj_name.lower().replace(" ", "_").replace("-", "_")
+    
+    # Check if Tripo3D is available and enabled
+    TRIPO3D_API_KEY = os.getenv("TRIPO3D_API_KEY")
+    tripo3d_available = use_tripo3d and TRIPO3D_API_KEY is not None
+    
+    if tripo3d_available:
+        print(f"[OBJECT] 🎯 Priority 1: Attempting Tripo3D generation for '{obj_name}'...")
     
     # Object definitions - simple geometric shapes
     object_templates = {
@@ -814,29 +839,67 @@ async def generate_scanned_object(obj_name: str, count: int = 1, room_size: floa
         },
     }
     
-    # Get template from predefined list, or generate with AI
+    # Generate requested count of objects at random positions
+    half_room = room_size / 2 - 2  # Keep away from walls
+    
+    # PRIORITY 1: Try Tripo3D for high-quality 3D models
+    if tripo3d_available:
+        try:
+            model_url = await generate_3d_model_tripo3d(obj_name)
+            
+            if model_url:
+                print(f"[OBJECT] ✅ Priority 1 SUCCESS: Tripo3D generated model for '{obj_name}'")
+                
+                # Create objects using GLB model URL
+                for i in range(count):
+                    pos_x = random.uniform(-half_room, half_room)
+                    pos_z = random.uniform(-half_room, half_room)
+                    
+                    obj = {
+                        "name": f"{obj_name}_{i+1}",
+                        "type": "glb_model",  # Special type for GLB models
+                        "original_name": obj_name,
+                        "model_url": model_url,  # Direct URL to GLB file
+                        "position": {"x": pos_x, "y": 0, "z": pos_z},
+                        "scale": 1.0,
+                        "rotation": random.uniform(0, math.pi * 2)
+                    }
+                    objects.append(obj)
+                
+                return objects  # Success! Return GLB models
+            else:
+                print(f"[OBJECT] ⚠️ Priority 1 FAILED: Tripo3D generation failed, falling back to Priority 2...")
+        except Exception as e:
+            print(f"[OBJECT] ⚠️ Priority 1 ERROR: Tripo3D error: {e}")
+            print(f"[OBJECT] Falling back to Priority 2...")
+    
+    # PRIORITY 2: AI-Generated Primitive Templates (if no predefined template exists)
     template = object_templates.get(obj_lower)
     
     if not template:
-        # Try to generate template with AI
-        print(f"[OBJECT] '{obj_name}' not in templates, asking AI to design it...")
+        print(f"[OBJECT] 🎯 Priority 2: '{obj_name}' not in templates, asking AI to design it...")
         ai_template = await generate_object_template_with_ai(obj_name)
         
         if ai_template and "parts" in ai_template:
             template = ai_template
-            print(f"[OBJECT] ✅ AI generated template for '{obj_name}' with {len(template['parts'])} parts")
+            print(f"[OBJECT] ✅ Priority 2 SUCCESS: AI generated template for '{obj_name}' with {len(template['parts'])} parts")
         else:
-            # Fallback: Generic object - create a simple colored box
-            print(f"[OBJECT] ⚠️ AI failed, using generic box for '{obj_name}'")
-            template = {
-                "parts": [
-                    {"shape": "box", "position": {"x": 0, "y": 0.25, "z": 0}, "dimensions": {"width": 0.5, "height": 0.5, "depth": 0.5}, "color": "#808080"},
-                ],
-                "scale": 0.8
-            }
+            print(f"[OBJECT] ⚠️ Priority 2 FAILED: AI template generation failed")
+            template = None
+    else:
+        print(f"[OBJECT] ✅ Priority 3 SUCCESS: Using predefined template for '{obj_name}'")
     
-    # Generate requested count of objects at random positions
-    half_room = room_size / 2 - 2  # Keep away from walls
+    # PRIORITY 3/4: Predefined Template or Generic Box Fallback
+    if not template:
+        print(f"[OBJECT] ⚠️ Priority 4: Using generic box for '{obj_name}' (last resort)")
+        template = {
+            "parts": [
+                {"shape": "box", "position": {"x": 0, "y": 0.25, "z": 0}, "dimensions": {"width": 0.5, "height": 0.5, "depth": 0.5}, "color": "#808080"},
+            ],
+            "scale": 0.8
+        }
+    
+    # Create objects using primitive shapes
     for i in range(count):
         pos_x = random.uniform(-half_room, half_room)
         pos_z = random.uniform(-half_room, half_room)
