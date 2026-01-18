@@ -4012,48 +4012,43 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
     const isRoomBiome = biomeName && (biomeName.toLowerCase() === 'room' || biomeName.toLowerCase() === 'indoor');
     
     if (isRoomBiome && (!data.world?.model_url || data.world?.type === 'scan_fallback')) {
-      console.log('[SCAN] 🍳 Creating kitchen room biome...');
+      console.log('[SCAN] 🏠 Creating basic room...');
       
       // Ensure structures object exists
       if (!data.structures) {
         data.structures = {};
       }
       
-      // Create realistic kitchen with L-shaped layout (like the reference image)
-      const wallColor = 0xF5F5F5; // White/off-white walls (like reference)
+      // Create basic room with walls, floor, ceiling, and windows
+      const wallColor = 0xF5F5F5; // White/off-white walls
       const roomSize = 25; // Room dimensions
-      const wallHeight = 10; // Standard kitchen ceiling height
-      const windowHeight = 6; // Tall windows for natural light
-      const counterHeight = 3; // Standard counter height (36 inches)
-      const counterDepth = 2; // Counter depth (24 inches)
-      const upperCabinetHeight = 3; // Upper cabinet height (30 inches)
-      const upperCabinetBottom = 7; // Upper cabinets start above counter (7 units = ~84 inches from floor)
-      const backsplashHeight = 1.5; // Backsplash height above counter
+      const wallHeight = 10; // Standard ceiling height
+      const windowHeight = 6; // Tall windows
       
-      // Create room walls (white/off-white like reference)
+      // Create room walls
       data.structures.walls = [
-        // Back wall with window
+        // Back wall
         {
           dimensions: { width: roomSize, height: wallHeight, depth: 0.5 },
           position: { x: 0, y: wallHeight / 2, z: -roomSize / 2 },
           color: wallColor,
           type: 'wall'
         },
-        // Front wall with window
+        // Front wall
         {
           dimensions: { width: roomSize, height: wallHeight, depth: 0.5 },
           position: { x: 0, y: wallHeight / 2, z: roomSize / 2 },
           color: wallColor,
           type: 'wall'
         },
-        // Left wall with window
+        // Left wall
         {
           dimensions: { width: 0.5, height: wallHeight, depth: roomSize },
           position: { x: -roomSize / 2, y: wallHeight / 2, z: 0 },
           color: wallColor,
           type: 'wall'
         },
-        // Right wall with window
+        // Right wall
         {
           dimensions: { width: 0.5, height: wallHeight, depth: roomSize },
           position: { x: roomSize / 2, y: wallHeight / 2, z: 0 },
@@ -4076,7 +4071,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         }
       ];
       
-      // Create high glass windows on each wall
+      // Create windows on each wall
       const windowWidth = 8;
       const windowColor = 0x87CEEB; // Sky blue glass color
       const windows = [
@@ -4118,256 +4113,17 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         }
       ];
       
-      // Add windows to walls
+      // Add windows to structures
       if (!data.structures.windows) {
         data.structures.windows = windows;
       }
       
-      // Create L-shaped kitchen layout (like reference image)
-      const cabinetColor = 0xD2B48C; // Light wood color (like reference)
-      const counterColor = 0xF5F5DC; // Light beige/speckled countertop (like reference)
-      const backsplashColor = 0xC0C0C0; // Stainless steel backsplash
-      const stoveColor = 0xFFFFFF; // White stove
-      const sinkColor = 0xC0C0C0; // Stainless steel sink
-      const refrigeratorColor = 0xFFFFFF; // White refrigerator
-      
+      // Initialize scanned_objects as empty array (no kitchen objects)
       if (!data.structures.scanned_objects) {
         data.structures.scanned_objects = [];
       }
       
-      // L-SHAPED LAYOUT: Back wall (left side) + Right wall (corner kitchen)
-      
-      // === BACK WALL SECTION (left side of room) ===
-      const backWallCabinetZ = -roomSize / 2 + counterDepth / 2;
-      const lowerCabinetY = counterHeight / 2; // Base of cabinet at counter height
-      
-      // Lower cabinets on back wall
-      data.structures.scanned_objects.push(
-        // Lower cabinet 1 (left corner)
-        {
-          name: 'lower_cabinet_back_1',
-          position: { x: -8, y: lowerCabinetY, z: backWallCabinetZ },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 4, height: counterHeight, depth: counterDepth },
-            position: { x: 0, y: 0, z: 0 },
-            color: cabinetColor,
-            material: { roughness: 0.7, metalness: 0.1 }
-          }]
-        },
-        // Lower cabinet 2 (center - where stove goes)
-        {
-          name: 'lower_cabinet_back_2',
-          position: { x: -3, y: lowerCabinetY, z: backWallCabinetZ },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 4, height: counterHeight, depth: counterDepth },
-            position: { x: 0, y: 0, z: 0 },
-            color: cabinetColor,
-            material: { roughness: 0.7, metalness: 0.1 }
-          }]
-        }
-      );
-      
-      // === RIGHT WALL SECTION (forms L-shape) ===
-      const rightWallCabinetX = roomSize / 2 - counterDepth / 2;
-      
-      // Lower cabinets on right wall (continues L-shape)
-      data.structures.scanned_objects.push(
-        // Lower cabinet on right wall (near corner)
-        {
-          name: 'lower_cabinet_right_1',
-          position: { x: rightWallCabinetX, y: lowerCabinetY, z: -5 },
-          scale: 1,
-          rotation: { x: 0, y: Math.PI / 2, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 4, height: counterHeight, depth: counterDepth },
-            position: { x: 0, y: 0, z: 0 },
-            color: cabinetColor,
-            material: { roughness: 0.7, metalness: 0.1 }
-          }]
-        },
-        // Lower cabinet on right wall (sink area)
-        {
-          name: 'lower_cabinet_right_2',
-          position: { x: rightWallCabinetX, y: lowerCabinetY, z: 0 },
-          scale: 1,
-          rotation: { x: 0, y: Math.PI / 2, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 4, height: counterHeight, depth: counterDepth },
-            position: { x: 0, y: 0, z: 0 },
-            color: cabinetColor,
-            material: { roughness: 0.7, metalness: 0.1 }
-          }]
-        }
-      );
-      
-      // Countertop on back wall (L-shape)
-      const counterTopY = counterHeight + 0.05; // On top of cabinets
-      data.structures.scanned_objects.push(
-        // Countertop on back wall
-        {
-          name: 'countertop_back',
-          position: { x: -5.5, y: counterTopY, z: backWallCabinetZ },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 8, height: 0.15, depth: counterDepth },
-            position: { x: 0, y: 0, z: 0 },
-            color: counterColor,
-            material: { roughness: 0.3, metalness: 0.0 }
-          }]
-        },
-        // Countertop on right wall (L-shape continuation)
-        {
-          name: 'countertop_right',
-          position: { x: rightWallCabinetX, y: counterTopY, z: -2.5 },
-          scale: 1,
-          rotation: { x: 0, y: Math.PI / 2, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 8, height: 0.15, depth: counterDepth },
-            position: { x: 0, y: 0, z: 0 },
-            color: counterColor,
-            material: { roughness: 0.3, metalness: 0.0 }
-          }]
-        }
-      );
-      
-      // Stainless steel backsplash (behind stove and sink)
-      const backsplashY = counterTopY + backsplashHeight / 2;
-      data.structures.scanned_objects.push(
-        // Backsplash on back wall (behind stove)
-        {
-          name: 'backsplash_back',
-          position: { x: -3, y: backsplashY, z: -roomSize / 2 + 0.1 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 4, height: backsplashHeight, depth: 0.1 },
-            position: { x: 0, y: 0, z: 0 },
-            color: backsplashColor,
-            material: { roughness: 0.2, metalness: 0.6 }
-          }]
-        },
-        // Backsplash on right wall (behind sink)
-        {
-          name: 'backsplash_right',
-          position: { x: roomSize / 2 - 0.1, y: backsplashY, z: 0 },
-          scale: 1,
-          rotation: { x: 0, y: Math.PI / 2, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 4, height: backsplashHeight, depth: 0.1 },
-            position: { x: 0, y: 0, z: 0 },
-            color: backsplashColor,
-            material: { roughness: 0.2, metalness: 0.6 }
-          }]
-        }
-      );
-      
-      // White electric stove (in corner, on back wall)
-      data.structures.scanned_objects.push({
-        name: 'stove',
-        position: { x: -3, y: counterTopY, z: -roomSize / 2 + counterDepth / 2 },
-        scale: 1,
-        rotation: { x: 0, y: 0, z: 0 },
-        parts: [{
-          shape: 'box',
-          dimensions: { width: 3.5, height: 0.5, depth: counterDepth - 0.1 },
-          position: { x: 0, y: 0, z: 0 },
-          color: stoveColor,
-          material: { roughness: 0.6, metalness: 0.3 }
-        }]
-      });
-      
-      // Stainless steel sink (on right wall, next to corner)
-      data.structures.scanned_objects.push({
-        name: 'sink',
-        position: { x: roomSize / 2 - counterDepth / 2, y: counterTopY, z: 0 },
-        scale: 1,
-        rotation: { x: 0, y: Math.PI / 2, z: 0 },
-        parts: [{
-          shape: 'box',
-          dimensions: { width: 2, height: 0.4, depth: 1.5 },
-          position: { x: 0, y: 0, z: 0 },
-          color: sinkColor,
-          material: { roughness: 0.1, metalness: 0.8 }
-        }]
-      });
-      
-      // Upper cabinets (three on back wall - like reference)
-      const upperCabinetY = upperCabinetBottom + upperCabinetHeight / 2;
-      data.structures.scanned_objects.push(
-        // Upper cabinet 1 (left)
-        {
-          name: 'upper_cabinet_1',
-          position: { x: -8, y: upperCabinetY, z: -roomSize / 2 + 0.3 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 },
-            position: { x: 0, y: 0, z: 0 },
-            color: cabinetColor,
-            material: { roughness: 0.7, metalness: 0.1 }
-          }]
-        },
-        // Upper cabinet 2 (center)
-        {
-          name: 'upper_cabinet_2',
-          position: { x: -3, y: upperCabinetY, z: -roomSize / 2 + 0.3 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 },
-            position: { x: 0, y: 0, z: 0 },
-            color: cabinetColor,
-            material: { roughness: 0.7, metalness: 0.1 }
-          }]
-        },
-        // Upper cabinet 3 (right)
-        {
-          name: 'upper_cabinet_3',
-          position: { x: 2, y: upperCabinetY, z: -roomSize / 2 + 0.3 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 },
-            position: { x: 0, y: 0, z: 0 },
-            color: cabinetColor,
-            material: { roughness: 0.7, metalness: 0.1 }
-          }]
-        }
-      );
-      
-      // White refrigerator (at end of right wall, like reference)
-      const refrigeratorY = (counterHeight + 2) / 2; // Taller than counter
-      data.structures.scanned_objects.push({
-        name: 'refrigerator',
-        position: { x: roomSize / 2 - 2, y: refrigeratorY, z: 5 },
-        scale: 1,
-        rotation: { x: 0, y: 0, z: 0 },
-        parts: [{
-          shape: 'box',
-          dimensions: { width: 2.5, height: counterHeight + 2, depth: 2.5 },
-          position: { x: 0, y: 0, z: 0 },
-          color: refrigeratorColor,
-          material: { roughness: 0.8, metalness: 0.2 }
-        }]
-      });
-      
-      console.log('[SCAN] ✅ Kitchen room created with white walls, L-shaped layout, stove, sink, backsplash, cabinets, and refrigerator');
+      console.log('[SCAN] ✅ Basic room created with walls, floor, ceiling, and windows');
     }
     
     // Set color palette from AI-generated palette if available
@@ -4759,35 +4515,20 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
     setStreamingActive(false);
     setScanMode(false);
     
-    // Generate kitchen room directly when streaming stops (NO TripoSR API call)
+    // Trigger generate function with "kitchen" search when streaming stops
     if (latestScanDataRef.current && !worldGeneratedFromScanRef.current && gameState !== GameState.PLAYING) {
       const scanData = latestScanDataRef.current;
       
       // Log the scene description to console (as requested)
       console.log(`[STREAMING] 📝 Scene Description:`);
       console.log(`[STREAMING] ${scanData.sceneDescription}`);
-      console.log(`[STREAMING] 🎬 Creating kitchen room directly (skipping TripoSR)...`);
+      console.log(`[STREAMING] 🎬 Triggering generateWorld with search "kitchen"...`);
       
-      // Create world data structure directly (no API call)
-      const worldData = {
-        world: {
-          type: 'scan_fallback',
-          biome: 'room',
-          scene_type: 'indoor',
-          scene_description: scanData.sceneDescription,
-          colors: scanData.parsedData?.colors || { palette: [] }
-        },
-        biome: 'room',
-        structures: {},  // Will be populated by kitchen generation code in loadWorldFromScan
-        spawn_point: { x: 0, y: 1, z: 10 }
-      };
-      
-      // Generate world directly (kitchen generation happens in loadWorldFromScan)
+      // Mark as generated to prevent multiple calls
       worldGeneratedFromScanRef.current = true;
-      (async () => {
-        await loadWorldFromScan(worldData);
-        setGameState(GameState.PLAYING);
-      })();
+      
+      // Call generateWorld with "kitchen" as the search/prompt
+      generateWorld('kitchen');
     }
     
     setLastScanResult(null);
