@@ -13,6 +13,31 @@ const OVERSHOOT_API_KEY = 'ovs_2d4ab5e6aa5d635976e707712176fe5b';
 
 const API_BASE = 'http://localhost:8000/api';
 
+// Helper function to handle backend connection errors
+const handleBackendConnectionError = (error, context = '') => {
+  const isConnectionError = error instanceof TypeError && 
+    (error.message.includes('Failed to fetch') || 
+     error.message.includes('NetworkError') ||
+     error.message.includes('ERR_CONNECTION_REFUSED'));
+  
+  if (isConnectionError) {
+    const errorMsg = `❌ Backend server is not running!\n\n` +
+      `Please start the backend server with:\n` +
+      `cd backend && python -m uvicorn main:app --reload\n\n` +
+      `Or if using npm:\n` +
+      `cd backend && npm start\n\n` +
+      `Context: ${context || 'API request'}`;
+    
+    console.error('[BACKEND] Connection Error:', errorMsg);
+    console.error('[BACKEND] Full error:', error);
+    
+    // Show user-friendly alert
+    alert(errorMsg);
+    return true; // Indicates connection error was handled
+  }
+  return false; // Not a connection error
+};
+
 const GameState = {
   IDLE: 'idle',
   LISTENING: 'listening',
@@ -2273,10 +2298,10 @@ const VoiceWorldBuilder = () => {
     // Position on terrain
     // If gridOrigin is provided, use grid positioning; otherwise use buildingData.position
     if (gridOrigin !== null && gridOrigin !== undefined) {
-    const gridPos = getBuildingGridPosition(idx, buildingGridConfig, gridOrigin);
-    occupiedCells.add(`${Math.round(gridPos.x)}:${Math.round(gridPos.z)}`);
-    const terrainY = getHeightAt(gridPos.x, gridPos.z);
-    group.position.set(gridPos.x, terrainY, gridPos.z);
+      const gridPos = getBuildingGridPosition(idx, buildingGridConfig, gridOrigin);
+      occupiedCells.add(`${Math.round(gridPos.x)}:${Math.round(gridPos.z)}`);
+      const terrainY = getHeightAt(gridPos.x, gridPos.z);
+      group.position.set(gridPos.x, terrainY, gridPos.z);
     } else {
       // Use position from buildingData (for random placement)
       const pos = buildingData.position || { x: 0, y: 0, z: 0 };
@@ -2312,7 +2337,7 @@ const VoiceWorldBuilder = () => {
     group.updateMatrix();
 
     return group;
-  }
+  };
 
   const createMountainPeak = (peakData, biome = null) => {
   const group = new THREE.Group();
@@ -2493,7 +2518,8 @@ const VoiceWorldBuilder = () => {
   group.rotation.y = Math.random() * Math.PI * 2;
   
   return group;
-};
+  };
+
   const getHeightAt = (x, z) => {
     if (!heightmapRef.current) return 0;
     const hm = heightmapRef.current;
@@ -3222,7 +3248,7 @@ const VoiceWorldBuilder = () => {
   
   console.log(`[NORTHERN LIGHTS] Created ${layers.length} aurora layers (MAXIMUM VIBRANCY like reference)`);
   return layers;
-};
+  };
 
   const animateNorthernLights = (scene) => {
   const lights = scene.children.filter(c => c.userData?.isNorthernLights);
@@ -3349,7 +3375,8 @@ const VoiceWorldBuilder = () => {
     const pulse = Math.sin(time * 0.5 + layer) * 0.05;
     aurora.material.opacity = baseOpacity - layer * 0.05 + pulse;
   });
-};
+  };
+
   // Camera capture functions for Overshoot AI scanning
   const startCameraCapture = async () => {
     try {
@@ -3453,7 +3480,21 @@ const VoiceWorldBuilder = () => {
       setScanMode(false);
       
       // Create Overshoot RealtimeVision instance
-      const vision = new RealtimeVision({
+      // FIX 1: Changed sampling_ratio from 1/30 (0.033) to integer 1
+      // FIX 2: Changed cameraFacing to 'user' (API accepts 'user' or 'environment')
+      // FIX 3: Simplified processing config (removed delay_seconds)
+      const processingConfig = {
+        clip_length_seconds: 1,
+        fps: 30,
+        sampling_ratio: 1 // FIX 1: Changed from 1/30 to integer 1
+      };
+      
+      const sourceConfig = { 
+        type: 'camera', 
+        cameraFacing: 'user' // FIX 2: Changed to 'user' (API accepts 'user' or 'environment')
+      };
+      
+      const visionConfig = {
         apiUrl: OVERSHOOT_API_URL,
         apiKey: OVERSHOOT_API_KEY,
         prompt: `Describe the ENTIRE visible scene in extreme detail for 3D model generation. Return JSON with:
@@ -3465,14 +3506,8 @@ const VoiceWorldBuilder = () => {
   "scale_reference": "real-world dimensions if identifiable"
 }
 Ignore people. Include ALL visible elements - this will create the complete 3D world.`,
-        source: { type: 'camera', cameraFacing: 'environment' },
-        processing: {
-          clip_length_seconds: 1,
-          delay_seconds: 1,
-          fps: 30,
-          // Optimized: Process every 30th frame = 1 frame per second (as per guide recommendation)
-          sampling_ratio: 1/30 // ~0.033 (1 frame per second at 30fps)
-        },
+        source: sourceConfig,
+        processing: processingConfig,
         onResult: async (result) => {
           overshootResultCountRef.current++;
           const resultNum = overshootResultCountRef.current;
@@ -3543,44 +3578,52 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
                   const imageData = canvas.toDataURL('image/jpeg', 0.7);
                   
                   // Send to scan-world endpoint which now generates entire scene
-                  const res = await fetch(`${API_BASE}/scan-world`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                      image_data: imageData
-                    }),
-                  });
-                  
-                  if (res.ok) {
-                    const worldData = await res.json();
-                    console.log(`[OVERSHOOT] ✅ Complete 3D world generated!`);
-                    console.log(`[OVERSHOOT] Model URL:`, worldData.world?.model_url);
+                  try {
+                    const res = await fetch(`${API_BASE}/scan-world`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ 
+                        image_data: imageData
+                      }),
+                    });
                     
-                    // Check if backend returned an error (Tripo3D failure)
-                    if (worldData.error) {
-                      console.error(`[OVERSHOOT] ⚠️ Backend Error: ${worldData.error}`);
-                      console.error(`[OVERSHOOT] 💡 SOLUTION: Check your backend terminal/console for detailed Tripo3D error logs`);
-                      console.error(`[OVERSHOOT] 💡 Common causes: API timeout (>2min), rate limit, invalid API key, network error`);
+                    if (res.ok) {
+                      const worldData = await res.json();
+                      console.log(`[OVERSHOOT] ✅ Complete 3D world generated!`);
+                      console.log(`[OVERSHOOT] Model URL:`, worldData.world?.model_url);
+                      
+                      // Check if backend returned an error (Tripo3D failure)
+                      if (worldData.error) {
+                        console.error(`[OVERSHOOT] ⚠️ Backend Error: ${worldData.error}`);
+                        console.error(`[OVERSHOOT] 💡 SOLUTION: Check your backend terminal/console for detailed Tripo3D error logs`);
+                        console.error(`[OVERSHOOT] 💡 Common causes: API timeout (>2min), rate limit, invalid API key, network error`);
+                      }
+                      
+                      if (!worldData.world?.model_url) {
+                        console.warn(`[OVERSHOOT] ⚠️ No model URL received from backend - falling back to legacy generation`);
+                        console.warn(`[OVERSHOOT] 💡 This means Tripo3D failed to generate the 3D model`);
+                        console.warn(`[OVERSHOOT] 💡 Check backend logs for detailed error message`);
+                      }
+                      
+                      // Load the complete scanned world
+                      await loadWorldFromScan(worldData);
+                      setGameState(GameState.PLAYING);
+                    } else {
+                      const errText = await res.text();
+                      console.error('[OVERSHOOT] World generation failed:', errText);
                     }
-                    
-                    if (!worldData.world?.model_url) {
-                      console.warn(`[OVERSHOOT] ⚠️ No model URL received from backend - falling back to legacy generation`);
-                      console.warn(`[OVERSHOOT] 💡 This means Tripo3D failed to generate the 3D model`);
-                      console.warn(`[OVERSHOOT] 💡 Check backend logs for detailed error message`);
+                  } catch (fetchError) {
+                    if (!handleBackendConnectionError(fetchError, 'OVERSHOOT scan-world request')) {
+                      console.error('[OVERSHOOT] Backend error:', fetchError);
                     }
-                    
-                    // Load the complete scanned world
-                    await loadWorldFromScan(worldData);
-                    setGameState(GameState.PLAYING);
-                  } else {
-                    const errText = await res.text();
-                    console.error('[OVERSHOOT] World generation failed:', errText);
                   }
                 } else {
                   console.warn('[OVERSHOOT] No video frame available for full scene generation');
                 }
               } catch (backendError) {
-                console.error('[OVERSHOOT] Backend error:', backendError);
+                if (!handleBackendConnectionError(backendError, 'OVERSHOOT world generation')) {
+                  console.error('[OVERSHOOT] Backend error:', backendError);
+                }
               }
             }
           } catch (parseError) {
@@ -3596,13 +3639,52 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         },
         onError: (error) => {
           console.error('[OVERSHOOT] SDK Error:', error);
+          console.error('[OVERSHOOT] Error type:', typeof error);
+          console.error('[OVERSHOOT] Error message:', error?.message || error);
+          console.error('[OVERSHOOT] Error stack:', error?.stack);
+          
+          // Try to extract response details if available
+          if (error?.response) {
+            console.error('[OVERSHOOT] Response status:', error.response.status);
+            console.error('[OVERSHOOT] Response body:', error.response.body);
+          }
+          
+          // Log configuration at time of error for debugging
+          console.error('[OVERSHOOT] Config at error time - Source:', JSON.stringify(sourceConfig));
+          console.error('[OVERSHOOT] Config at error time - Processing:', JSON.stringify(processingConfig));
         }
-      });
+      };
+      
+      // Log the configuration being sent
+      console.log('[OVERSHOOT] 📋 Configuration being sent to API:');
+      console.log('[OVERSHOOT]   API URL:', visionConfig.apiUrl);
+      console.log('[OVERSHOOT]   API Key:', visionConfig.apiKey ? `${visionConfig.apiKey.substring(0, 10)}...` : 'MISSING');
+      console.log('[OVERSHOOT]   Source:', JSON.stringify(visionConfig.source, null, 2));
+      console.log('[OVERSHOOT]   Processing:', JSON.stringify(visionConfig.processing, null, 2));
+      console.log('[OVERSHOOT]   Sampling Ratio Type:', typeof visionConfig.processing.sampling_ratio, 'Value:', visionConfig.processing.sampling_ratio);
+      
+      const vision = new RealtimeVision(visionConfig);
       
       // Start the Overshoot vision
       console.log('[OVERSHOOT] Starting RealtimeVision...');
-      await vision.start();
-      console.log('[OVERSHOOT] ✅ RealtimeVision started successfully');
+      console.log('[OVERSHOOT] 🔍 FIX 1: Using integer sampling_ratio:', processingConfig.sampling_ratio, '(was 1/30 = 0.033)');
+      console.log('[OVERSHOOT] 🔍 FIX 2: Using cameraFacing:', sourceConfig.cameraFacing, '(API accepts "user" or "environment")');
+      console.log('[OVERSHOOT] 🔍 FIX 3: Simplified processing config (removed delay_seconds)');
+      
+      try {
+        await vision.start();
+        console.log('[OVERSHOOT] ✅ RealtimeVision started successfully');
+        console.log('[OVERSHOOT] ✅ All fixes applied successfully - API accepted configuration');
+      } catch (startError) {
+        console.error('[OVERSHOOT] ❌ Failed to start vision:', startError);
+        console.error('[OVERSHOOT] ❌ Start error details:', {
+          message: startError?.message,
+          status: startError?.response?.status,
+          statusText: startError?.response?.statusText,
+          body: startError?.response?.body
+        });
+        throw startError; // Re-throw to be caught by outer catch
+      }
       
       // Store reference for cleanup
       overshootVisionRef.current = vision;
@@ -3735,44 +3817,52 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
           
           console.log(`[FALLBACK/OPENAI] 📸 Frame #${frameCount} → backend/scan-world`);
           
-          const res = await fetch(`${API_BASE}/scan-world`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image_data: imageData }),
-          });
-          
-          if (res.ok) {
-            const data = await res.json();
-            console.log(`[FALLBACK/OPENAI] ✅ Frame #${frameCount} analyzed - Biome: ${data.biome || 'unknown'}`);
-            
-            // Check for TripoSR generation result
-            if (data.world?.model_url) {
-              console.log(`[FALLBACK/OPENAI] ✅ TripoSR model generated: ${data.world.model_url}`);
-              console.log(`[FALLBACK/OPENAI] World type: ${data.world.type}`);
-            } else if (data.error) {
-              console.error(`[FALLBACK/OPENAI] ⚠️ Backend Error: ${data.error}`);
-              console.error(`[FALLBACK/OPENAI] 💡 TripoSR generation failed - check backend logs`);
-            } else if (data.world?.type === 'scan_fallback') {
-              console.warn(`[FALLBACK/OPENAI] ⚠️ TripoSR generation failed - using fallback world`);
-              console.warn(`[FALLBACK/OPENAI] 💡 This means AIML_API_KEY or TripoSR API is not working`);
-            }
-            
-            setLastScanResult({
-              biome: data.biome || data.world?.scene_type || 'unknown',
-              timestamp: new Date().toLocaleTimeString(),
-              frameCount: frameCount,
-              source: 'openai-fallback'
+          try {
+            const res = await fetch(`${API_BASE}/scan-world`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image_data: imageData }),
             });
             
-            if (gameState !== GameState.PLAYING && (data.biome || data.world)) {
-              await loadWorldFromScan(data);
+            if (res.ok) {
+              const data = await res.json();
+              console.log(`[FALLBACK/OPENAI] ✅ Frame #${frameCount} analyzed - Biome: ${data.biome || 'unknown'}`);
+              
+              // Check for TripoSR generation result
+              if (data.world?.model_url) {
+                console.log(`[FALLBACK/OPENAI] ✅ TripoSR model generated: ${data.world.model_url}`);
+                console.log(`[FALLBACK/OPENAI] World type: ${data.world.type}`);
+              } else if (data.error) {
+                console.error(`[FALLBACK/OPENAI] ⚠️ Backend Error: ${data.error}`);
+                console.error(`[FALLBACK/OPENAI] 💡 TripoSR generation failed - check backend logs`);
+              } else if (data.world?.type === 'scan_fallback') {
+                console.warn(`[FALLBACK/OPENAI] ⚠️ TripoSR generation failed - using fallback world`);
+                console.warn(`[FALLBACK/OPENAI] 💡 This means AIML_API_KEY or TripoSR API is not working`);
+              }
+              
+              setLastScanResult({
+                biome: data.biome || data.world?.scene_type || 'unknown',
+                timestamp: new Date().toLocaleTimeString(),
+                frameCount: frameCount,
+                source: 'openai-fallback'
+              });
+              
+              if (gameState !== GameState.PLAYING && (data.biome || data.world)) {
+                await loadWorldFromScan(data);
+              }
+            } else {
+              const errorText = await res.text();
+              console.error(`[FALLBACK/OPENAI] ❌ Request failed: ${res.status} - ${errorText}`);
             }
-          } else {
-            const errorText = await res.text();
-            console.error(`[FALLBACK/OPENAI] ❌ Request failed: ${res.status} - ${errorText}`);
+          } catch (fetchError) {
+            if (!handleBackendConnectionError(fetchError, `FALLBACK/OPENAI Frame #${frameCount} scan-world request`)) {
+              console.error('[FALLBACK/OPENAI] Frame error:', fetchError);
+            }
           }
         } catch (error) {
-          console.error('[FALLBACK/OPENAI] Frame error:', error);
+          if (!handleBackendConnectionError(error, 'FALLBACK/OPENAI frame capture')) {
+            console.error('[FALLBACK/OPENAI] Frame error:', error);
+          }
         }
         
         isAnalyzing = false;
@@ -3804,34 +3894,41 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       console.log('[OVERSHOOT] Processing streaming result:', analysis);
       
       // Send to backend to generate world from streaming analysis
-      const res = await fetch(`${API_BASE}/scan-world`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          streaming_analysis: analysis,
-          use_streaming: true 
-        }),
-      });
+      try {
+        const res = await fetch(`${API_BASE}/scan-world`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            streaming_analysis: analysis,
+            use_streaming: true 
+          }),
+        });
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('[OVERSHOOT] Backend error:', errorText);
-        return;
-      }
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error('[OVERSHOOT] Backend error:', errorText);
+          return;
+        }
 
-      const data = await res.json();
+        const data = await res.json();
       
-      // Only update world if we're not already playing (to avoid interruptions)
-      if (gameState !== GameState.PLAYING) {
-        console.log('[OVERSHOOT] Updating world from streaming analysis...');
-        await loadWorldFromScan(data);
-      } else {
-        // If already playing, we could do incremental updates
-        console.log('[OVERSHOOT] World already active, skipping update');
+        // Only update world if we're not already playing (to avoid interruptions)
+        if (gameState !== GameState.PLAYING) {
+          console.log('[OVERSHOOT] Updating world from streaming analysis...');
+          await loadWorldFromScan(data);
+        } else {
+          // If already playing, we could do incremental updates
+          console.log('[OVERSHOOT] World already active, skipping update');
+        }
+      } catch (fetchError) {
+        if (!handleBackendConnectionError(fetchError, 'OVERSHOOT processStreamingResult scan-world request')) {
+          console.error('[OVERSHOOT] Error processing result:', fetchError);
+        }
       }
-      
     } catch (error) {
-      console.error('[OVERSHOOT] Error processing result:', error);
+      if (!handleBackendConnectionError(error, 'OVERSHOOT processStreamingResult')) {
+        console.error('[OVERSHOOT] Error processing result:', error);
+      }
     }
   };
 
@@ -4397,30 +4494,31 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
     stopCameraCapture();
     
     try {
-      const res = await fetch(`${API_BASE}/scan-world`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_data: imageData }),
-      });
-      
-      
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('[SCAN] API Error Response:', errorText);
+      try {
+        const res = await fetch(`${API_BASE}/scan-world`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_data: imageData }),
+        });
         
-        // Try to parse as JSON for better error message
-        let errorDetail = errorText;
-        try {
-          const errorJson = JSON.parse(errorText);
-          errorDetail = errorJson.detail || errorText;
-        } catch (e) {
-          // Not JSON, use as-is
-        }
         
-        throw new Error(`Scan failed: ${res.status}\n\n${errorDetail}`);
-      }
-      
-      const data = await res.json();
+          if (!res.ok) {
+            const errorText = await res.text();
+            console.error('[SCAN] API Error Response:', errorText);
+            
+            // Try to parse as JSON for better error message
+            let errorDetail = errorText;
+            try {
+              const errorJson = JSON.parse(errorText);
+              errorDetail = errorJson.detail || errorText;
+            } catch (e) {
+              // Not JSON, use as-is
+            }
+            
+            throw new Error(`Scan failed: ${res.status}\n\n${errorDetail}`);
+          }
+          
+          const data = await res.json();
       console.log('[SCAN] World generated from scan:', data);
       
       // Set color palette from AI-generated palette if available
@@ -4717,10 +4815,17 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         setEnemyCount(enemiesRef.current.length);
       }
       
-      setGameState(GameState.PLAYING);
-      
-    } catch (error) {
-      console.error('[SCAN ERROR]:', error);
+          setGameState(GameState.PLAYING);
+        } catch (fetchError) {
+          if (!handleBackendConnectionError(fetchError, 'captureAndScanWorld scan-world request')) {
+            throw fetchError; // Re-throw if not a connection error
+          }
+          setGameState(GameState.IDLE);
+          return; // Exit early if connection error
+        }
+      } catch (error) {
+        if (!handleBackendConnectionError(error, 'captureAndScanWorld')) {
+          console.error('[SCAN ERROR]:', error);
       
       let errorMessage = 'Failed to generate world from scan.\n\n';
       
@@ -4754,25 +4859,26 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
   const generateWorld = async (promptText) => {
     setGameState(GameState.GENERATING);
     try {
-      const res = await fetch(`${API_BASE}/generate-world`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: promptText }),
-      });
+      try {
+        const res = await fetch(`${API_BASE}/generate-world`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: promptText }),
+        });
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('API Error Response:', errorText);
-        throw new Error(`API error: ${res.status} - ${errorText}`);
-      }
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error('API Error Response:', errorText);
+          throw new Error(`API error: ${res.status} - ${errorText}`);
+        }
 
-      const data = await res.json();
-      console.log("=== FRONTEND: Full API response ===");
-      console.log(JSON.stringify(data, null, 2));
+        const data = await res.json();
+        console.log("=== FRONTEND: Full API response ===");
+        console.log(JSON.stringify(data, null, 2));
 
-      if (!data.world) {
-        throw new Error('Invalid response: missing world data');
-      }
+        if (!data.world) {
+          throw new Error('Invalid response: missing world data');
+        }
 
       // Set color palette from AI-generated palette if available
       if (data.world?.color_palette && data.world.color_palette.length > 0) {
@@ -5011,7 +5117,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
           console.log(`✅ Added ${data.structures.street_lamps.length} street lamps (glowing: ${shouldGlow})`);
         }
 
-          if (data.structures?.buildings) {
+        if (data.structures?.buildings) {
             data.structures.buildings.forEach((buildingData, idx) => {
               const gridIndex = Math.floor(
                 idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ)
@@ -5247,10 +5353,19 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         });
         setEnemyCount(enemiesRef.current.length);
       }
-      setGameState(GameState.PLAYING);
+        setGameState(GameState.PLAYING);
+      } catch (fetchError) {
+        if (!handleBackendConnectionError(fetchError, 'generateWorld generate-world request')) {
+          throw fetchError; // Re-throw if not a connection error
+        }
+        setGameState(GameState.IDLE);
+        return; // Exit early if connection error
+      }
     } catch (err) {
-      console.error("World generation error:", err);
-      alert("Failed to generate world. Check console.");
+      if (!handleBackendConnectionError(err, 'generateWorld')) {
+        console.error("World generation error:", err);
+        alert("Failed to generate world. Check console.");
+      }
       setGameState(GameState.IDLE);
     }
   };
@@ -5307,39 +5422,40 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/ab4e53c8-3e02-4665-bb8e-bc913babc9ea',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:5322',message:'Direct modification request',data:{method:'PATCH',payload:payload},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
       // #endregion
-      const res = await fetch(`${API_BASE}/modify-world`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      try {
+        const res = await fetch(`${API_BASE}/modify-world`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-      console.log("API response status:", res.status);
+        console.log("API response status:", res.status);
 
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
-      const data = await res.json();
-      console.log("=== FRONTEND: Modify response ===", data);
-      console.log("=== FRONTEND: Trees in response ===", data.structures?.trees);
-      if (data.structures?.trees && data.structures.trees.length > 0) {
-        console.log("=== FRONTEND: First tree sample ===", JSON.stringify(data.structures.trees[0], null, 2));
-      }
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        const data = await res.json();
+        console.log("=== FRONTEND: Modify response ===", data);
+        console.log("=== FRONTEND: Trees in response ===", data.structures?.trees);
+        if (data.structures?.trees && data.structures.trees.length > 0) {
+          console.log("=== FRONTEND: First tree sample ===", JSON.stringify(data.structures.trees[0], null, 2));
+        }
 
-      const scene = sceneRef.current;
-      if (!scene) return;
+        const scene = sceneRef.current;
+        if (!scene) return;
 
-      // Store old counts
-      const oldTreeCount = currentWorld?.structures?.trees?.length || 0;
-      const oldRockCount = currentWorld?.structures?.rocks?.length || 0;
-      const oldBuildingCount = currentWorld?.structures?.buildings?.length || 0;
-      const oldSkyscraperCount = structuresRef.current.filter(s => s.userData?.buildingType === 'skyscraper').length;
-      const oldHouseCount = structuresRef.current.filter(s => s.userData?.buildingType === 'house' || (s.userData?.buildingType !== 'skyscraper' && s.userData?.structureType === 'building')).length;
-      const oldPeakCount = currentWorld?.structures?.peaks?.length || 0;
-      const oldStreetLampCount = currentWorld?.structures?.street_lamps?.length || 0;
-      const oldEnemyCount = currentWorld?.combat?.enemies?.length || 0;
+        // Store old counts
+        const oldTreeCount = currentWorld?.structures?.trees?.length || 0;
+        const oldRockCount = currentWorld?.structures?.rocks?.length || 0;
+        const oldBuildingCount = currentWorld?.structures?.buildings?.length || 0;
+        const oldSkyscraperCount = structuresRef.current.filter(s => s.userData?.buildingType === 'skyscraper').length;
+        const oldHouseCount = structuresRef.current.filter(s => s.userData?.buildingType === 'house' || (s.userData?.buildingType !== 'skyscraper' && s.userData?.structureType === 'building')).length;
+        const oldPeakCount = currentWorld?.structures?.peaks?.length || 0;
+        const oldStreetLampCount = currentWorld?.structures?.street_lamps?.length || 0;
+        const oldEnemyCount = currentWorld?.combat?.enemies?.length || 0;
 
-      console.log("Old counts - Trees:", oldTreeCount, "Rocks:", oldRockCount, "Buildings:", oldBuildingCount, "Skyscrapers:", oldSkyscraperCount, "Houses:", oldHouseCount, "Peaks:", oldPeakCount, "Street Lamps:", oldStreetLampCount, "Enemies:", oldEnemyCount);
+        console.log("Old counts - Trees:", oldTreeCount, "Rocks:", oldRockCount, "Buildings:", oldBuildingCount, "Skyscrapers:", oldSkyscraperCount, "Houses:", oldHouseCount, "Peaks:", oldPeakCount, "Street Lamps:", oldStreetLampCount, "Enemies:", oldEnemyCount);
 
-      // Get new counts
-      const newTreeCount = data.structures?.trees?.length || 0;
+        // Get new counts
+        const newTreeCount = data.structures?.trees?.length || 0;
       const newRockCount = data.structures?.rocks?.length || 0;
       const newBuildingCount = data.structures?.buildings?.length || 0;
       const newPeakCount = data.structures?.peaks?.length || 0;
@@ -5775,36 +5891,45 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         return updated;
       });
       
-      setGameState(GameState.PLAYING);
-      console.log("✅ Modification complete, returned to PLAYING state");
-      
-      // Clear uploaded image after successful modification
-      if (uploadedImage) {
-        setUploadedImage(null);
-        setImagePreview(null);
+        setGameState(GameState.PLAYING);
+        console.log("✅ Modification complete, returned to PLAYING state");
+        
+        // Clear uploaded image after successful modification
+        if (uploadedImage) {
+          setUploadedImage(null);
+          setImagePreview(null);
+        }
+      } catch (fetchError) {
+        if (!handleBackendConnectionError(fetchError, 'modifyWorld modify-world PATCH request')) {
+          throw fetchError; // Re-throw if not a connection error
+        }
+        setGameState(GameState.PLAYING); // Return to playing state even on connection error
+        return; // Exit early if connection error
       }
     } catch (err) {
-      console.error("Modify-world error:", err);
-      // Add error message to the last conversation session if it exists
-      setChatHistory(prev => {
-        const updated = [...prev];
-        const lastItem = updated[updated.length - 1];
-        if (lastItem && lastItem.type === 'conversation' && lastItem.session) {
-          // Add error message to the conversation session
-          lastItem.session.push({
-            role: 'system',
-            content: `❌ Error: ${err.message}`
-          });
-        } else {
-          // Fallback: add as separate error message
-          updated.push({
-        command: `❌ Error: ${err.message}`,
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'error'
-          });
-        }
-        return updated;
-      });
+      if (!handleBackendConnectionError(err, 'modifyWorld')) {
+        console.error("Modify-world error:", err);
+        // Add error message to the last conversation session if it exists
+        setChatHistory(prev => {
+          const updated = [...prev];
+          const lastItem = updated[updated.length - 1];
+          if (lastItem && lastItem.type === 'conversation' && lastItem.session) {
+            // Add error message to the conversation session
+            lastItem.session.push({
+              role: 'system',
+              content: `❌ Error: ${err.message}`
+            });
+          } else {
+            // Fallback: add as separate error message
+            updated.push({
+              command: `❌ Error: ${err.message}`,
+              timestamp: new Date().toLocaleTimeString(),
+              type: 'error'
+            });
+          }
+          return updated;
+        });
+      }
       setGameState(GameState.PLAYING);
     }
   };
@@ -5870,345 +5995,354 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       console.log('[COLOR PICKER] Biome:', biome, 'Structures:', structure_counts);
       
       // Call backend to regenerate terrain with new colors
-      const res = await fetch(`${API_BASE}/update-colors`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          biome: biome,
-          structures: structure_counts,
-          color_palette: palette
-        })
-      });
-
-      if (!res.ok) {
-        throw new Error(`API error: ${res.status}`);
-      }
-
-      const terrainData = await res.json();
-      
-      // Extract color assignments from response
-      const colorAssignments = terrainData.color_assignments || {};
-      console.log('[COLOR PICKER] Color assignments:', colorAssignments);
-      
-      // Update terrain with new colors
-      const scene = sceneRef.current;
-      if (!scene) {
-        console.error('[COLOR PICKER] Scene not available');
-        return;
-      }
-
-      console.log('[COLOR PICKER] Received terrain data:', {
-        hasHeightmap: !!terrainData.heightmap_raw,
-        hasColorMap: !!terrainData.colour_map_array,
-        heightmapShape: terrainData.heightmap_raw ? `${terrainData.heightmap_raw.length}x${terrainData.heightmap_raw[0]?.length}` : 'none',
-        colorMapShape: terrainData.colour_map_array ? `${terrainData.colour_map_array.length}x${terrainData.colour_map_array[0]?.length}` : 'none'
-      });
-
-      // Remove old terrain mesh - also search scene to ensure we remove it
-      if (terrainMeshRef.current) {
-        console.log('[COLOR PICKER] Removing old terrain mesh (by ref)');
-        scene.remove(terrainMeshRef.current);
-        if (terrainMeshRef.current.geometry) {
-          terrainMeshRef.current.geometry.dispose();
-        }
-        if (terrainMeshRef.current.material) {
-          if (terrainMeshRef.current.material.map) {
-            terrainMeshRef.current.material.map.dispose();
-          }
-          terrainMeshRef.current.material.dispose();
-        }
-        terrainMeshRef.current = null;
-      }
-      
-      // Also search scene for any terrain meshes and remove them (fallback)
-      // Look for meshes with vertex colors (terrain characteristic)
-      const terrainMeshes = scene.children.filter(child => {
-        return child.isMesh && 
-               child.material && 
-               child.material.vertexColors && 
-               child.geometry &&
-               child.geometry.attributes.color && // Has color attribute
-               !child.userData?.isSky && // Not the sky
-               !child.userData?.isGround; // Not the ground plane
-      });
-      
-      if (terrainMeshes.length > 0) {
-        console.log(`[COLOR PICKER] Found ${terrainMeshes.length} potential terrain mesh(es) in scene, removing...`);
-        terrainMeshes.forEach(mesh => {
-          console.log('[COLOR PICKER] Removing terrain mesh:', {
-            id: mesh.id,
-            position: mesh.position.toArray(),
-            rotation: mesh.rotation.toArray()
-          });
-          scene.remove(mesh);
-          if (mesh.geometry) mesh.geometry.dispose();
-          if (mesh.material) {
-            if (mesh.material.map) mesh.material.map.dispose();
-            mesh.material.dispose();
-          }
+      try {
+        const res = await fetch(`${API_BASE}/update-colors`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            biome: biome,
+            structures: structure_counts,
+            color_palette: palette
+          })
         });
-      }
 
-      // Update refs with new terrain data
-      if (terrainData.heightmap_raw && terrainData.colour_map_array) {
-        console.log('[COLOR PICKER] Updating terrain refs and creating new mesh');
-        console.log('[COLOR PICKER] Before update - terrain mesh count:', 
-          scene.children.filter(c => c.isMesh && c.material?.vertexColors).length);
-        
-        // Store old color for comparison (before updating refs)
-        const oldColorSample = colorMapRef.current?.[0]?.[0];
-        
-        heightmapRef.current = terrainData.heightmap_raw;
-        colorMapRef.current = terrainData.colour_map_array;
-        terrainPlacementMaskRef.current = terrainData.placement_mask || 
-          heightmapRef.current.map(row => row.map(height => (height >= 0 ? 1 : 0)));
-        
-        // Log a sample of the new color data to verify it's different
-        if (colorMapRef.current && colorMapRef.current[0] && colorMapRef.current[0][0]) {
-          const newColorSample = colorMapRef.current[0][0];
-          console.log('[COLOR PICKER] Color comparison:', {
-            oldColor: oldColorSample,
-            newColor: newColorSample,
-            colorsChanged: oldColorSample ? JSON.stringify(oldColorSample) !== JSON.stringify(newColorSample) : 'N/A (no old color)'
-          });
-          console.log('[COLOR PICKER] Sample new color (first pixel):', newColorSample);
-          console.log('[COLOR PICKER] Sample new color (middle pixel):', 
-            colorMapRef.current[Math.floor(colorMapRef.current.length / 2)][Math.floor(colorMapRef.current[0].length / 2)]);
+        if (!res.ok) {
+          throw new Error(`API error: ${res.status}`);
         }
+
+        const terrainData = await res.json();
         
-        // Create new terrain mesh with updated colors
-        const newTerrainMesh = createTerrain(
-          heightmapRef.current,
-          colorMapRef.current,
-          256
-        );
+        // Extract color assignments from response
+        const colorAssignments = terrainData.color_assignments || {};
+        console.log('[COLOR PICKER] Color assignments:', colorAssignments);
         
-        if (!newTerrainMesh) {
-          console.error('[COLOR PICKER] Failed to create terrain mesh');
+        // Update terrain with new colors
+        const scene = sceneRef.current;
+        if (!scene) {
+          console.error('[COLOR PICKER] Scene not available');
           return;
         }
-        
-        // Ensure terrain is positioned correctly (should be at origin)
-        // NOTE: createTerrain already rotates the geometry, so DON'T rotate the mesh again
-        newTerrainMesh.position.set(0, 0, 0);
-        // Don't set rotation.x - geometry is already rotated in createTerrain
-        
-        // Mark color attribute as needing update
-        if (newTerrainMesh.geometry && newTerrainMesh.geometry.attributes.color) {
-          newTerrainMesh.geometry.attributes.color.needsUpdate = true;
+
+        console.log('[COLOR PICKER] Received terrain data:', {
+          hasHeightmap: !!terrainData.heightmap_raw,
+          hasColorMap: !!terrainData.colour_map_array,
+          heightmapShape: terrainData.heightmap_raw ? `${terrainData.heightmap_raw.length}x${terrainData.heightmap_raw[0]?.length}` : 'none',
+          colorMapShape: terrainData.colour_map_array ? `${terrainData.colour_map_array.length}x${terrainData.colour_map_array[0]?.length}` : 'none'
+        });
+
+        // Remove old terrain mesh - also search scene to ensure we remove it
+        if (terrainMeshRef.current) {
+          console.log('[COLOR PICKER] Removing old terrain mesh (by ref)');
+          scene.remove(terrainMeshRef.current);
+          if (terrainMeshRef.current.geometry) {
+            terrainMeshRef.current.geometry.dispose();
+          }
+          if (terrainMeshRef.current.material) {
+            if (terrainMeshRef.current.material.map) {
+              terrainMeshRef.current.material.map.dispose();
+            }
+            terrainMeshRef.current.material.dispose();
+          }
+          terrainMeshRef.current = null;
         }
         
-        terrainMeshRef.current = newTerrainMesh;
-        scene.add(newTerrainMesh);
-        
-        // Verify the new mesh has correct colors
-        if (newTerrainMesh.geometry && newTerrainMesh.geometry.attributes.color) {
-          const colorAttr = newTerrainMesh.geometry.attributes.color;
-          const sampleIdx = Math.floor(colorAttr.count / 2);
-          const firstIdx = 0;
-          console.log('[COLOR PICKER] Terrain mesh color samples:', {
-            firstVertex: {
-              r: colorAttr.array[firstIdx * 3],
-              g: colorAttr.array[firstIdx * 3 + 1],
-              b: colorAttr.array[firstIdx * 3 + 2]
-            },
-            middleVertex: {
-              r: colorAttr.array[sampleIdx * 3],
-              g: colorAttr.array[sampleIdx * 3 + 1],
-              b: colorAttr.array[sampleIdx * 3 + 2]
-            },
-            // Compare with color map array
-            expectedFromColorMap: colorMapRef.current[0]?.[0],
-            matches: colorAttr.array[firstIdx * 3] === colorMapRef.current[0]?.[0]?.[0] / 255 &&
-                     colorAttr.array[firstIdx * 3 + 1] === colorMapRef.current[0]?.[0]?.[1] / 255 &&
-                     colorAttr.array[firstIdx * 3 + 2] === colorMapRef.current[0]?.[0]?.[2] / 255
-          });
-        }
-        
-        console.log('[COLOR PICKER] After update - terrain mesh count:', 
-          scene.children.filter(c => c.isMesh && c.material?.vertexColors).length);
-        
-        
-        console.log('[COLOR PICKER] New terrain mesh added to scene:', {
-          meshId: newTerrainMesh.id,
-          position: newTerrainMesh.position.toArray(),
-          rotation: newTerrainMesh.rotation.toArray(),
-          visible: newTerrainMesh.visible,
-          inScene: scene.children.includes(newTerrainMesh),
-          hasColorAttribute: !!newTerrainMesh.geometry?.attributes?.color,
-          colorCount: newTerrainMesh.geometry?.attributes?.color?.count || 0,
-          sceneChildrenCount: scene.children.length
+        // Also search scene for any terrain meshes and remove them (fallback)
+        // Look for meshes with vertex colors (terrain characteristic)
+        const terrainMeshes = scene.children.filter(child => {
+          return child.isMesh && 
+                 child.material && 
+                 child.material.vertexColors && 
+                 child.geometry &&
+                 child.geometry.attributes.color && // Has color attribute
+                 !child.userData?.isSky && // Not the sky
+                 !child.userData?.isGround; // Not the ground plane
         });
         
-        // Ensure the new terrain mesh is visible and properly positioned
-        newTerrainMesh.visible = true;
-        newTerrainMesh.updateMatrix();
-        
-        // Force render update - use requestAnimationFrame to ensure proper rendering
-        if (rendererRef.current && cameraRef.current) {
-          requestAnimationFrame(() => {
-            if (rendererRef.current && cameraRef.current && sceneRef.current) {
-              rendererRef.current.render(sceneRef.current, cameraRef.current);
-              console.log('[COLOR PICKER] Forced render update after animation frame');
+        if (terrainMeshes.length > 0) {
+          console.log(`[COLOR PICKER] Found ${terrainMeshes.length} potential terrain mesh(es) in scene, removing...`);
+          terrainMeshes.forEach(mesh => {
+            console.log('[COLOR PICKER] Removing terrain mesh:', {
+              id: mesh.id,
+              position: mesh.position.toArray(),
+              rotation: mesh.rotation.toArray()
+            });
+            scene.remove(mesh);
+            if (mesh.geometry) mesh.geometry.dispose();
+            if (mesh.material) {
+              if (mesh.material.map) mesh.material.map.dispose();
+              mesh.material.dispose();
             }
           });
         }
-        
-        // Update sky/background color FIRST (before structures) - this should always happen if color_assignments exist
-        const skyColorFromAssignments = colorAssignments?.sky;
-        if (skyColorFromAssignments) {
-          console.log('[COLOR PICKER] Updating sky color:', skyColorFromAssignments);
+
+        // Update refs with new terrain data
+        if (terrainData.heightmap_raw && terrainData.colour_map_array) {
+          console.log('[COLOR PICKER] Updating terrain refs and creating new mesh');
+          console.log('[COLOR PICKER] Before update - terrain mesh count:', 
+            scene.children.filter(c => c.isMesh && c.material?.vertexColors).length);
           
-          // Update renderer clear color
-          if (rendererRef.current) {
-            const skyColor = new THREE.Color(skyColorFromAssignments);
-            rendererRef.current.setClearColor(skyColor);
-            console.log('[COLOR PICKER] Updated renderer clear color:', skyColorFromAssignments, 'RGB:', skyColor.r, skyColor.g, skyColor.b);
+          // Store old color for comparison (before updating refs)
+          const oldColorSample = colorMapRef.current?.[0]?.[0];
+          
+          heightmapRef.current = terrainData.heightmap_raw;
+          colorMapRef.current = terrainData.colour_map_array;
+          terrainPlacementMaskRef.current = terrainData.placement_mask || 
+            heightmapRef.current.map(row => row.map(height => (height >= 0 ? 1 : 0)));
+          
+          // Log a sample of the new color data to verify it's different
+          if (colorMapRef.current && colorMapRef.current[0] && colorMapRef.current[0][0]) {
+            const newColorSample = colorMapRef.current[0][0];
+            console.log('[COLOR PICKER] Color comparison:', {
+              oldColor: oldColorSample,
+              newColor: newColorSample,
+              colorsChanged: oldColorSample ? JSON.stringify(oldColorSample) !== JSON.stringify(newColorSample) : 'N/A (no old color)'
+            });
+            console.log('[COLOR PICKER] Sample new color (first pixel):', newColorSample);
+            console.log('[COLOR PICKER] Sample new color (middle pixel):', 
+              colorMapRef.current[Math.floor(colorMapRef.current.length / 2)][Math.floor(colorMapRef.current[0].length / 2)]);
           }
           
-          // Update sky mesh texture
-          const skyMesh = scene.children.find(c => c.userData?.isSky);
-          console.log('[COLOR PICKER] Looking for sky mesh:', {
-            found: !!skyMesh,
-            sceneChildrenCount: scene.children.length,
-            skyMeshes: scene.children.filter(c => c.userData?.isSky).length
+          // Create new terrain mesh with updated colors
+          const newTerrainMesh = createTerrain(
+            heightmapRef.current,
+            colorMapRef.current,
+            256
+          );
+          
+          if (!newTerrainMesh) {
+            console.error('[COLOR PICKER] Failed to create terrain mesh');
+            return;
+          }
+          
+          // Ensure terrain is positioned correctly (should be at origin)
+          // NOTE: createTerrain already rotates the geometry, so DON'T rotate the mesh again
+          newTerrainMesh.position.set(0, 0, 0);
+          // Don't set rotation.x - geometry is already rotated in createTerrain
+          
+          // Mark color attribute as needing update
+          if (newTerrainMesh.geometry && newTerrainMesh.geometry.attributes.color) {
+            newTerrainMesh.geometry.attributes.color.needsUpdate = true;
+          }
+          
+          terrainMeshRef.current = newTerrainMesh;
+          scene.add(newTerrainMesh);
+          
+          // Verify the new mesh has correct colors
+          if (newTerrainMesh.geometry && newTerrainMesh.geometry.attributes.color) {
+            const colorAttr = newTerrainMesh.geometry.attributes.color;
+            const sampleIdx = Math.floor(colorAttr.count / 2);
+            const firstIdx = 0;
+            console.log('[COLOR PICKER] Terrain mesh color samples:', {
+              firstVertex: {
+                r: colorAttr.array[firstIdx * 3],
+                g: colorAttr.array[firstIdx * 3 + 1],
+                b: colorAttr.array[firstIdx * 3 + 2]
+              },
+              middleVertex: {
+                r: colorAttr.array[sampleIdx * 3],
+                g: colorAttr.array[sampleIdx * 3 + 1],
+                b: colorAttr.array[sampleIdx * 3 + 2]
+              },
+              // Compare with color map array
+              expectedFromColorMap: colorMapRef.current[0]?.[0],
+              matches: colorAttr.array[firstIdx * 3] === colorMapRef.current[0]?.[0]?.[0] / 255 &&
+                       colorAttr.array[firstIdx * 3 + 1] === colorMapRef.current[0]?.[0]?.[1] / 255 &&
+                       colorAttr.array[firstIdx * 3 + 2] === colorMapRef.current[0]?.[0]?.[2] / 255
+            });
+          }
+          
+          console.log('[COLOR PICKER] After update - terrain mesh count:', 
+            scene.children.filter(c => c.isMesh && c.material?.vertexColors).length);
+          
+          
+          console.log('[COLOR PICKER] New terrain mesh added to scene:', {
+            meshId: newTerrainMesh.id,
+            position: newTerrainMesh.position.toArray(),
+            rotation: newTerrainMesh.rotation.toArray(),
+            visible: newTerrainMesh.visible,
+            inScene: scene.children.includes(newTerrainMesh),
+            hasColorAttribute: !!newTerrainMesh.geometry?.attributes?.color,
+            colorCount: newTerrainMesh.geometry?.attributes?.color?.count || 0,
+            sceneChildrenCount: scene.children.length
           });
           
-          if (skyMesh && skyMesh.material) {
-            const skyColor = new THREE.Color(skyColorFromAssignments);
+          // Ensure the new terrain mesh is visible and properly positioned
+          newTerrainMesh.visible = true;
+          newTerrainMesh.updateMatrix();
+          
+          // Force render update - use requestAnimationFrame to ensure proper rendering
+          if (rendererRef.current && cameraRef.current) {
+            requestAnimationFrame(() => {
+              if (rendererRef.current && cameraRef.current && sceneRef.current) {
+                rendererRef.current.render(sceneRef.current, cameraRef.current);
+                console.log('[COLOR PICKER] Forced render update after animation frame');
+              }
+            });
+          }
+          
+          // Update sky/background color FIRST (before structures) - this should always happen if color_assignments exist
+          const skyColorFromAssignments = colorAssignments?.sky;
+          if (skyColorFromAssignments) {
+            console.log('[COLOR PICKER] Updating sky color:', skyColorFromAssignments);
             
-            // Create gradient from sky color
-            const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 512;
-            const context = canvas.getContext('2d');
-            const gradient = context.createLinearGradient(0, 0, 0, 512);
-            
-            // Create darker top and lighter bottom for gradient effect
-            const topColor = new THREE.Color(skyColorFromAssignments);
-            topColor.multiplyScalar(0.6); // Darker at top
-            const bottomColor = new THREE.Color(skyColorFromAssignments);
-            bottomColor.multiplyScalar(1.2); // Lighter at bottom
-            
-            gradient.addColorStop(0, `#${topColor.getHexString().padStart(6, '0')}`);
-            gradient.addColorStop(0.5, skyColorFromAssignments);
-            gradient.addColorStop(1, `#${bottomColor.getHexString().padStart(6, '0')}`);
-            
-            context.fillStyle = gradient;
-            context.fillRect(0, 0, 512, 512);
-            
-            // Dispose old texture if it exists
-            if (skyMesh.material.map) {
-              skyMesh.material.map.dispose();
+            // Update renderer clear color
+            if (rendererRef.current) {
+              const skyColor = new THREE.Color(skyColorFromAssignments);
+              rendererRef.current.setClearColor(skyColor);
+              console.log('[COLOR PICKER] Updated renderer clear color:', skyColorFromAssignments, 'RGB:', skyColor.r, skyColor.g, skyColor.b);
             }
             
-            // Update sky texture
-            const skyTexture = new THREE.CanvasTexture(canvas);
-            skyMesh.material.map = skyTexture;
-            skyMesh.material.needsUpdate = true;
+            // Update sky mesh texture
+            const skyMesh = scene.children.find(c => c.userData?.isSky);
+            console.log('[COLOR PICKER] Looking for sky mesh:', {
+              found: !!skyMesh,
+              sceneChildrenCount: scene.children.length,
+              skyMeshes: scene.children.filter(c => c.userData?.isSky).length
+            });
             
-            console.log('[COLOR PICKER] Updated sky mesh texture:', skyColorFromAssignments, {
-              topColor: topColor.getHexString(),
-              midColor: skyColor.getHexString(),
-              bottomColor: bottomColor.getHexString()
-            });
-          } else {
-            console.warn('[COLOR PICKER] Sky mesh not found or has no material:', {
-              skyMesh: !!skyMesh,
-              hasMaterial: skyMesh?.material ? true : false
-            });
-          }
-          
-          // Update ambient light color based on sky
-          const ambientLight = scene.children.find(c => c.isAmbientLight);
-          if (ambientLight) {
-            const skyColor = new THREE.Color(skyColorFromAssignments);
-            skyColor.multiplyScalar(0.8); // Darken slightly
-            ambientLight.color.copy(skyColor);
-            console.log('[COLOR PICKER] Updated ambient light color');
-          }
-        } else {
-          console.warn('[COLOR PICKER] No sky color in color_assignments:', colorAssignments);
-        }
-        
-        // Update structures with new colors from color_assignments
-        if (colorAssignments && Object.keys(colorAssignments).length > 0) {
-          console.log('[COLOR PICKER] Updating structure colors...');
-          
-          // Update tree colors
-          structuresRef.current.forEach((structure) => {
-            if (structure.userData?.structureType === 'tree') {
-              const leafColor = colorAssignments.tree_leaves || '#228B22';
-              const trunkColor = colorAssignments.tree_trunk || '#8b4513';
+            if (skyMesh && skyMesh.material) {
+              const skyColor = new THREE.Color(skyColorFromAssignments);
               
-              // Update leaf colors
-              structure.traverse((child) => {
-                if (child.isMesh && child.material && child.material.vertexColors) {
-                  const colorAttr = child.geometry.attributes.color;
-                  if (colorAttr) {
-                    const color = new THREE.Color(leafColor);
-                    for (let i = 0; i < colorAttr.count; i++) {
-                      colorAttr.setXYZ(i, color.r, color.g, color.b);
-                    }
-                    colorAttr.needsUpdate = true;
-                  }
-                } else if (child.isMesh && child.material && child.material.color) {
-                  // Check if it's a trunk (standard material)
-                  if (child.material.roughness > 1.0) { // Trunk has roughness > 1.0
-                    child.material.color.set(trunkColor);
-                  }
-                }
+              // Create gradient from sky color
+              const canvas = document.createElement('canvas');
+              canvas.width = 512;
+              canvas.height = 512;
+              const context = canvas.getContext('2d');
+              const gradient = context.createLinearGradient(0, 0, 0, 512);
+              
+              // Create darker top and lighter bottom for gradient effect
+              const topColor = new THREE.Color(skyColorFromAssignments);
+              topColor.multiplyScalar(0.6); // Darker at top
+              const bottomColor = new THREE.Color(skyColorFromAssignments);
+              bottomColor.multiplyScalar(1.2); // Lighter at bottom
+              
+              gradient.addColorStop(0, `#${topColor.getHexString().padStart(6, '0')}`);
+              gradient.addColorStop(0.5, skyColorFromAssignments);
+              gradient.addColorStop(1, `#${bottomColor.getHexString().padStart(6, '0')}`);
+              
+              context.fillStyle = gradient;
+              context.fillRect(0, 0, 512, 512);
+              
+              // Dispose old texture if it exists
+              if (skyMesh.material.map) {
+                skyMesh.material.map.dispose();
+              }
+              
+              // Update sky texture
+              const skyTexture = new THREE.CanvasTexture(canvas);
+              skyMesh.material.map = skyTexture;
+              skyMesh.material.needsUpdate = true;
+              
+              console.log('[COLOR PICKER] Updated sky mesh texture:', skyColorFromAssignments, {
+                topColor: topColor.getHexString(),
+                midColor: skyColor.getHexString(),
+                bottomColor: bottomColor.getHexString()
               });
-            } else if (structure.userData?.structureType === 'building') {
-              const buildingColor = colorAssignments.building || '#FFB6C1';
-              structure.traverse((child) => {
-                if (child.isMesh && child.material && child.material.color) {
-                  // Update building color, but keep windows darker
-                  if (!child.material.map) { // Not a window (windows have textures)
-                    child.material.color.set(buildingColor);
-                  }
-                }
-              });
-            } else if (structure.userData?.structureType === 'rock') {
-              const rockColor = colorAssignments.rock || '#808080';
-              structure.traverse((child) => {
-                if (child.isMesh && child.material && child.material.color) {
-                  child.material.color.set(rockColor);
-                }
-              });
-            } else if (structure.userData?.structureType === 'mountain') {
-              const mountainColor = colorAssignments.mountain || '#708090';
-              structure.traverse((child) => {
-                if (child.isMesh && child.material && child.material.color) {
-                  child.material.color.set(mountainColor);
-                }
+            } else {
+              console.warn('[COLOR PICKER] Sky mesh not found or has no material:', {
+                skyMesh: !!skyMesh,
+                hasMaterial: skyMesh?.material ? true : false
               });
             }
+            
+            // Update ambient light color based on sky
+            const ambientLight = scene.children.find(c => c.isAmbientLight);
+            if (ambientLight) {
+              const skyColor = new THREE.Color(skyColorFromAssignments);
+              skyColor.multiplyScalar(0.8); // Darken slightly
+              ambientLight.color.copy(skyColor);
+              console.log('[COLOR PICKER] Updated ambient light color');
+            }
+          } else {
+            console.warn('[COLOR PICKER] No sky color in color_assignments:', colorAssignments);
+          }
+          
+          // Update structures with new colors from color_assignments
+          if (colorAssignments && Object.keys(colorAssignments).length > 0) {
+            console.log('[COLOR PICKER] Updating structure colors...');
+            
+            // Update tree colors
+            structuresRef.current.forEach((structure) => {
+              if (structure.userData?.structureType === 'tree') {
+                const leafColor = colorAssignments.tree_leaves || '#228B22';
+                const trunkColor = colorAssignments.tree_trunk || '#8b4513';
+                
+                // Update leaf colors
+                structure.traverse((child) => {
+                  if (child.isMesh && child.material && child.material.vertexColors) {
+                    const colorAttr = child.geometry.attributes.color;
+                    if (colorAttr) {
+                      const color = new THREE.Color(leafColor);
+                      for (let i = 0; i < colorAttr.count; i++) {
+                        colorAttr.setXYZ(i, color.r, color.g, color.b);
+                      }
+                      colorAttr.needsUpdate = true;
+                    }
+                  } else if (child.isMesh && child.material && child.material.color) {
+                    // Check if it's a trunk (standard material)
+                    if (child.material.roughness > 1.0) { // Trunk has roughness > 1.0
+                      child.material.color.set(trunkColor);
+                    }
+                  }
+                });
+              } else if (structure.userData?.structureType === 'building') {
+                const buildingColor = colorAssignments.building || '#FFB6C1';
+                structure.traverse((child) => {
+                  if (child.isMesh && child.material && child.material.color) {
+                    // Update building color, but keep windows darker
+                    if (!child.material.map) { // Not a window (windows have textures)
+                      child.material.color.set(buildingColor);
+                    }
+                  }
+                });
+              } else if (structure.userData?.structureType === 'rock') {
+                const rockColor = colorAssignments.rock || '#808080';
+                structure.traverse((child) => {
+                  if (child.isMesh && child.material && child.material.color) {
+                    child.material.color.set(rockColor);
+                  }
+                });
+              } else if (structure.userData?.structureType === 'mountain') {
+                const mountainColor = colorAssignments.mountain || '#708090';
+                structure.traverse((child) => {
+                  if (child.isMesh && child.material && child.material.color) {
+                    child.material.color.set(mountainColor);
+                  }
+                });
+              }
+            });
+          }
+          
+          // Update current world with new terrain data and color assignments
+          setCurrentWorld(prev => ({
+            ...prev,
+            world: {
+              ...prev?.world,
+              heightmap_raw: terrainData.heightmap_raw,
+              colour_map_array: terrainData.colour_map_array,
+              placement_mask: terrainData.placement_mask,
+              color_assignments: colorAssignments
+            }
+          }));
+          
+          console.log('[COLOR PICKER] ✅ Terrain and structure colors updated successfully');
+        } else {
+          console.error('[COLOR PICKER] Missing terrain data:', {
+            heightmap: !!terrainData.heightmap_raw,
+            colorMap: !!terrainData.colour_map_array
           });
         }
-        
-        // Update current world with new terrain data and color assignments
-        setCurrentWorld(prev => ({
-          ...prev,
-          world: {
-            ...prev?.world,
-            heightmap_raw: terrainData.heightmap_raw,
-            colour_map_array: terrainData.colour_map_array,
-            placement_mask: terrainData.placement_mask,
-            color_assignments: colorAssignments
-          }
-        }));
-        
-        console.log('[COLOR PICKER] ✅ Terrain and structure colors updated successfully');
-      } else {
-        console.error('[COLOR PICKER] Missing terrain data:', {
-          heightmap: !!terrainData.heightmap_raw,
-          colorMap: !!terrainData.colour_map_array
-        });
+      } catch (fetchError) {
+        if (!handleBackendConnectionError(fetchError, 'applyColorPaletteToWorld update-colors request')) {
+          throw fetchError; // Re-throw if not a connection error
+        }
+        return; // Exit early if connection error
       }
     } catch (error) {
-      console.error('[COLOR PICKER] Error applying color palette:', error);
-      alert(`Failed to apply color palette: ${error.message}`);
+      if (!handleBackendConnectionError(error, 'applyColorPaletteToWorld')) {
+        console.error('[COLOR PICKER] Error applying color palette:', error);
+        alert(`Failed to apply color palette: ${error.message}`);
+      }
     }
   };
 
@@ -6486,33 +6620,49 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/ab4e53c8-3e02-4665-bb8e-bc913babc9ea',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:5322',message:'Chat modification request',data:{method:'POST',body:{messages: newMessages, current_world: currentWorld}},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
       // #endregion
-      const res = await fetch(`${API_BASE}/modify-world`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          messages: newMessages,
-          current_world: currentWorld,
-          player_position: playerPos,
-          player_direction: playerDirection
-        }),
-      });
+      try {
+        const res = await fetch(`${API_BASE}/modify-world`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            messages: newMessages,
+            current_world: currentWorld,
+            player_position: playerPos,
+            player_direction: playerDirection
+          }),
+        });
 
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
 
-      const data = await res.json();
-      
-      // Add AI response to conversation
-      const updatedMessages = [...newMessages, { role: 'assistant', content: data.message }];
-      setChatConversation(updatedMessages);
+        const data = await res.json();
+        
+        // Add AI response to conversation
+        const updatedMessages = [...newMessages, { role: 'assistant', content: data.message }];
+        setChatConversation(updatedMessages);
 
-      setIsWaitingForAI(false);
+        setIsWaitingForAI(false);
+      } catch (fetchError) {
+        if (!handleBackendConnectionError(fetchError, 'sendChatMessageForModify modify-world POST request')) {
+          throw fetchError; // Re-throw if not a connection error
+        }
+        setIsWaitingForAI(false);
+        setChatConversation(prev => [...prev, { 
+          role: 'assistant', 
+          content: 'Sorry, the backend server is not running. Please start it and try again.' 
+        }]);
+        return; // Exit early if connection error
+      }
     } catch (error) {
-      console.error('Chat error:', error);
-      setIsWaitingForAI(false);
-      setChatConversation(prev => [...prev, { 
-        role: 'assistant', 
-        content: 'Sorry, I encountered an error. Please try again.' 
-      }]);
+      if (!handleBackendConnectionError(error, 'sendChatMessageForModify')) {
+        console.error('Chat error:', error);
+        setIsWaitingForAI(false);
+        setChatConversation(prev => [...prev, { 
+          role: 'assistant', 
+          content: 'Sorry, I encountered an error. Please try again.' 
+        }]);
+      } else {
+        setIsWaitingForAI(false);
+      }
     }
   };
 
@@ -8433,6 +8583,5 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
     </div>
   );
 };
-
 
 export default VoiceWorldBuilder;

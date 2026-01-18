@@ -5,6 +5,10 @@ print("="*80)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
+import asyncio
+import signal
+import sys
 
 # Import API routers
 from api.routes.generate import router as generate_router
@@ -14,11 +18,76 @@ from api.routes.scan import router as scan_router
 
 print("[MAIN.PY] Routers imported")
 
-# Create FastAPI app
+# Global shutdown flag
+shutdown_event = asyncio.Event()
+
+# Lifespan context manager for graceful startup/shutdown
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Handle application lifespan: startup and shutdown events.
+    Provides graceful shutdown with proper cleanup.
+    """
+    # Startup
+    print("=" * 60)
+    print("[LIFESPAN] Application starting up...")
+    print("=" * 60)
+    
+    # Setup signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        """Handle shutdown signals gracefully"""
+        signal_name = signal.Signals(signum).name
+        print(f"\n[SHUTDOWN] Received {signal_name} signal, initiating graceful shutdown...")
+        shutdown_event.set()
+    
+    # Register signal handlers (SIGINT = Ctrl+C, SIGTERM = termination)
+    if sys.platform != "win32":
+        # Unix/Linux/Mac
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+    else:
+        # Windows
+        signal.signal(signal.SIGINT, signal_handler)
+        # Windows doesn't support SIGTERM, but we'll handle it if available
+        if hasattr(signal, 'SIGTERM'):
+            signal.signal(signal.SIGTERM, signal_handler)
+    
+    print("[LIFESPAN] Signal handlers registered")
+    print("[LIFESPAN] Application ready")
+    
+    yield  # Application runs here
+    
+    # Shutdown
+    print("\n" + "=" * 60)
+    print("[LIFESPAN] Application shutting down...")
+    print("[LIFESPAN] Cleaning up resources...")
+    
+    # Cancel any running tasks
+    try:
+        # Get all running tasks
+        tasks = [task for task in asyncio.all_tasks() if not task.done()]
+        if tasks:
+            print(f"[LIFESPAN] Cancelling {len(tasks)} running task(s)...")
+            for task in tasks:
+                task.cancel()
+            
+            # Wait for tasks to complete cancellation (with timeout)
+            await asyncio.gather(*tasks, return_exceptions=True)
+    except asyncio.CancelledError:
+        # Expected during shutdown
+        pass
+    except Exception as e:
+        print(f"[LIFESPAN] Warning during cleanup: {e}")
+    
+    print("[LIFESPAN] Shutdown complete")
+    print("=" * 60)
+
+# Create FastAPI app with lifespan
 app = FastAPI(
     title="AI World Builder API",
     description="Voice-driven 3D world generation",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 print("[MAIN.PY] FastAPI app created")
@@ -105,15 +174,43 @@ async def root():
 # Run server if executed directly
 if __name__ == "__main__":
     import uvicorn
+    
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        """
+        Custom exception handler to suppress CancelledError during shutdown
+        """
+        # Suppress CancelledError and KeyboardInterrupt during shutdown
+        if issubclass(exc_type, (asyncio.CancelledError, KeyboardInterrupt)):
+            # Only print if not already shutting down gracefully
+            if not shutdown_event.is_set():
+                print(f"\n[SHUTDOWN] {exc_type.__name__}: Initiating graceful shutdown...")
+            return
+        # Use default exception handler for other exceptions
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+    
+    # Set custom exception handler
+    sys.excepthook = handle_exception
+    
     print("=" * 60)
     print("AI World Builder Backend Starting...")
     print(f"API Docs: http://localhost:8000/docs")
     print(f"Health Check: http://localhost:8000/api/health")
+    print(f"Press Ctrl+C to stop the server gracefully")
     print("=" * 60)
     
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True  # Auto-reload on code changes
-    )
+    try:
+        uvicorn.run(
+            "main:app",
+            host="0.0.0.0",
+            port=8000,
+            reload=True,  # Auto-reload on code changes
+            log_level="info"
+        )
+    except KeyboardInterrupt:
+        # This will be caught and handled gracefully by lifespan
+        print("\n[SHUTDOWN] KeyboardInterrupt received, shutting down...")
+    except Exception as e:
+        print(f"\n[SHUTDOWN] Unexpected error during shutdown: {e}")
+        raise
+    finally:
+        print("\n[SHUTDOWN] Server stopped")
