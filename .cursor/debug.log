@@ -43,3 +43,18 @@
 {"location":"App.jsx:animateSnowfall","message":"Animation tick","data":{"hasScene":true,"hasSnowParticles":false,"childCount":80},"timestamp":1768739867168,"sessionId":"debug-session","hypothesisId":"H4-animate"}
 {"location":"App.jsx:animateSnowfall","message":"Animation tick","data":{"hasScene":true,"hasSnowParticles":false,"childCount":80},"timestamp":1768739867937,"sessionId":"debug-session","hypothesisId":"H4-animate"}
 {"location":"App.jsx:animateSnowfall","message":"Animation tick","data":{"hasScene":true,"hasSnowParticles":false,"childCount":80},"timestamp":1768739869170,"sessionId":"debug-session","hypothesisId":"H4-animate"}
+{"location": "generate.py:420", "message": "Mountain peak generated", "data": {"x": 59.73333333333332, "y": 8.074234127998352, "z": -125.9921568627451, "scale": 1.0}, "timestamp": 1768758230524, "sessionId": "debug-session", "hypothesisId": "H4"}
+{"location": "generate.py:420", "message": "Mountain peak generated", "data": {"x": -28.61176470588235, "y": 7.505275905132294, "z": -90.8549019607843, "scale": 1.0}, "timestamp": 1768758230525, "sessionId": "debug-session", "hypothesisId": "H4"}
+{"location": "generate.py:420", "message": "Mountain peak generated", "data": {"x": 93.86666666666667, "y": 7.503584325313568, "z": -53.70980392156862, "scale": 1.0}, "timestamp": 1768758230526, "sessionId": "debug-session", "hypothesisId": "H4"}
+{"location": "update.py:25", "message": "modify_world_chat entry", "data": {"method": "POST", "messages_count": 1}, "timestamp": 1768766346234, "sessionId": "debug-session", "hypothesisId": "H1,H2"}
+{"location": "update.py:42", "message": "Chat response received", "data": {"ready_to_modify": false, "message_length": 35}, "timestamp": 1768766352038, "sessionId": "debug-session", "hypothesisId": "H2"}
+{"location": "update.py:21", "message": "modify_world entry", "data": {"method": "PATCH", "command": "remove 5 trees"}, "timestamp": 1768766357215, "sessionId": "debug-session", "hypothesisId": "H1"}
+{"location": "voice.py:1162", "message": "AI response parsed diff", "data": {"peaks": []}, "timestamp": 1768766370873, "sessionId": "debug-session", "hypothesisId": "H3"}
+{"location": "update.py:25", "message": "modify_world_chat entry", "data": {"method": "POST", "messages_count": 1}, "timestamp": 1768767145990, "sessionId": "debug-session", "hypothesisId": "H1,H2"}
+{"location": "update.py:42", "message": "Chat response received", "data": {"ready_to_modify": false, "message_length": 67}, "timestamp": 1768767151626, "sessionId": "debug-session", "hypothesisId": "H2"}
+{"location": "update.py:21", "message": "modify_world entry", "data": {"method": "PATCH", "command": "make it noon time, brighter"}, "timestamp": 1768767153675, "sessionId": "debug-session", "hypothesisId": "H1"}
+{"location": "voice.py:1162", "message": "AI response parsed diff", "data": {"peaks": []}, "timestamp": 1768767168399, "sessionId": "debug-session", "hypothesisId": "H3"}
+{"location": "update.py:25", "message": "modify_world_chat entry", "data": {"method": "POST", "messages_count": 1}, "timestamp": 1768767564621, "sessionId": "debug-session", "hypothesisId": "H1,H2"}
+{"location": "update.py:42", "message": "Chat response received", "data": {"ready_to_modify": false, "message_length": 149}, "timestamp": 1768767570550, "sessionId": "debug-session", "hypothesisId": "H2"}
+{"location": "update.py:21", "message": "modify_world entry", "data": {"method": "PATCH", "command": "add a castle and a market"}, "timestamp": 1768767574835, "sessionId": "debug-session", "hypothesisId": "H1"}
+{"location": "voice.py:1162", "message": "AI response parsed diff", "data": {"peaks": []}, "timestamp": 1768767645741, "sessionId": "debug-session", "hypothesisId": "H3"}

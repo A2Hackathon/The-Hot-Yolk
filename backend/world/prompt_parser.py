@@ -1,4 +1,4 @@
-import requests
+from groq import Groq
 import json
 import os
 import re
@@ -18,11 +18,11 @@ _prompt_cache = {}
 _cache_loaded = False
 
 
-def get_openrouter_api_key():
-    api_key = os.environ.get("OPENROUTER_API_KEY")
+def get_groq_client():
+    api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        raise ValueError("OPENROUTER_API_KEY not found in environment variables")
-    return api_key
+        raise ValueError("GROQ_API_KEY not found in environment variables")
+    return Groq(api_key=api_key)
 
 
 def normalize_prompt(prompt: str) -> str:
@@ -137,22 +137,6 @@ def get_from_cache(prompt: str) -> dict:
         cached_biome = cached_params.get("biome", "").lower() if cached_params else ""
         prompt_lower = prompt.lower() if prompt else ""
         
-        # CRITICAL: Reject cache if biome contains time words (e.g., "city at night")
-        if cached_biome:
-            time_phrases_in_biome = [" at night", " at noon", " at sunset", " at dusk", " at evening", " at dawn", " at midnight", " at morning", " at day", " at afternoon"]
-            time_words_in_biome = [" night", " noon", " sunset", " dusk", " evening", " dawn", " midnight", " morning", " day", " afternoon"]
-            if any(phrase in cached_biome for phrase in time_phrases_in_biome) or any(word in cached_biome for word in time_words_in_biome):
-                print(f"[CACHE] 🚫 Cache REJECTED: Biome '{cached_biome}' contains time words - DELETING")
-                try:
-                    load_cache()
-                    if cache_key in _prompt_cache:
-                        del _prompt_cache[cache_key]
-                        save_cache()
-                        print(f"[CACHE] ✅ Deleted bad cache entry with time in biome")
-                except Exception as e:
-                    print(f"[CACHE] Error deleting: {e}")
-                return None  # Don't return bad cache
-        
         # Check if cached biome is wrong for specific locations
         force_mappings = {
             "gotham": ["gotham", "batman"],
@@ -162,8 +146,7 @@ def get_from_cache(prompt: str) -> dict:
             "paris": ["paris", "france"],
             "spiderman_world": ["spider", "spiderman"],
             "lava": ["lava", "magma", "volcanic", "volcano", "molten"],
-            "arctic": ["arctic", "snow", "ice", "frozen", "winter", "icy"],
-            "park": ["park"]
+            "arctic": ["arctic", "snow", "ice", "frozen", "winter", "icy"]
         }
         
         for target_biome, keywords in force_mappings.items():
@@ -181,33 +164,10 @@ def get_from_cache(prompt: str) -> dict:
                         print(f"[CACHE] Error deleting: {e}")
                     return None  # Don't return bad cache
         
-        # Post-process cached data to fix biome if it contains time words
-        cached_biome_raw = cached_params.get("biome", "")
-        if cached_biome_raw and isinstance(cached_biome_raw, str):
-            cached_biome_lower = cached_biome_raw.lower()
-            time_phrases = [" at night", " at noon", " at sunset", " at dusk", " at evening", " at dawn", " at midnight", " at morning", " at day", " at afternoon"]
-            
-            for phrase in time_phrases:
-                if phrase in cached_biome_lower:
-                    parts = cached_biome_lower.split(phrase, 1)
-                    if len(parts) == 2:
-                        base_biome = parts[0].strip()
-                        time_word = phrase.replace(" at ", "").strip()
-                        cached_params["biome"] = base_biome
-                        if cached_params.get("time") not in ["noon", "sunset", "night"]:
-                            if time_word in ["night", "midnight", "evening", "dusk"]:
-                                cached_params["time"] = "night"
-                            elif time_word in ["noon", "day", "morning", "afternoon"]:
-                                cached_params["time"] = "noon"
-                            elif time_word == "sunset":
-                                cached_params["time"] = "sunset"
-                        print(f"[CACHE] ✅ FIXED cached data: Split '{cached_biome_raw}' → biome: '{base_biome}', time: '{cached_params.get('time')}'")
-                        break
-        
         # Cache is valid, return it
         entry["hit_count"] = entry.get("hit_count", 0) + 1
         entry["last_accessed"] = time.time()
-        print(f"[CACHE] ✓ Cache HIT for prompt: '{prompt[:50]}...' (biome: '{cached_params.get('biome', '')}')")
+        print(f"[CACHE] ✓ Cache HIT for prompt: '{prompt[:50]}...' (biome: '{cached_biome}')")
         return cached_params
     
     print(f"[CACHE] ✗ Cache MISS for prompt: '{prompt[:50]}...'")
@@ -260,8 +220,7 @@ def parse_prompt(prompt: str) -> dict:
             "venice": ["venice", "italy"],
             "paris": ["paris", "france"],
             "spiderman_world": ["spider", "spiderman"],
-            "arctic": ["arctic", "snow", "ice", "frozen", "winter", "icy"],
-            "park": ["park"]
+            "arctic": ["arctic", "snow", "ice", "frozen", "winter", "icy"]
         }
         
         corrected = False
@@ -358,8 +317,7 @@ def parse_prompt(prompt: str) -> dict:
             "paris": ["paris", "france"],
             "spiderman_world": ["spider", "spiderman"],
             "lava": ["lava", "magma", "volcanic", "volcano", "molten"],
-            "arctic": ["arctic", "snow", "ice", "frozen", "winter", "icy"],
-            "park": ["park"]
+            "arctic": ["arctic", "snow", "ice", "frozen", "winter", "icy"]
         }
         
         target_biome = None
@@ -369,22 +327,11 @@ def parse_prompt(prompt: str) -> dict:
                 print(f"[PARSER] 🎯 PRE-CHECK: User wrote '{prompt}' → forcing AI to use biome '{target_biome}'")
                 break
         
-        api_key = get_openrouter_api_key()
+        client = get_groq_client()
         
-        # Use OpenRouter API to access multiple models
-        # Using GPT-4o-mini for good quality and reasonable cost
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "http://localhost:5173",  # Optional but recommended
-            },
-            json={
-                "model": "openai/gpt-4o-mini",  # Cost-effective, good quality
-                # Alternatives: "meta-llama/llama-3.1-70b-instruct:free" for free tier
-                #               "anthropic/claude-3-haiku" for structured outputs
-                "messages": [
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
                 {
                     "role": "system",
                     "content": """You are a UNIVERSAL WORLD CREATOR. Your job is to turn ANYTHING into a 3D world that MATCHES THE EXACT PROMPT the user wrote.
@@ -399,50 +346,32 @@ CRITICAL RULES:
 7. ALWAYS return valid JSON, no matter what the input is
 8. ALWAYS generate EXACTLY 2 distinct types of "creative_objects" that are NOT standard biome objects (trees, rocks, etc.). These must be deduced from the biome name and prompt.
 9. If the user's prompt contains a built-in biome name (e.g., 'gotham', 'arctic', 'lava'), your response for the 'biome' field MUST be ONLY that name. The rest of the prompt (e.g., 'with mountains') should be used to define 'structure' or 'creative_objects'.
-10. **CRITICAL: ALWAYS detect TIME separately from BIOME** - Phrases like "city at night", "arctic at noon", "forest at sunset" must be split:
-    * "city at night" → biome: "city", time: "night" (NOT biome: "city at night")
-    * "arctic at noon" → biome: "arctic", time: "noon" (NOT biome: "arctic at noon")
-    * Extract time words: "night", "noon", "sunset", "dusk", "evening", "dawn", "midnight", "morning", "day", "afternoon"
-    * The biome field should ONLY contain the biome name, NEVER include time words
-11. **CRITICAL: Check BUILT-IN BIOMES first** - Before creating a unique biome name, check if the user's prompt matches a built-in biome:
-    * Built-in biomes: "arctic", "city", "lava", "volcanic", "volcano", "futuristic", "cyberpunk", "gotham", "metropolis", "tokyo", "spiderman_world", "desert", "jungle", "forest", "underwater", "room"
-    * If user writes "city at night" → Check: does "city" match a built-in biome? YES → biome: "city", time: "night"
-    * If user writes "arctic with mountains" → Check: does "arctic" match a built-in biome? YES → biome: "arctic", structure: add mountains
-    * Only create unique biome names (like "pizza_world") if the prompt does NOT match any built-in biome
 
-**CRITICAL: BIOME vs KEY_FEATURE SEPARATION:**
-- **BIOME field**: Use for BASE terrain/environment types: "city", "arctic", "lava", "volcanic", "desert", "jungle", "forest", "underwater", "room"
-- **KEY_FEATURE field**: Use for THEMES/STYLES/CHARACTERS that modify a base biome: "gotham", "tokyo", "metropolis", "neon", "futuristic", "cyberpunk", "spiderman_world"
-- Examples:
-  * "gotham" → biome: "city", key_feature: "gotham" (NOT biome: "gotham")
-  * "tokyo" → biome: "city", key_feature: "tokyo" (NOT biome: "tokyo")
-  * "neon city" → biome: "city", key_feature: "neon" (NOT biome: "neon")
-  * "futuristic city" → biome: "city", key_feature: "futuristic" (NOT biome: "futuristic")
-  * "lava" → biome: "lava", key_feature: null (lava IS a biome, not a feature)
-  * "arctic" → biome: "arctic", key_feature: null (arctic IS a biome, not a feature)
-- ALWAYS generate 2 creative objects based on key_feature (if present) or biome (e.g., for "gotham": "bat_signal", "gargoyle")
+IMPORTANT: 
+- User wrote: "gotham" → biome: "gotham" (NOT "city"), generate DARK colors based on Gotham's visual identity
+- User wrote: "tokyo" → biome: "tokyo" (NOT "city"), generate NEON colors based on Tokyo's visual identity  
+- User wrote: "metropolis" → biome: "metropolis" (NOT "city"), generate BRIGHT colors based on Metropolis's visual identity
+- Use the EXACT location/character name from the user's prompt as the biome name!
+- ALWAYS generate 2 creative objects (e.g., for "gotham": "bat_signal", "gargoyle")
 
 THEME RESEARCH & CONTEXTUAL AWARENESS:
 When user mentions a location/character/theme, USE YOUR KNOWLEDGE to generate authentic settings:
 
 EXAMPLES OF THEME-AWARE GENERATION:
 - "gotham" → 
-  * biome: "city", key_feature: "gotham"
   * Colors: Dark (#000000, #1a1a1a, #2d2d2d, #4a0e4e purple accents) - DARK and gothic
   * Lighting: NIGHT with fog, dim ambient, dramatic shadows
   * Buildings: Gothic architecture (tall, angular, dark stone), many street lamps
   * Time: "night" (always dark in Gotham)
-  * key_feature modifies the "city" biome with gothic style
+  * NOT just "city" biome!
 
 - "metropolis" / "superman" →
-  * biome: "city", key_feature: "metropolis"
   * Colors: Bright (#FFFFFF, #87CEEB sky blue, #FFD700 gold accents) - BRIGHT and hopeful
   * Lighting: NOON with bright, optimistic feel
   * Buildings: Modern skyscrapers (glass, chrome, futuristic)
   * Time: "noon" (bright and optimistic)
 
 - "spiderman" / "spider-man" →
-  * biome: "city", key_feature: "spiderman_world"
   * Colors: Red (#DC143C), Blue (#0000FF), White (#FFFFFF), Gray (#808080) - Classic NYC/Spiderman palette
   * Lighting: SUNSET or NOON (NYC street level)
   * Buildings: NYC-style skyscrapers (many, tall, varied heights)
@@ -450,7 +379,6 @@ EXAMPLES OF THEME-AWARE GENERATION:
   * Time: "sunset" or "noon"
 
 - "tokyo" →
-  * biome: "city", key_feature: "tokyo"
   * Colors: Neon (#FF00FF, #00FFFF), White, Gray, Red accents - NEON and vibrant
   * Lighting: NIGHT with neon glow, or NOON bright
   * Buildings: Dense urban, many small buildings, neon signs
@@ -522,92 +450,36 @@ BIOME EXTRACTION STRATEGY:
   * "retro" → biome: "retro_80s"
   * "steampunk" → biome: "steampunk"
 
-COLOR PALETTE GENERATION (MANDATORY - AI MUST GENERATE BASED ON BIOME + KEY_FEATURE):
-**CRITICAL: You MUST generate a unique color_palette with MINIMUM 5 hex colors. This is MANDATORY - no exceptions!**
+COLOR PALETTE GENERATION (AI-GENERATED BASED ON USER'S EXACT WORDS):
+- YOU must generate color_palette (3-5 hex colors) based on WHAT THE USER WROTE in their prompt
+- Read the user's prompt carefully - if they wrote "gotham", think about Gotham's actual visual characteristics
+- Use your knowledge to determine appropriate colors:
+  * What are the characteristic colors associated with what the user wrote?
+  * What colors appear in source material (comics, movies, real locations) for that specific name?
+  * What colors match the mood/atmosphere of that specific location/character?
+- Decision process:
+  1. Read the user's prompt: "gotham"
+  2. Think: What does "gotham" actually look like visually? (Dark, gothic, moody, always night)
+  3. Generate: Dark colors that match Gotham's actual appearance (blacks, dark grays, dark purples/blues)
+  4. Output: color_palette: ["#000000", "#1a1a1a", "#2d2d2d", "#1a1a3a"] (example - you generate based on your knowledge)
+- If user wrote "gotham" → Generate DARK, GOTHIC colors (NOT bright city colors)
+- If user wrote "tokyo" → Generate NEON, VIBRANT colors (NOT generic city colors)
+- If user wrote "metropolis" → Generate BRIGHT, OPTIMISTIC colors (NOT generic city colors)
+- For ANY prompt: Generate colors that match the VISUAL IDENTITY of what the user wrote
+- ALWAYS include 3-5 hex colors in color_palette
+- Be creative but authentic to the theme's visual identity from your knowledge
 
-**REQUIRED COLOR DISTRIBUTION:**
-- Color 0: Ground/Terrain (base terrain color)
-- Color 1: Trees/Vegetation (leaves, plants)
-- Color 2: Buildings/Structures (man-made structures)
-- Color 3: Mountains/Rocks (elevated terrain features)
-- Color 4: Sky/Background (MANDATORY - must be included for sky coloring)
-- Color 5+: Additional accents (optional, but recommended)
-
-**YOU MUST INCLUDE AT LEAST 5 COLORS - one of them MUST be suitable for sky/background!**
-
-GENERATION STRATEGY:
-1. **If key_feature is present:** Combine biome + key_feature to create a unique color scheme
-   - biome: "city", key_feature: "gotham" → Think: "What colors represent a dark, gothic city?" → Generate DARK colors (blacks, dark grays, dark purples/blues)
-   - biome: "city", key_feature: "tokyo" → Think: "What colors represent Tokyo's neon-lit streets?" → Generate NEON colors (bright magentas, cyans, electric blues)
-   - biome: "city", key_feature: "metropolis" → Think: "What colors represent a bright, optimistic superhero city?" → Generate BRIGHT colors (whites, sky blues, gold accents)
-   - biome: "city", key_feature: "neon" → Think: "What colors represent neon/cyberpunk aesthetic?" → Generate NEON cyberpunk colors
-   - biome: "city", key_feature: "futuristic" → Think: "What colors represent futuristic tech?" → Generate futuristic colors (metallic, tech blues, glowing accents)
-
-2. **If key_feature is null:** Use biome characteristics to generate appropriate colors
-   - biome: "city" → Think: "What colors represent a generic urban environment?" → Generate urban colors (grays, muted blues, concrete tones)
-   - biome: "arctic" → Think: "What colors represent ice and snow?" → Generate icy colors (whites, light blues, crystal tones)
-   - biome: "lava" → Think: "What colors represent volcanic terrain?" → Generate volcanic colors (deep reds, oranges, black)
-   - biome: "desert" → Think: "What colors represent sandy deserts?" → Generate desert colors (tans, yellows, warm oranges)
-   - biome: "jungle" → Think: "What colors represent tropical forests?" → Generate jungle colors (greens, browns, earthy tones)
-
-3. **CREATIVE PROCESS - Use your knowledge:**
-   - Think about: What are the characteristic colors of this biome/theme combination?
-   - Consider: What colors appear in source material (comics, movies, games, real locations)?
-   - Reflect: What colors match the mood/atmosphere (dark, bright, neon, natural, etc.)?
-   - Generate: Create a cohesive palette that visually represents this world
-
-4. **RULES (MANDATORY):**
-   - ALWAYS generate MINIMUM 5 hex colors (#RRGGBB format) - NO EXCEPTIONS
-   - Color 0: Ground/Terrain
-   - Color 1: Trees/Vegetation
-   - Color 2: Buildings/Structures
-   - Color 3: Mountains/Rocks
-   - Color 4: Sky/Background (MANDATORY - must be a color suitable for sky)
-   - NO hardcoded colors - use your knowledge to create appropriate schemes
-   - Each biome + key_feature combination should have a UNIQUE color palette
-   - Be creative but authentic to the visual identity
-   - Consider time of day: Night scenes might have darker sky colors, noon scenes might be brighter sky colors
-   - Sky color (Color 4) should match the time of day and biome theme
-
-5. **EXAMPLES (YOU generate these, not hardcode them - MUST have 5+ colors):**
-   - biome: "city", key_feature: "gotham" → Your knowledge: Gotham is dark, gothic, moody → Generate: ["#000000", "#1a1a1a", "#2d2d2d", "#4a0e4e", "#0a0a1a"] (5 colors: ground, trees, buildings, mountains, SKY)
-   - biome: "city", key_feature: "tokyo" → Your knowledge: Tokyo has neon nightlife → Generate: ["#2a2a2a", "#00FF00", "#FF00FF", "#808080", "#000033"] (5 colors: ground, trees, buildings, mountains, SKY)
-   - biome: "city", key_feature: "metropolis" → Your knowledge: Metropolis is bright and hopeful → Generate: ["#E0E0E0", "#87CEEB", "#FFFFFF", "#C0C0C0", "#87CEEB"] (5 colors: ground, trees, buildings, mountains, SKY)
-   - biome: "arctic", key_feature: null → Your knowledge: Arctic is icy and cold → Generate: ["#E0F4FF", "#B0E0FF", "#FFFFFF", "#87CEEB", "#B0E0FF"] (5 colors: ground, trees, buildings, mountains, SKY)
-   - biome: "lava", key_feature: null → Your knowledge: Lava is fiery and molten → Generate: ["#8B0000", "#FF4500", "#FF6347", "#000000", "#1a0000"] (5 colors: ground, trees, buildings, mountains, SKY)
-   
-   **NOTICE: Each example has exactly 5 colors, with the 5th color (index 4) being the SKY color!**
-
-**REMEMBER: You are creating UNIQUE color palettes based on your knowledge of themes, locations, and visual aesthetics. Each biome + key_feature combination deserves a thoughtfully generated color scheme that captures its essence.**
-
-TIME DETECTION (MANDATORY - SEPARATE FROM BIOME):
-**CRITICAL: Time MUST be detected separately from biome. NEVER put time words in the biome field.**
-
-STEP 1: Extract time keywords from the prompt FIRST:
-- Look for: "at night", "at noon", "at sunset", "at dusk", "at evening", "at dawn", "at midnight", "at morning", "at day", "at afternoon"
-- Also detect standalone time words: "night", "noon", "sunset", "dusk", "evening", "dawn", "midnight", "morning", "day", "afternoon"
-- If you see "city at night" → Extract "night" as time, "city" as biome (NOT "city at night" as biome)
-- If you see "arctic at noon" → Extract "noon" as time, "arctic" as biome (NOT "arctic at noon" as biome)
-- Examples:
-  * "city at night" → biome: "city", time: "night"
-  * "arctic at sunset" → biome: "arctic", time: "sunset"
-  * "forest at noon" → biome: "forest" or "jungle", time: "noon"
-  * "desert at night" → biome: "desert", time: "night"
-
-STEP 2: If NO time mentioned, use THEME-APPROPRIATE default:
+TIME DETECTION (THEME-AWARE):
+- Extract explicit mentions: "sunset", "dusk", "evening", "night", "midnight", "dawn", "noon"
+- If NO time mentioned, use THEME-APPROPRIATE default based on the location/character:
   * "gotham" → ALWAYS "night" (Gotham is always dark/moody)
   * "metropolis" → "noon" (bright and optimistic)
   * "tokyo" → "night" (neon city, best at night) OR "noon" (busy daytime)
   * "venice" / "paris" → "sunset" (romantic golden hour)
   * "spiderman" → "sunset" (NYC street level, dramatic lighting)
-  * "city" → "noon" (default for cities)
-  * "arctic" → "noon" (default, but can vary)
   * Generic themes → "noon" (default)
-
 - Creative: "twilight", "golden hour", "witching hour" are valid too
 - MATCH THE MOOD: Dark themes = night, Bright themes = noon, Romantic = sunset
-
-**REMEMBER: The biome field should NEVER contain time words. Always separate them.**
 
 STRUCTURE DETECTION - CONTEXT-AWARE INTELLIGENCE:
 Your job is to interpret the prompt and suggest RELEVANT structures that make sense for the world described.
@@ -660,9 +532,9 @@ CRITICAL: Support for CUSTOM OBJECTS (creative_objects):
    - "jungle adventure" → tree: 50, rock: 15, mountain: 3, building: 0
    - "arctic tundra" → tree: 30 (leafless), rock: 20, mountain: 5, building: 0
    - "rainbow paradise" → tree: 30, rock: 25, mountain: 3, building: 0
-   - "gotham" → biome: "city", key_feature: "gotham", building: 30 (GOTHIC tall/dark), street_lamp: 20 (many), tree: 0, rock: 5, time: "night", colors: YOU generate DARK colors (think: what colors represent Gotham's dark, gothic atmosphere?)
-   - "metropolis" → biome: "city", key_feature: "metropolis", building: 35 (MODERN skyscrapers), street_lamp: 8, tree: 10, rock: 5, time: "noon", colors: YOU generate BRIGHT colors (think: what colors represent Metropolis's bright, optimistic feel?)
-   - "tokyo" → biome: "city", key_feature: "tokyo", building: 40 (DENSE urban), street_lamp: 15, tree: 3, rock: 5, time: "night", colors: YOU generate NEON colors (think: what colors represent Tokyo's neon-lit nightlife?)
+   - "gotham" → building: 30 (GOTHIC tall/dark), street_lamp: 20 (many), tree: 0, rock: 5, time: "night", colors: YOU generate DARK colors (think: what colors represent Gotham's dark, gothic atmosphere?)
+   - "metropolis" → building: 35 (MODERN skyscrapers), street_lamp: 8, tree: 10, rock: 5, time: "noon", colors: YOU generate BRIGHT colors (think: what colors represent Metropolis's bright, optimistic feel?)
+   - "tokyo" → building: 40 (DENSE urban), street_lamp: 15, tree: 3, rock: 5, time: "night", colors: YOU generate NEON colors (think: what colors represent Tokyo's neon-lit nightlife?)
    - "venice" → building: 20 (HISTORIC colorful), street_lamp: 0, tree: 5, rock: 0, time: "sunset", colors: YOU generate WATER/ROMANTIC colors (think: water, canals, warm sunset), creative_objects: [gondolas, bridges]
    - "paris" → building: 25 (CLASSIC architecture), street_lamp: 10, tree: 15, rock: 0, time: "sunset", colors: YOU generate ROMANTIC colors (think: elegant European, romantic atmosphere)
 
@@ -672,32 +544,20 @@ CRITICAL: Support for CUSTOM OBJECTS (creative_objects):
    - "Take me to a lava planet" → biome: "lava", structure: {"rock": 45, "mountain": 12, "tree": 0, "building": 0}
    - "I want a peaceful forest" → biome: "jungle", structure: {"tree": 40, "rock": 10, "mountain": 2, "building": 0}
    - "Show me the arctic" → biome: "arctic", structure: {"tree": 30, "rock": 25, "mountain": 5, "building": 0}
-   - "city at night" → biome: "city" (NOT "city at night"), time: "night", structure: {"building": 20, "street_lamp": 10, "tree": 5, "rock": 3}
-   - "arctic at sunset" → biome: "arctic" (NOT "arctic at sunset"), time: "sunset", structure: {"tree": 30, "rock": 25, "mountain": 5, "building": 0}
-   - "forest at noon" → biome: "jungle" or "forest" (NOT "forest at noon"), time: "noon", structure: {"tree": 40, "rock": 10, "mountain": 2, "building": 0}
-   - "desert at night" → biome: "desert" (NOT "desert at night"), time: "night", structure: {"rock": 20, "mountain": 5, "tree": 3, "building": 0}
-   - "spiderman world" → biome: "city", key_feature: "spiderman_world", structure: {"building": 30, "street_lamp": 10, "tree": 5, "rock": 10}, time: "sunset", colors: YOU generate (think: Spiderman's red/blue costume colors, NYC urban colors), creative_objects: [webs, web-shooters]
-   - "gotham" → biome: "city", key_feature: "gotham", structure: {"building": 30, "street_lamp": 20, "tree": 0, "rock": 5}, time: "night" (ALWAYS), colors: YOU generate DARK GOTHIC colors (think: what colors represent Gotham's dark, moody, gothic atmosphere from comics/movies?)
-   - "metropolis" → biome: "city", key_feature: "metropolis", structure: {"building": 35, "street_lamp": 8, "tree": 10, "rock": 5}, time: "noon" (BRIGHT), colors: YOU generate BRIGHT/HOPEFUL colors (think: what colors represent Metropolis's optimistic, bright, heroic atmosphere?)
-   - "tokyo" → biome: "city", key_feature: "tokyo", structure: {"building": 40, "street_lamp": 15, "tree": 3, "rock": 5}, time: "night", colors: YOU generate NEON VIBRANT colors (think: what colors represent Tokyo's neon-lit streets, vibrant nightlife?)
-   - "neon city" → biome: "city", key_feature: "neon", structure: {"building": 25, "street_lamp": 15, "tree": 3, "rock": 5}, time: "night", colors: YOU generate NEON colors
-   - "futuristic city" → biome: "city", key_feature: "futuristic", structure: {"building": 30, "street_lamp": 10, "tree": 5, "rock": 10}, time: "night", colors: YOU generate FUTURISTIC colors
+   - "spiderman world" → biome: "spiderman_world", structure: {"building": 30, "street_lamp": 10, "tree": 5, "rock": 10}, time: "sunset", colors: YOU generate (think: Spiderman's red/blue costume colors, NYC urban colors), creative_objects: [webs, web-shooters]
+   - "gotham" → biome: "gotham", structure: {"building": 30, "street_lamp": 20, "tree": 0, "rock": 5}, time: "night" (ALWAYS), colors: YOU generate DARK GOTHIC colors (think: what colors represent Gotham's dark, moody, gothic atmosphere from comics/movies?)
+   - "metropolis" → biome: "metropolis", structure: {"building": 35, "street_lamp": 8, "tree": 10, "rock": 5}, time: "noon" (BRIGHT), colors: YOU generate BRIGHT/HOPEFUL colors (think: what colors represent Metropolis's optimistic, bright, heroic atmosphere?)
+   - "tokyo" → biome: "tokyo", structure: {"building": 40, "street_lamp": 15, "tree": 3, "rock": 5}, time: "night", colors: YOU generate NEON VIBRANT colors (think: what colors represent Tokyo's neon-lit streets, vibrant nightlife?)
    - "venice" → biome: "venice", structure: {"building": 20, "street_lamp": 0, "tree": 5, "rock": 0}, time: "sunset", colors: YOU generate WATER/ROMANTIC colors (think: canals, water, warm sunset, historic buildings), creative_objects: [gondolas, bridges, canals]
    - "paris" → biome: "paris", structure: {"building": 25, "street_lamp": 10, "tree": 15, "rock": 0}, time: "sunset", colors: YOU generate ROMANTIC/ELEGANT colors (think: what colors represent Paris's romantic, elegant atmosphere?), creative_objects: [Eiffel Tower]
 
-CRITICAL RULE - BIOME vs KEY_FEATURE:
-- If user writes "gotham" → biome: "city", key_feature: "gotham", time: "night", colors: YOU generate DARK colors based on Gotham
-- If user writes "tokyo" → biome: "city", key_feature: "tokyo", time: "night", colors: YOU generate NEON colors based on Tokyo
-- If user writes "metropolis" → biome: "city", key_feature: "metropolis", time: "noon", colors: YOU generate BRIGHT colors based on Metropolis
-- If user writes "spiderman" → biome: "city", key_feature: "spiderman_world", colors: YOU generate based on Spiderman/NYC
-- If user writes "neon city" → biome: "city", key_feature: "neon", time: "night"
-- If user writes "futuristic city" → biome: "city", key_feature: "futuristic"
-- **If user writes "city at night" → biome: "city", key_feature: null, time: "night"** - ALWAYS separate time from biome!
-- **If user writes "arctic at noon" → biome: "arctic", key_feature: null, time: "noon"** - ALWAYS separate time from biome!
-- **If user writes "lava" → biome: "lava", key_feature: null** - lava is a biome, not a feature
-- Themes/locations/characters like "gotham", "tokyo", "neon", "futuristic" go in key_feature, NOT biome!
-- Base terrain types like "city", "arctic", "lava" go in biome!
-- Generate colors based on key_feature (if present) OR biome - match the visual identity!
+CRITICAL RULE - USE USER'S EXACT WORDS:
+- If user writes "gotham" → biome: "gotham" (NOT "city"), time: "night", colors: YOU generate DARK colors based on Gotham
+- If user writes "tokyo" → biome: "tokyo" (NOT "city"), time: "night", colors: YOU generate NEON colors based on Tokyo
+- If user writes "metropolis" → biome: "metropolis" (NOT "city"), time: "noon", colors: YOU generate BRIGHT colors based on Metropolis
+- If user writes "spiderman" → biome: "spiderman_world" (NOT "city"), colors: YOU generate based on Spiderman/NYC
+- NEVER convert specific locations/characters to generic "city" - use the EXACT word the user wrote as the biome name!
+- Generate colors based on WHAT THE USER WROTE, not based on a generic "city" interpretation
 
 REMEMBER: Your structure suggestions should make the world feel authentic and relevant to what the user asked for!
 
@@ -710,18 +570,15 @@ CREATIVE FALLBACKS:
 ENEMY COUNT: 0-10 (default: 5)
 WEAPON: "double_jump", "dash", "none" (default: "dash")
 
-IMPORTANT: BIOME vs KEY_FEATURE - understand the difference:
-- User wrote "gotham" → biome: "city", key_feature: "gotham" (gotham is a city theme, not a biome)
-- User wrote "tokyo" → biome: "city", key_feature: "tokyo" (tokyo is a city theme, not a biome)
-- User wrote "metropolis" → biome: "city", key_feature: "metropolis" (metropolis is a city theme, not a biome)
-- User wrote "lava" → biome: "lava", key_feature: null (lava IS a biome itself)
-- User wrote "arctic" → biome: "arctic", key_feature: null (arctic IS a biome itself)
-- Generate colors based on key_feature (if present) OR biome - match the visual identity!
+IMPORTANT: Look at what the user ACTUALLY wrote in their prompt and use that EXACT word as the biome name.
+- User wrote "gotham" → biome: "gotham" (NOT "city")
+- User wrote "tokyo" → biome: "tokyo" (NOT "city")  
+- User wrote "metropolis" → biome: "metropolis" (NOT "city")
+- Generate colors based on the SPECIFIC location/character the user mentioned, not generic defaults!
 
 Return ONLY this JSON structure (NO markdown, NO backticks):
 {
-  "biome": "city"|"arctic"|"lava"|"volcanic"|"desert"|"jungle"|"forest"|"underwater"|"room",  // BASE terrain type
-  "key_feature": "gotham"|"tokyo"|"metropolis"|"neon"|"futuristic"|"cyberpunk"|"spiderman_world"|null,  // THEME/STYLE/CHARACTER (optional)
+  "biome": "EXACT_WORD_FROM_USER_PROMPT",  // Use what user wrote, not generic "city"
   "biome_description": "Creative description of this world",
   "time": "noon"|"sunset"|"night",
   "enemy_count": 0-10,
@@ -763,19 +620,9 @@ Return ONLY this JSON structure (NO markdown, NO backticks):
       ]
     }
   ],
-  "color_palette": ["#HEX", "#HEX", "#HEX", "#HEX", "#HEX"],  // MINIMUM 5 colors: [ground, trees, buildings, mountains, SKY]
-  "plant_type": "tree|cactus|creepy_plant|mushroom|vine|fern|palm|bamboo|crystal_plant|glowing_plant",  // Biome-specific plant design
+  "color_palette": ["#HEX", "#HEX", ...],
   "special_effects": ["effect1", "effect2"]
 }
-
-BIOME vs KEY_FEATURE GUIDANCE:
-- BIOME: Base terrain types - "city", "arctic", "lava", "volcanic", "desert", "jungle", "forest", "underwater", "room"
-- KEY_FEATURE: Themes/styles that modify biomes - "gotham", "tokyo", "metropolis", "neon", "futuristic", "cyberpunk", "spiderman_world"
-- If user says "gotham" → biome: "city", key_feature: "gotham" (gotham is a style of city, not a biome)
-- If user says "tokyo" → biome: "city", key_feature: "tokyo" (tokyo is a style of city, not a biome)
-- If user says "neon city" → biome: "city", key_feature: "neon" (neon is a style, city is the biome)
-- If user says "lava" → biome: "lava", key_feature: null (lava is a biome itself)
-- If user says "arctic" → biome: "arctic", key_feature: null (arctic is a biome itself)
 
 REMEMBER: 
 - NEVER refuse to create a world. Turn ANYTHING into valid parameters!
@@ -795,67 +642,31 @@ REMEMBER:
 {"⚠️ CRITICAL: User wrote a specific location/character. You MUST use the EXACT word as the biome name!" + f" User wrote '{prompt}' → biome MUST be '{target_biome}' (NOT 'city', NOT 'default')" + " Generate DARK colors for Gotham, NEON colors for Tokyo, BRIGHT colors for Metropolis." if target_biome else ""}
 
 CRITICAL INSTRUCTIONS:
-1. **FIRST: Separate BIOME from KEY_FEATURE** - This is CRITICAL:
-   - BASE BIOMES (terrain types): "city", "arctic", "lava", "volcanic", "desert", "jungle", "forest", "underwater", "room"
-   - KEY_FEATURES (themes/styles): "gotham", "tokyo", "metropolis", "neon", "futuristic", "cyberpunk", "spiderman_world"
-   - If user wrote "gotham" → biome: "city", key_feature: "gotham" (gotham is a city theme, NOT a biome)
-   - If user wrote "tokyo" → biome: "city", key_feature: "tokyo" (tokyo is a city theme, NOT a biome)
-   - If user wrote "neon city" → biome: "city", key_feature: "neon" (neon is a style, city is the biome)
-   - If user wrote "lava" → biome: "lava", key_feature: null (lava IS a biome itself)
-   - If user wrote "arctic" → biome: "arctic", key_feature: null (arctic IS a biome itself)
-
-2. **SECOND: Extract TIME separately from BIOME** - This is MANDATORY:
-   - Look for time phrases: "at night", "at noon", "at sunset", "at dusk", "at evening", "at dawn"
-   - Also standalone: "night", "noon", "sunset", "dusk", "evening", "dawn", "midnight", "morning", "day"
-   - If user wrote "city at night" → biome: "city", time: "night" (NEVER biome: "city at night")
-   - If user wrote "arctic at sunset" → biome: "arctic", time: "sunset" (NEVER biome: "arctic at sunset")
-   - The biome field must NEVER contain time words!
-
-3. **Separate BIOME from KEY_FEATURE** - This is CRITICAL:
-   - BASE BIOMES: "city", "arctic", "lava", "volcanic", "desert", "jungle", "forest", "underwater", "room"
-   - KEY_FEATURES (themes): "gotham", "tokyo", "metropolis", "neon", "futuristic", "cyberpunk", "spiderman_world"
-   - If user wrote "gotham" → biome: "city", key_feature: "gotham" (gotham is a style of city, not a biome)
-   - If user wrote "tokyo" → biome: "city", key_feature: "tokyo" (tokyo is a style of city, not a biome)
-   - If user wrote "neon city" → biome: "city", key_feature: "neon" (neon is a style, city is the biome)
-   - If user wrote "lava" → biome: "lava", key_feature: null (lava is a biome itself)
-   - If user wrote "city at night" → biome: "city", key_feature: null, time: "night"
-   - Themes/locations/characters = key_feature, Base terrain types = biome!
+1. Use the EXACT word/phrase the user wrote as the biome name
+   - If user wrote "gotham" → biome: "gotham" (NOT "city", NOT "default")
+   - If user wrote "tokyo" → biome: "tokyo" (NOT "city", NOT "default")
+   - NEVER convert specific locations to generic "city" biome!
    
-4. **MANDATORY: Generate color_palette (MINIMUM 5 hex colors) based on BIOME + KEY_FEATURE combination:**
-   - ALWAYS generate MINIMUM 5 colors by combining biome and key_feature (if present)
-   - REQUIRED structure: [ground, trees, buildings, mountains, SKY] - Color 4 MUST be for sky/background
-   - If key_feature exists: Generate colors representing the combination (e.g., biome: "city", key_feature: "gotham" → Dark gothic city colors)
-   - If key_feature is null: Generate colors based on biome characteristics (e.g., biome: "arctic" → Icy colors)
-   - Use your knowledge of themes, locations, and visual aesthetics - BE CREATIVE and generate unique color schemes
-   - NO hardcoded defaults - YOU must think about what colors represent this biome + key_feature combination
-   - Each combination should have a UNIQUE color palette that captures its visual essence
-   - **SKY COLOR (Color 4) is MANDATORY** - must be appropriate for the time of day and biome theme
+2. Generate colors based on WHAT THE USER WROTE
+   - If user wrote "gotham" → Generate DARK, GOTHIC colors (think: Gotham is always dark, moody, gothic) - colors like #000000, #1a1a1a, #2d2d2d
+   - If user wrote "tokyo" → Generate NEON colors (think: Tokyo's vibrant neon nightlife) - colors like #FF00FF, #00FFFF
+   - Research the visual characteristics of what the user wrote and generate appropriate colors
    
-5. Match the visual identity of what the user mentioned
+3. Match the visual identity of what the user mentioned
    - Colors, lighting, structures should all match the theme's authentic visual characteristics
    
-6. ALWAYS generate EXACTLY 2 creative_objects that are NOT standard biome objects
+4. ALWAYS generate EXACTLY 2 creative_objects that are NOT standard biome objects
    - These 2 objects MUST be deduced from the biome name and user prompt
    - Examples: For "gotham" → "bat_signal" and "gargoyle"; For "tokyo" → "neon_sign" and "vending_machine"
    - NEVER include trees, rocks, buildings, street_lamps, or mountains as creative_objects
 
 Create a world that matches the EXACT prompt the user wrote above."""}
-                ],
-                "temperature": 0.5,  # Increased for better context understanding
-                "max_tokens": 800,  # More tokens for detailed structure suggestions
-                "response_format": {"type": "json_object"}  # Force JSON response
-            },
-            timeout=60  # 60 second timeout
+            ],
+            temperature=0.5,  # Increased for better context understanding
+            max_tokens=800  # More tokens for detailed structure suggestions
         )
         
-        # Check for errors
-        if not response.ok:
-            error_detail = response.text
-            print(f"[PARSER] OpenRouter API error: {response.status_code} - {error_detail}")
-            raise ValueError(f"OpenRouter API error: {response.status_code}")
-        
-        completion = response.json()
-        result = completion["choices"][0]["message"]["content"].strip()
+        result = completion.choices[0].message.content.strip()
         
         print(f"[PARSER DEBUG] Raw LLM response: {result}")
         print(f"[PARSER DEBUG] User prompt was: '{prompt}'")
@@ -871,53 +682,6 @@ Create a world that matches the EXACT prompt the user wrote above."""}
         print(f"[PARSER DEBUG] AI returned color_palette: {params.get('color_palette', [])}")
         print(f"[PARSER DEBUG] AI returned structure: {params.get('structure', {})}")
         
-        # CRITICAL: Post-process to fix biome if it contains time words (e.g., "city at night")
-        ai_biome_raw = params.get("biome", "")
-        if ai_biome_raw and isinstance(ai_biome_raw, str):
-            ai_biome_lower = ai_biome_raw.lower()
-            # Check if biome contains time phrases
-            time_phrases = [" at night", " at noon", " at sunset", " at dusk", " at evening", " at dawn", " at midnight", " at morning", " at day", " at afternoon"]
-            time_words = [" night", " noon", " sunset", " dusk", " evening", " dawn", " midnight", " morning", " day", " afternoon"]
-            
-            # Check for "at [time]" pattern
-            for phrase in time_phrases:
-                if phrase in ai_biome_lower:
-                    # Extract time and biome
-                    parts = ai_biome_lower.split(phrase, 1)
-                    if len(parts) == 2:
-                        base_biome = parts[0].strip()
-                        time_word = phrase.replace(" at ", "").strip()
-                        params["biome"] = base_biome
-                        if params.get("time") not in ["noon", "sunset", "night"]:
-                            # Map time word to valid time
-                            if time_word in ["night", "midnight", "evening", "dusk"]:
-                                params["time"] = "night"
-                            elif time_word in ["noon", "day", "morning", "afternoon"]:
-                                params["time"] = "noon"
-                            elif time_word == "sunset":
-                                params["time"] = "sunset"
-                        print(f"[PARSER] ✅ FIXED: Split '{ai_biome_raw}' → biome: '{base_biome}', time: '{params.get('time')}'")
-                        break
-            
-            # Check for standalone time words (less common but possible)
-            if params.get("biome") == ai_biome_raw:  # Only if not already fixed
-                for word in time_words:
-                    if word in ai_biome_lower:
-                        parts = ai_biome_lower.split(word, 1)
-                        if len(parts) == 2:
-                            base_biome = parts[0].strip()
-                            time_word = word.strip()
-                            params["biome"] = base_biome
-                            if params.get("time") not in ["noon", "sunset", "night"]:
-                                if time_word in ["night", "midnight", "evening", "dusk"]:
-                                    params["time"] = "night"
-                                elif time_word in ["noon", "day", "morning", "afternoon"]:
-                                    params["time"] = "noon"
-                                elif time_word == "sunset":
-                                    params["time"] = "sunset"
-                            print(f"[PARSER] ✅ FIXED: Split '{ai_biome_raw}' → biome: '{base_biome}', time: '{params.get('time')}'")
-                            break
-        
         # Validate and set defaults
         params.setdefault("biome", "default")
         params.setdefault("time", "noon")
@@ -929,59 +693,24 @@ Create a world that matches the EXACT prompt the user wrote above."""}
         params.setdefault("special_effects", [])
         params.setdefault("biome_description", "")
         
-        # VALIDATE: AI MUST generate color_palette with MINIMUM 5 colors (including sky)
+        # If color_palette is empty, only provide fallback for abstract/theoretical biomes that AI might not know
+        # For real locations/characters, let AI generate colors based on knowledge
         color_palette_val = params.get("color_palette", [])
-        biome_val = params.get("biome", "").lower()
-        key_feature_val = params.get("key_feature")
-        
         # Ensure color_palette is a list before checking length
         if not color_palette_val or not isinstance(color_palette_val, list) or len(color_palette_val) == 0:
-            # AI should ALWAYS generate colors - warn if missing
-            feature_desc = f" with key_feature '{key_feature_val}'" if key_feature_val else ""
-            print(f"[PARSER] ⚠️ WARNING: No color_palette from AI for biome '{biome_val}'{feature_desc}")
-            print(f"[PARSER] ⚠️ AI should have generated MINIMUM 5 colors based on biome + key_feature combination")
-            # Only provide fallback for truly abstract/theoretical biomes where AI might not know
-            # But this should be rare - AI should generate colors for most cases
+            # Only use fallbacks for abstract/theoretical biomes where AI might not have visual references
+            # Real locations/characters should have been generated by AI based on knowledge
             abstract_palettes = {
                 "rainbow": ["#FF0000", "#FF7F00", "#FFFF00", "#00FF00", "#0000FF", "#4B0082", "#9400D3"],
+                # Note: Removed hardcoded palettes for gotham, metropolis, tokyo, etc. - AI should generate these
             }
-            if biome_val in abstract_palettes:
-                params["color_palette"] = abstract_palettes[biome_val]
-                print(f"[PARSER] Applied abstract fallback for '{biome_val}' - but AI should have generated this!")
+            biome_lower = params["biome"].lower()
+            if biome_lower in abstract_palettes:
+                params["color_palette"] = abstract_palettes[biome_lower]
+                print(f"[PARSER] Applied abstract fallback color palette for '{params['biome']}': {params['color_palette']}")
             else:
-                print(f"[PARSER] ⚠️ Leaving color_palette empty - AI should regenerate with MINIMUM 5 colors")
-        elif len(color_palette_val) < 5:
-            # Warn if palette is too small (less than 5 colors)
-            feature_desc = f" with key_feature '{key_feature_val}'" if key_feature_val else ""
-            print(f"[PARSER] ⚠️ WARNING: color_palette has only {len(color_palette_val)} colors, but MINIMUM 5 required (including sky)")
-            print(f"[PARSER] ⚠️ AI should generate: [ground, trees, buildings, mountains, SKY] - currently missing sky color!")
-            # Try to add a sky color if missing (use lightened version of first color)
-            if len(color_palette_val) == 4:
-                # Add sky color as 5th color (lightened version of ground)
-                from world.colour_scheme import hex_to_rgb, rgb_to_hex, adjust_shade
-                ground_rgb = hex_to_rgb(color_palette_val[0])
-                sky_rgb = adjust_shade(ground_rgb, lighten=0.7, saturate=0.2)
-                color_palette_val.append(rgb_to_hex(sky_rgb))
-                params["color_palette"] = color_palette_val
-                print(f"[PARSER] ✅ Added sky color to palette: {color_palette_val[-1]}")
-            else:
-                # For 1-3 colors, generate missing colors
-                print(f"[PARSER] ⚠️ Palette too small - generating missing colors...")
-                # This is a fallback - AI should have generated 5 colors
-                while len(color_palette_val) < 5:
-                    # Use variations of existing colors
-                    from world.colour_scheme import hex_to_rgb, rgb_to_hex, adjust_shade
-                    base_idx = len(color_palette_val) - 1
-                    base_rgb = hex_to_rgb(color_palette_val[base_idx])
-                    if len(color_palette_val) == 4:
-                        # 5th color should be sky - lighten significantly
-                        new_rgb = adjust_shade(base_rgb, lighten=0.6, saturate=0.1)
-                    else:
-                        # Other colors - slight variation
-                        new_rgb = adjust_shade(base_rgb, lighten=0.2 if len(color_palette_val) % 2 == 0 else -0.2)
-                    color_palette_val.append(rgb_to_hex(new_rgb))
-                params["color_palette"] = color_palette_val
-                print(f"[PARSER] ✅ Generated missing colors to reach 5: {color_palette_val}")
+                # For real locations/themes, log that AI should have provided colors
+                print(f"[PARSER] WARNING: No color_palette from AI for '{params['biome']}' - AI should have generated theme-appropriate colors")
         
         # Clamp enemy count (no biome restriction - accept ANY biome name)
         params["enemy_count"] = max(0, min(10, params["enemy_count"]))
@@ -1232,7 +961,7 @@ def fallback_parse(prompt: str) -> dict:
     elif re.search(r'\btrees\b', prompt_lower):
         # If "trees" (plural) is mentioned without a number, use biome-specific default
         # Arctic: 25, Others: 10
-        if biome in ["arctic", "park"]:
+        if biome == "arctic":
             structure["tree"] = 25
         else:
             structure["tree"] = 10
@@ -1294,7 +1023,7 @@ def fallback_parse(prompt: str) -> dict:
         "arctic": {"tree": 30, "rock": 25, "mountain": 5, "building": 0, "street_lamp": 0},
         "winter": {"tree": 30, "rock": 25, "mountain": 5, "building": 0, "street_lamp": 0},
         "ice": {"tree": 30, "rock": 25, "mountain": 5, "building": 0, "street_lamp": 0},
-        "desert": {"rock": 25, "mountain": 5, "tree": 15, "building": 0, "street_lamp": 0},
+        "desert": {"rock": 25, "mountain": 5, "tree": 3, "building": 0, "street_lamp": 0},
         "apocalyptic": {"rock": 35, "mountain": 5, "tree": 0, "building": 8, "street_lamp": 0},
         "rainbow": {"tree": 30, "rock": 25, "mountain": 3, "building": 0, "street_lamp": 0},
         "candy": {"tree": 20, "rock": 20, "mountain": 2, "building": 0, "street_lamp": 0},

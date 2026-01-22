@@ -7,9 +7,7 @@ from world.terrain import generate_heightmap, get_walkable_points
 from world.enemy_placer import place_enemies
 from world.lighting import get_lighting_preset, get_sky_color
 from world.physics_config import get_combined_config
-from world.colour_scheme import assign_palette_to_elements
-from models.generators import generate_object_template_with_ai, generate_3d_model_tripo3d
-import os
+from models.generators import generate_object_template_with_ai
 
 router = APIRouter()
 
@@ -26,7 +24,7 @@ def generate_trees(
     
     # CRITICAL: Check if biome is winter/arctic/icy
     biome_lower = biome.lower()
-    is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen", "park"]
+    is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen"]
     
     print(f"[TREE DEBUG] Biome: '{biome}' | Is Winter: {is_winter}")
     
@@ -38,14 +36,6 @@ def generate_trees(
             "max_height": 1.0,
             "scale_boost": 3.0,  # Larger trees in arctic
             "leafless": True  # No leaves in winter/arctic
-        },
-        "park": {  # Park biome (copy of arctic)
-            "types": ["pine", "spruce"], 
-            "density": 0.7, 
-            "min_height": 0.3, 
-            "max_height": 1.0,
-            "scale_boost": 3.0,
-            "leafless": True
         },
         "city": {
             "types": ["oak", "maple"], 
@@ -127,7 +117,6 @@ def generate_rocks(
     
     rock_config = {
         "arctic": {"types": ["ice_rock", "boulder"], "density": 1.2, "min_height": 0.3},
-        "park": {"types": ["ice_rock", "boulder"], "density": 1.2, "min_height": 0.3},  # Park biome (copy of arctic)
         "city": {"types": ["decorative_rock"], "density": 0.2, "min_height": 0.2},
         "default": {"types": ["boulder", "rock"], "density": 1.0, "min_height": 0.3}
     }
@@ -263,8 +252,8 @@ def generate_buildings(
     buildings = []
     biome_lower = biome.lower()
     
-    if biome_lower not in ["city", "arctic", "park"]:
-        return []  # Only generate buildings for city, arctic, or park
+    if biome_lower not in ["city", "arctic"]:
+        return []  # Only generate buildings for city or arctic
     
     segments = len(heightmap_raw) - 1
     
@@ -276,7 +265,7 @@ def generate_buildings(
             {"type": "skyscraper", "height": 50, "width": 8, "depth": 8, "color": 0x555555},
             {"type": "house", "height": 20, "width": 10, "depth": 7, "color": 0x888888},
         ]
-    elif biome_lower in ["arctic", "park"]:
+    elif biome_lower == "arctic":
         building_types = [
             {"type": "igloo", "height": 3, "width": 5, "depth": 5, "color": 0xFFFFFF},
         ]
@@ -301,8 +290,8 @@ def generate_buildings(
                                 break
                         if is_flat:
                             valid_points.append((x, z))
-                elif biome_lower in ["arctic", "park"]:
-                    # Arctic/park igloos can be on slightly sloped terrain
+                elif biome_lower == "arctic":
+                    # Arctic igloos can be on slightly sloped terrain
                     if 0.0 <= h <= 0.7:
                         valid_points.append((x, z))
     
@@ -364,7 +353,7 @@ def generate_mountain_peaks(
     if max_peaks == 0:
         return []
     
-    if biome.lower() not in ["arctic", "winter", "icy", "snow", "frozen", "park"]:
+    if biome.lower() not in ["arctic", "winter", "icy", "snow", "frozen"]:
         return []
 
     segments = len(heightmap_raw) - 1
@@ -428,13 +417,6 @@ def generate_mountain_peaks(
             },
             "scale": 1.0
         })
-        # #region agent log
-        try:
-            import json
-            with open('c:\\Projects\\NexHacks26\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"location":"generate.py:420","message":"Mountain peak generated","data":{"x":world_x,"y":h*10,"z":world_z,"scale":1.0},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","hypothesisId":"H4"})+'\n')
-        except: pass
-        # #endregion
 
         placed_positions.append((world_x, world_z))
 
@@ -465,11 +447,10 @@ def place_trees_on_terrain(
         existing_peaks = []
 
     biome_lower = biome.lower()
-    is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen", "park"]
+    is_winter = biome_lower in ["arctic", "winter", "icy", "snow", "frozen"]
 
     tree_types = {
         "arctic": ["pine", "spruce"],
-        "park": ["pine", "spruce"],  # Park biome (copy of arctic)
         "city": ["oak", "maple"],
         "default": ["oak", "pine", "birch"]
     }
@@ -507,57 +488,8 @@ def place_trees_on_terrain(
                         valid_points.append((x, z))
 
     if not valid_points:
-        print("[TREE DEBUG] ⚠️ No valid points found for trees! Trying fallback...")
-        # Fallback: Try to find at least some points, even if conditions aren't perfect
-        # This ensures plants are always placed
-        for z in range(1, segments-1):
-            for x in range(1, segments-1):
-                if placement_mask[z][x] == 1:
-                    world_x = (x / segments) * terrain_size - terrain_size / 2
-                    world_z = (z / segments) * terrain_size - terrain_size / 2
-                    too_close_to_peak = False
-                    for peak in existing_peaks:
-                        peak_x = peak.get("position", {}).get("x", 0)
-                        peak_z = peak.get("position", {}).get("z", 0)
-                        peak_scale = peak.get("scale", 1.0)
-                        distance = math.sqrt((world_x - peak_x)**2 + (world_z - peak_z)**2)
-                        if distance < MIN_DISTANCE_FROM_PEAK * peak_scale:
-                            too_close_to_peak = True
-                            break
-                    if not too_close_to_peak:
-                        valid_points.append((x, z))
-                        if len(valid_points) >= tree_count:
-                            break
-            if len(valid_points) >= tree_count:
-                break
-        
-        if not valid_points:
-            print("[TREE DEBUG] ❌ Still no valid points after fallback! Using ultra-permissive placement...")
-            # Last resort: place plants anywhere placement_mask allows (ignore height restrictions)
-            for z in range(2, segments-2):
-                for x in range(2, segments-2):
-                    if placement_mask[z][x] == 1:
-                        world_x = (x / segments) * terrain_size - terrain_size / 2
-                        world_z = (z / segments) * terrain_size - terrain_size / 2
-                        too_close_to_peak = False
-                        for peak in existing_peaks:
-                            peak_x = peak.get("position", {}).get("x", 0)
-                            peak_z = peak.get("position", {}).get("z", 0)
-                            peak_scale = peak.get("scale", 1.0)
-                            distance = math.sqrt((world_x - peak_x)**2 + (world_z - peak_z)**2)
-                            if distance < MIN_DISTANCE_FROM_PEAK * peak_scale:
-                                too_close_to_peak = True
-                                break
-                        if not too_close_to_peak:
-                            valid_points.append((x, z))
-                            if len(valid_points) >= tree_count:
-                                break
-                if len(valid_points) >= tree_count:
-                    break
-        
-        if not valid_points:
-            print("[TREE DEBUG] ❌❌ CRITICAL: No valid points even with ultra-permissive placement!")
-            return []
+        print("[TREE DEBUG] No valid points found for trees!")
+        return []
 
     random.shuffle(valid_points)
     trees_to_place = min(tree_count, len(valid_points))
@@ -580,9 +512,7 @@ def place_trees_on_terrain(
             "rotation": float(rotation)
         })
 
-    print(f"[TREE DEBUG] Placed {len(trees)} trees (requested: {tree_count}, biome={biome}, leafless={is_winter})")
-    if len(trees) == 0:
-        print(f"[TREE DEBUG] ⚠️ WARNING: No trees were placed! tree_count={tree_count}, valid_points={len(valid_points) if 'valid_points' in locals() else 0}")
+    print(f"[TREE DEBUG] Placed {len(trees)} trees (biome={biome}, leafless={is_winter})")
     return trees
 
 def generate_room_walls(room_size: float = 30.0, wall_height: float = 8.0, wall_color: str = "#E8E8E8") -> List[Dict]:
@@ -634,34 +564,10 @@ def generate_room_walls(room_size: float = 30.0, wall_height: float = 8.0, wall_
     return walls
 
 
-async def generate_scanned_object(obj_name: str, count: int = 1, room_size: float = 30.0, use_tripo3d: bool = True) -> List[Dict]:
-    """
-    Generate 3D objects from scanned item names.
-    
-    Priority System:
-    1. Tripo3D API (if enabled and API key available) - Real 3D models ✅ BEST QUALITY
-    2. AI-Generated Primitives (GPT designs using shapes) - Good quality
-    3. Predefined Templates (20+ built-in objects) - Reliable fallback
-    4. Generic Box - Last resort
-    
-    Args:
-        obj_name: Name of the object to generate
-        count: Number of instances to create
-        room_size: Room dimensions for positioning
-        use_tripo3d: Whether to attempt Tripo3D generation (default: True)
-    
-    Returns:
-        List of object dictionaries ready for frontend rendering
-    """
+async def generate_scanned_object(obj_name: str, count: int = 1, room_size: float = 30.0) -> List[Dict]:
+    """Generate 3D objects from scanned item names. Uses AI to generate templates for unknown objects."""
     objects = []
     obj_lower = obj_name.lower().replace(" ", "_").replace("-", "_")
-    
-    # Check if Tripo3D is available and enabled
-    TRIPO3D_API_KEY = os.getenv("TRIPO3D_API_KEY")
-    tripo3d_available = use_tripo3d and TRIPO3D_API_KEY is not None
-    
-    if tripo3d_available:
-        print(f"[OBJECT] 🎯 Priority 1: Attempting Tripo3D generation for '{obj_name}'...")
     
     # Object definitions - simple geometric shapes
     object_templates = {
@@ -849,67 +755,29 @@ async def generate_scanned_object(obj_name: str, count: int = 1, room_size: floa
         },
     }
     
-    # Generate requested count of objects at random positions
-    half_room = room_size / 2 - 2  # Keep away from walls
-    
-    # PRIORITY 1: Try Tripo3D for high-quality 3D models
-    if tripo3d_available:
-        try:
-            model_url = await generate_3d_model_tripo3d(obj_name)
-            
-            if model_url:
-                print(f"[OBJECT] ✅ Priority 1 SUCCESS: Tripo3D generated model for '{obj_name}'")
-                
-                # Create objects using GLB model URL
-                for i in range(count):
-                    pos_x = random.uniform(-half_room, half_room)
-                    pos_z = random.uniform(-half_room, half_room)
-                    
-                    obj = {
-                        "name": f"{obj_name}_{i+1}",
-                        "type": "glb_model",  # Special type for GLB models
-                        "original_name": obj_name,
-                        "model_url": model_url,  # Direct URL to GLB file
-                        "position": {"x": pos_x, "y": 0, "z": pos_z},
-                        "scale": 1.0,
-                        "rotation": random.uniform(0, math.pi * 2)
-                    }
-                    objects.append(obj)
-                
-                return objects  # Success! Return GLB models
-            else:
-                print(f"[OBJECT] ⚠️ Priority 1 FAILED: Tripo3D generation failed, falling back to Priority 2...")
-        except Exception as e:
-            print(f"[OBJECT] ⚠️ Priority 1 ERROR: Tripo3D error: {e}")
-            print(f"[OBJECT] Falling back to Priority 2...")
-    
-    # PRIORITY 2: AI-Generated Primitive Templates (if no predefined template exists)
+    # Get template from predefined list, or generate with AI
     template = object_templates.get(obj_lower)
     
     if not template:
-        print(f"[OBJECT] 🎯 Priority 2: '{obj_name}' not in templates, asking AI to design it...")
+        # Try to generate template with AI
+        print(f"[OBJECT] '{obj_name}' not in templates, asking AI to design it...")
         ai_template = await generate_object_template_with_ai(obj_name)
         
         if ai_template and "parts" in ai_template:
             template = ai_template
-            print(f"[OBJECT] ✅ Priority 2 SUCCESS: AI generated template for '{obj_name}' with {len(template['parts'])} parts")
+            print(f"[OBJECT] ✅ AI generated template for '{obj_name}' with {len(template['parts'])} parts")
         else:
-            print(f"[OBJECT] ⚠️ Priority 2 FAILED: AI template generation failed")
-            template = None
-    else:
-        print(f"[OBJECT] ✅ Priority 3 SUCCESS: Using predefined template for '{obj_name}'")
+            # Fallback: Generic object - create a simple colored box
+            print(f"[OBJECT] ⚠️ AI failed, using generic box for '{obj_name}'")
+            template = {
+                "parts": [
+                    {"shape": "box", "position": {"x": 0, "y": 0.25, "z": 0}, "dimensions": {"width": 0.5, "height": 0.5, "depth": 0.5}, "color": "#808080"},
+                ],
+                "scale": 0.8
+            }
     
-    # PRIORITY 3/4: Predefined Template or Generic Box Fallback
-    if not template:
-        print(f"[OBJECT] ⚠️ Priority 4: Using generic box for '{obj_name}' (last resort)")
-        template = {
-            "parts": [
-                {"shape": "box", "position": {"x": 0, "y": 0.25, "z": 0}, "dimensions": {"width": 0.5, "height": 0.5, "depth": 0.5}, "color": "#808080"},
-            ],
-            "scale": 0.8
-        }
-    
-    # Create objects using primitive shapes
+    # Generate requested count of objects at random positions
+    half_room = room_size / 2 - 2  # Keep away from walls
     for i in range(count):
         pos_x = random.uniform(-half_room, half_room)
         pos_z = random.uniform(-half_room, half_room)
@@ -960,46 +828,22 @@ async def generate_world(prompt: Dict) -> Dict:
         enemy_count = parsed_params.get("enemy_count", 5)
         weapon = parsed_params.get("weapon", "both")
         structure_counts = parsed_params.get("structure", {})
-        color_palette = parsed_params.get("color_palette", [])
-        plant_type = parsed_params.get("plant_type", "tree")  # Default to tree
 
-        print(f"[Backend] Final biome: '{biome}' | time: '{time_of_day}' | color_palette: {color_palette}")
+        print(f"[Backend] Final biome: '{biome}' | time: '{time_of_day}'")
 
-        # --- Generate terrain with color palette ---
-        terrain_data = generate_heightmap(biome, structure_counts, color_palette=color_palette)
+        # --- Generate terrain ---
+        terrain_data = generate_heightmap(biome, structure_counts)
         heightmap_raw = terrain_data["heightmap_raw"]
         placement_mask = terrain_data["placement_mask"]
 
         # --- Generate 3D structures ---
-        # Default tree/plant count: 25 for arctic, 15 for desert (cacti), 15 for others (increased from 10)
-        # Plants should always be present (cactus for desert, trees for others, etc.)
-        if biome.lower() in ["desert", "sandy"]:
-            base_tree_count = 15  # Cacti for desert
-        elif biome.lower() in ["arctic", "winter", "icy", "park"]:
-            base_tree_count = 25  # Trees for arctic/park
-        elif biome.lower() == "city":
-            base_tree_count = 0  # City biomes can have 0 trees (or use building_count instead)
-        else:
-            base_tree_count = 15  # Default trees/plants (increased from 10)
-        
-        # Use base_tree_count if AI returned a low value (below minimum) or if not specified
-        ai_tree_count = structure_counts.get("tree")
-        if ai_tree_count is None:
-            tree_count = base_tree_count
-        else:
-            # For desert, ensure at least base_tree_count (15) even if AI suggests fewer
-            if biome.lower() in ["desert", "sandy"]:
-                tree_count = max(ai_tree_count, base_tree_count)
-            else:
-                tree_count = ai_tree_count
-        
-        # Ensure minimum plant count (plants are always present in any biome)
-        tree_count = max(tree_count, 5)  # Minimum 5 plants in any world
-        print(f"[Backend] Tree/plant count: {tree_count} (from structure_counts: {structure_counts.get('tree', 'not set')}, base: {base_tree_count})")
+        # Default tree count: 25 for arctic, 10 for others
+        base_tree_count = 25 if biome.lower() in ["arctic", "winter", "icy"] else 10
+        tree_count = structure_counts.get("tree", base_tree_count)
 
-        base_rock_count = 15 if biome.lower() in ["arctic", "winter", "icy", "park"] else 10 if biome.lower() == "city" else 20
+        base_rock_count = 15 if biome.lower() in ["arctic", "winter", "icy"] else 10 if biome.lower() == "city" else 20
         rock_count = structure_counts.get("rock", base_rock_count)
-        mountain_count = structure_counts.get("mountain", 3 if biome.lower() in ["arctic", "winter", "icy", "park"] else 0)
+        mountain_count = structure_counts.get("mountain", 3 if biome.lower() in ["arctic", "winter", "icy"] else 0)
         
         # Building count for city biome
         building_count = structure_counts.get("building", 15 if biome.lower() == "city" else 0)
@@ -1056,27 +900,10 @@ async def generate_world(prompt: Dict) -> Dict:
         lighting_config = get_lighting_preset(time_of_day, biome)
         sky_colour = get_sky_color(time_of_day, biome)
         
-        # --- Generate color assignments from palette ---
-        color_assignments = {}
-        if color_palette and isinstance(color_palette, list) and len(color_palette) > 0:
-            print(f"[Backend] Color palette received: {color_palette} (length: {len(color_palette)})")
-            color_assignments = assign_palette_to_elements(color_palette)
-            print(f"[Backend] Generated color assignments from palette: {len(color_assignments)} elements")
-            print(f"[Backend] Color assignments keys: {list(color_assignments.keys())}")
-            if "sky" in color_assignments:
-                print(f"[Backend] ✅ Sky color from assignments: {color_assignments['sky']}")
-            else:
-                print(f"[Backend] ⚠️ WARNING: 'sky' not found in color_assignments!")
-        else:
-            print(f"[Backend] ⚠️ WARNING: No color_palette provided, using default colors")
-        
         print(f"[Backend] Lighting config: {lighting_config}")
         print(f"[Backend] Sky color: {sky_colour}")
         print("="*60 + "\n")
 
-        # --- Get plant_type from parsed params ---
-        plant_type = parsed_params.get("plant_type", "tree")  # Default to tree if not specified
-        
         # --- Build response ---
         response = {
             "world": {
@@ -1087,10 +914,7 @@ async def generate_world(prompt: Dict) -> Dict:
                 "texture_url": terrain_data.get("texture_url"),
                 "lighting_config": lighting_config,
                 "sky_colour": sky_colour,
-                "colour_map_array": terrain_data.get('colour_map_array'),
-                "color_palette": color_palette,
-                "color_assignments": color_assignments,
-                "plant_type": plant_type
+                "colour_map_array": terrain_data.get('colour_map_array')
             },
             "structures": structures,
             "combat": {

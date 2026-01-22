@@ -12,7 +12,6 @@ from typing import Optional, Dict
 # Biome settings 
 BIOME_SETTINGS = {
     "arctic": {"height_multiplier": 1.0, "ground_color": "snow"},
-    "park": {"height_multiplier": 1.0, "ground_color": "snow"},  # Park biome (copy of arctic)
     "city": {"height_multiplier": 1.0, "ground_color": "street"},
     "lava": {"height_multiplier": 1.2, "ground_color": "lava"},
     "volcanic": {"height_multiplier": 1.2, "ground_color": "lava"},
@@ -44,7 +43,6 @@ STRUCTURE_KEYWORDS = {
 
 PLACEMENT_RULES = {
     "arctic": {"min_height": 0.2, "max_height": 1.0, "max_slope": 0.3},  # Standard terrain (cave features removed)
-    "park": {"min_height": 0.2, "max_height": 1.0, "max_slope": 0.3},  # Park biome (copy of arctic)
     "city": {"min_height": 0.2, "max_height": 0.8, "max_slope": 0.4},
     "lava": {"min_height": 0.3, "max_height": 1.5, "max_slope": 0.5},  # Lava can have more extreme terrain
     "volcanic": {"min_height": 0.3, "max_height": 1.5, "max_slope": 0.5},
@@ -180,7 +178,7 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
     
     # Check biome type for special handling
     biome_lower = biome_name.lower() if biome_name else ""
-    is_arctic = biome_lower in ["arctic", "winter", "icy", "snow", "frozen", "park"]
+    is_arctic = biome_lower in ["arctic", "winter", "icy", "snow", "frozen"]
 
     # Standard terrain generation for all biomes (removed cave features for arctic)
     # Base Simplex noise
@@ -384,7 +382,7 @@ def generate_heightmap_data(biome_name, structure_count_dict=None, width=256, he
                     variation = np.random.randint(-5, 5, 3)
                     final_color = np.clip(final_color.astype(int) + variation, 0, 255).astype(np.uint8)
                     colour_map_array[y, x] = tuple(final_color)
-            elif biome_name in ["arctic", "park"]:
+            elif biome_name == "arctic":
                 # All terrain (including mountains) should be white snow in arctic (only if no custom palette)
                 colour_map_array[y, x] = get_arctic_snow_colour(
                     heightmap[y, x],

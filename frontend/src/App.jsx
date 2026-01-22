@@ -1,14 +1,6 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import GameSettingsPanel from './GameSettingsPanel';
-import ColorPicker from './ColorPicker';
-import { RealtimeVision } from '@overshoot/sdk';
-
-// Overshoot API configuration (used directly in frontend via SDK)
-const OVERSHOOT_API_URL = 'https://cluster1.overshoot.ai/api/v0.2';
-const OVERSHOOT_API_KEY = 'ovs_2d4ab5e6aa5d635976e707712176fe5b';
 
 
 const API_BASE = 'http://localhost:8000/api';
@@ -16,7 +8,6 @@ const API_BASE = 'http://localhost:8000/api';
 const GameState = {
   IDLE: 'idle',
   LISTENING: 'listening',
-  CHATTING: 'chatting',
   GENERATING: 'generating',
   PLAYING: 'playing',
 };
@@ -50,35 +41,14 @@ const VoiceWorldBuilder = () => {
   const [enemyCount, setEnemyCount] = useState(0);
   const [chatHistory, setChatHistory] = useState([]);
   const [showChatHistory, setShowChatHistory] = useState(false);
-  const [chatConversation, setChatConversation] = useState([]);
-  const [isWaitingForAI, setIsWaitingForAI] = useState(false);
-  const [historyChatInput, setHistoryChatInput] = useState('');
   const [uploadedImage, setUploadedImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
-  const [scanMode, setScanMode] = useState(false);
-  const [cameraStream, setCameraStream] = useState(null);
-  const [showExportMenu, setShowExportMenu] = useState(false);
-  const videoRef = useRef(null);
-  const overshootVisionRef = useRef(null);
-  const [streamingActive, setStreamingActive] = useState(false);
-  const [lastScanResult, setLastScanResult] = useState(null);
-  const [editingMode, setEditingMode] = useState(false);
-  const editingModeRef = useRef(false);
-  const [selectedStructure, setSelectedStructure] = useState(null);
-  const selectedStructureRef = useRef(null);
-  const raycasterRef = useRef(new THREE.Raycaster());
-  const lebronBillboardRef = useRef(null);
-  const mouseRef = useRef(new THREE.Vector2());
-  const dragOffsetRef = useRef(new THREE.Vector3());
-  const isDraggingRef = useRef(false);
   const [physicsSettings, setPhysicsSettings] = useState({
-    speed: 5.0,
-    gravity: 30.0,
-    jumpHeight: 3.0
-  });
+  speed: 5.0,
+  gravity: 20.0,
+  jumpHeight: 3.0
+});
   const physicsSettingsRef = useRef(physicsSettings);
-  const [colorPalette, setColorPalette] = useState(null);
-  const [colorSchemeNotification, setColorSchemeNotification] = useState('');
   const buildingGridConfig = {
     gridSizeX: 2,   // buildings per row
     gridSizeZ: 2,   // buildings per column
@@ -110,11 +80,6 @@ const VoiceWorldBuilder = () => {
   });
 
   const pressedKeys = useRef(new Set());
-
-  // Sync editingModeRef with editingMode state so animate function can access current value
-  useEffect(() => {
-    editingModeRef.current = editingMode;
-  }, [editingMode]);
 
   const createGround = (scene, biomeName) => {
     // Remove existing ground if any
@@ -247,49 +212,6 @@ const VoiceWorldBuilder = () => {
 
     const animate = () => {
       updateEnemyHealthBars();
-      animateNorthernLights(sceneRef.current);
-      animateSnowfall(sceneRef.current, playerRef.current?.position);
-      
-      // Editing mode: Handle structure dragging
-      if (editingModeRef.current && isDraggingRef.current && selectedStructureRef.current && cameraRef.current && rendererRef.current) {
-        const structure = selectedStructureRef.current;
-        const raycaster = raycasterRef.current;
-        const mouse = mouseRef.current;
-        
-        // Update raycaster with current mouse position
-        raycaster.setFromCamera(mouse, cameraRef.current);
-        
-        // Intersect with ground plane at structure's current Y position (not y=0)
-        // This keeps the structure at its current height while dragging
-        const structureY = structure.position.y;
-        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -structureY);
-        const intersectPoint = new THREE.Vector3();
-        const result = raycaster.ray.intersectPlane(plane, intersectPoint);
-        
-        if (result !== null) {
-          structure.position.x = intersectPoint.x + dragOffsetRef.current.x;
-          structure.position.z = intersectPoint.z + dragOffsetRef.current.z;
-          // Update matrix if structure has matrixAutoUpdate disabled
-          if (!structure.matrixAutoUpdate) {
-            structure.updateMatrix();
-          }
-        }
-      } else if (editingModeRef.current) {
-        // Debug: Log why dragging isn't working
-        if (!isDraggingRef.current) {
-          console.log('[DRAG DEBUG] isDraggingRef.current is false');
-        }
-        if (!selectedStructureRef.current) {
-          console.log('[DRAG DEBUG] selectedStructureRef.current is null');
-        }
-        if (!cameraRef.current) {
-          console.log('[DRAG DEBUG] cameraRef.current is null');
-        }
-        if (!rendererRef.current) {
-          console.log('[DRAG DEBUG] rendererRef.current is null');
-        }
-      }
-      
       animationIdRef.current = requestAnimationFrame(animate);
       const player = playerRef.current;
       const cam = cameraRef.current;
@@ -435,15 +357,10 @@ const VoiceWorldBuilder = () => {
 
         player.position.y = newY;
 
-        // Adjust camera for room/indoor biomes (closer, lower for better indoor view)
-        const currentBiome = currentWorld?.world?.biome || currentWorld?.world?.biome_name || currentWorld?.biome;
-        const isIndoorBiome = currentBiome && (currentBiome.toLowerCase() === 'room' || currentBiome.toLowerCase() === 'indoor' || currentBiome.toLowerCase() === 'kitchen');
-        
-        // Use closer, lower camera for indoor rooms
-        const distance = isIndoorBiome ? 8 : cameraOffset.current.distance; // Closer for indoor
-        const height = isIndoorBiome ? 2 : cameraOffset.current.height; // Lower for indoor
+        const distance = cameraOffset.current.distance;
+        const height = cameraOffset.current.height;
         const angle = cameraOffset.current.angle;
-        const pitch = isIndoorBiome ? 0.1 : cameraOffset.current.pitch; // Less pitch for indoor
+        const pitch = cameraOffset.current.pitch;
 
         const offsetX = -Math.sin(angle) * distance;
         const offsetZ = -Math.cos(angle) * distance;
@@ -457,7 +374,7 @@ const VoiceWorldBuilder = () => {
 
         cam.position.lerp(targetPos, 0.1);
 
-        const lookAtY = player.position.y + (isIndoorBiome ? 1.5 : Math.sin(pitch) * 2);
+        const lookAtY = player.position.y + Math.sin(pitch) * 2;
         cam.lookAt(player.position.x, lookAtY, player.position.z);
 
         enemiesRef.current.forEach((enemy) => {
@@ -513,335 +430,6 @@ const VoiceWorldBuilder = () => {
       renderer.dispose();
     };
   }, []);
-
-  // Editing mode: Mouse handlers for structure selection and dragging
-  useEffect(() => {
-    console.log('[EDIT MODE] useEffect triggered, editingMode:', editingMode);
-    if (!editingMode) {
-      console.log('[EDIT MODE] Early return - editingMode is false');
-      return;
-    }
-    
-    console.log('[EDIT MODE] Setting up event handlers');
-    
-    const handleMouseMove = (e) => {
-      if (!rendererRef.current) return;
-      
-      // Update mouse position for raycaster (always, even when dragging)
-      mouseRef.current.x = (e.clientX / window.innerWidth) * 2 - 1;
-      mouseRef.current.y = -(e.clientY / window.innerHeight) * 2 + 1;
-      
-      // Prevent default during drag to avoid text selection
-      if (isDraggingRef.current) {
-        e.preventDefault();
-      }
-      
-      // Highlight structures on hover (if not dragging)
-      if (!isDraggingRef.current && sceneRef.current && cameraRef.current) {
-        raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
-        const intersects = raycasterRef.current.intersectObjects(structuresRef.current, true);
-        
-        // Remove highlight from all structures (except selected)
-        structuresRef.current.forEach(struct => {
-          if (struct !== selectedStructureRef.current && struct.traverse) {
-            struct.traverse((child) => {
-              if (child.isMesh && child.material && child.material.emissive) {
-                child.material.emissive.setHex(0x000000);
-              }
-            });
-          }
-        });
-        
-        // Highlight hovered structure
-        if (intersects.length > 0 && !isDraggingRef.current) {
-          const obj = intersects[0].object;
-          let structure = obj;
-          while (structure.parent && !structuresRef.current.includes(structure)) {
-            structure = structure.parent;
-          }
-          if (structuresRef.current.includes(structure) && structure !== selectedStructureRef.current) {
-            structure.traverse((child) => {
-              if (child.isMesh && child.material && child.material.emissive) {
-                child.material.emissive.setHex(0x444444);
-              }
-            });
-          }
-        }
-      }
-    };
-    
-    const handleMouseDown = (e) => {
-      console.log('[DRAG DEBUG] handleMouseDown called', {
-        hasRenderer: !!rendererRef.current,
-        hasCamera: !!cameraRef.current,
-        hasScene: !!sceneRef.current,
-        editingMode: editingMode,
-        structuresCount: structuresRef.current.length
-      });
-      
-      if (!rendererRef.current || !cameraRef.current || !sceneRef.current) return;
-      if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.closest('button')) return;
-      
-      mouseRef.current.x = (e.clientX / window.innerWidth) * 2 - 1;
-      mouseRef.current.y = -(e.clientY / window.innerHeight) * 2 + 1;
-      
-      raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
-      const intersects = raycasterRef.current.intersectObjects(structuresRef.current, true);
-      
-      console.log('[DRAG DEBUG] Raycast intersections:', intersects.length);
-      
-      if (intersects.length > 0) {
-        e.preventDefault();
-        const obj = intersects[0].object;
-        let structure = obj;
-        while (structure.parent && !structuresRef.current.includes(structure)) {
-          structure = structure.parent;
-        }
-        
-        console.log('[DRAG DEBUG] Found structure:', structure, 'in structuresRef:', structuresRef.current.includes(structure));
-        
-        if (structuresRef.current.includes(structure)) {
-          setSelectedStructure(structure);
-          selectedStructureRef.current = structure;
-          
-          // Store original position for matching with world data
-          if (!structure.userData.originalPosition) {
-            structure.userData.originalPosition = {
-              x: structure.position.x,
-              y: structure.position.y,
-              z: structure.position.z
-            };
-          }
-          
-          // Store base Y position (ground level) for scaling
-          if (structure.userData.baseY === undefined) {
-            structure.userData.baseY = structure.position.y;
-          }
-          
-          // Store original scale if not already set
-          if (structure.userData.originalScale === undefined) {
-            structure.userData.originalScale = structure.userData.scale || structure.scale.y || 1.0;
-          }
-          
-          // Use plane at structure's current Y position for consistent dragging
-          const structureY = structure.position.y;
-          const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -structureY);
-          const intersectPoint = new THREE.Vector3();
-          const result = raycasterRef.current.ray.intersectPlane(plane, intersectPoint);
-          if (result !== null) {
-            dragOffsetRef.current.set(
-              structure.position.x - intersectPoint.x,
-              0,
-              structure.position.z - intersectPoint.z
-            );
-          }
-          
-          isDraggingRef.current = true;
-          console.log('[DRAG DEBUG] Started dragging!', {
-            isDragging: isDraggingRef.current,
-            selectedStructure: !!selectedStructureRef.current,
-            structureType: structure.userData?.structureType
-          });
-          
-          structure.traverse((child) => {
-            if (child.isMesh && child.material && child.material.emissive) {
-              child.material.emissive.setHex(0x00ff00);
-            }
-          });
-        } else {
-          console.log('[DRAG DEBUG] Structure not in structuresRef.current');
-        }
-      } else {
-        if (selectedStructureRef.current) {
-          selectedStructureRef.current.traverse((child) => {
-            if (child.isMesh && child.material && child.material.emissive) {
-              child.material.emissive.setHex(0x000000);
-            }
-          });
-        }
-        setSelectedStructure(null);
-        selectedStructureRef.current = null;
-        isDraggingRef.current = false;
-      }
-    };
-    
-    const handleMouseUp = () => {
-      isDraggingRef.current = false;
-      
-      if (selectedStructureRef.current && currentWorld) {
-        const structure = selectedStructureRef.current;
-        const structType = structure.userData?.structureType;
-        const structures = currentWorld.structures || {};
-        const newPos = {
-          x: structure.position.x,
-          y: structure.position.y,
-          z: structure.position.z
-        };
-        const oldPos = structure.userData.originalPosition || newPos;
-        
-        // Find matching structure in world data by comparing positions (within tolerance)
-        const tolerance = 0.1;
-        const findMatchingStructure = (structList, targetPos) => {
-          return structList.findIndex(s => {
-            const pos = s.position || {};
-            return Math.abs(pos.x - targetPos.x) < tolerance &&
-                   Math.abs(pos.z - targetPos.z) < tolerance;
-          });
-        };
-        
-        let updated = false;
-        if (structType === 'tree' && structures.trees) {
-          const treeIndex = findMatchingStructure(structures.trees, oldPos);
-          if (treeIndex >= 0) {
-            structures.trees[treeIndex].position = newPos;
-            structure.userData.originalPosition = newPos;
-            updated = true;
-          }
-        } else if (structType === 'rock' && structures.rocks) {
-          const rockIndex = findMatchingStructure(structures.rocks, oldPos);
-          if (rockIndex >= 0) {
-            structures.rocks[rockIndex].position = newPos;
-            structure.userData.originalPosition = newPos;
-            updated = true;
-          }
-        } else if (structType === 'building' && structures.buildings) {
-          // Handle buildings (including grid-based ones)
-          const buildingIndex = findMatchingStructure(structures.buildings, oldPos);
-          if (buildingIndex >= 0) {
-            structures.buildings[buildingIndex].position = newPos;
-            structure.userData.originalPosition = newPos;
-            updated = true;
-          }
-        }
-        
-        // Update placement tracking systems
-        if (updated && (newPos.x !== oldPos.x || newPos.z !== oldPos.z)) {
-          // Calculate structure radius based on type
-          let radius = 0;
-          if (structType === 'tree') {
-            const scale = structure.userData.scale || 1.0;
-            const leafSize = structure.userData.leafless ? 3 * scale : 2.2 * scale;
-            radius = leafSize + 1;
-          } else if (structType === 'rock') {
-            radius = (structure.userData.scale || 1.0) * 2;
-          } else if (structType === 'building') {
-            radius = structure.userData.collisionRadius || 5;
-          }
-          
-          // 1. Update occupiedCells for grid-based buildings
-          // Check if old position exists in occupiedCells (indicates grid-based building)
-          const oldKey = `${Math.round(oldPos.x)}:${Math.round(oldPos.z)}`;
-          const newKey = `${Math.round(newPos.x)}:${Math.round(newPos.z)}`;
-          if (occupiedCells.has(oldKey)) {
-            occupiedCells.delete(oldKey);
-            occupiedCells.add(newKey);
-          }
-          
-          // 2. Update terrainPlacementMaskRef
-          if (terrainPlacementMaskRef.current && radius > 0) {
-            // Clear old position
-            unmarkRadiusOccupied(oldPos.x, oldPos.z, radius, terrainPlacementMaskRef.current);
-            // Mark new position as occupied
-            markRadiusOccupied(newPos.x, newPos.z, radius, terrainPlacementMaskRef.current);
-          }
-        }
-        
-        if (updated) {
-          // Update currentWorld state
-          setCurrentWorld({ ...currentWorld });
-        }
-      }
-    };
-    
-    const handleWheel = (e) => {
-      if (!editingModeRef.current) return;
-      if (!selectedStructureRef.current) return;
-      e.preventDefault();
-      
-      // Scale factor: positive deltaY (scroll down) = smaller, negative (scroll up) = larger
-      const scaleDelta = e.deltaY > 0 ? -0.05 : 0.05;
-      // Get current scale from Three.js object scale (x, y, or z - should be uniform) or userData
-      const currentScaleX = selectedStructureRef.current.scale?.x || 1.0;
-      const currentScaleFromUserData = selectedStructureRef.current.userData.scale || currentScaleX;
-      const currentScale = Math.max(currentScaleX, currentScaleFromUserData);
-      const newScale = Math.max(0.1, Math.min(5.0, currentScale + scaleDelta));
-      
-      // Apply uniform scale to the structure
-      selectedStructureRef.current.scale.set(newScale, newScale, newScale);
-      
-      // Store scale in userData for future reference
-      selectedStructureRef.current.userData.scale = newScale;
-      
-      // Adjust Y position so the base stays on the ground
-      // If structure had a base Y, keep it aligned (position changes proportionally with scale)
-      const baseY = selectedStructureRef.current.userData.baseY;
-      if (baseY !== undefined) {
-        // Keep the bottom of the structure at the same ground level
-        selectedStructureRef.current.position.y = baseY;
-      }
-      
-      // Update matrix if structure has matrixAutoUpdate disabled
-      if (!selectedStructureRef.current.matrixAutoUpdate) {
-        selectedStructureRef.current.updateMatrix();
-      }
-      
-      const structType = selectedStructureRef.current.userData?.structureType;
-      const structures = currentWorld?.structures || {};
-      
-      // Find matching structure by position
-      const tolerance = 0.1;
-      const findMatchingStructure = (structList, targetPos) => {
-        return structList.findIndex(s => {
-          const pos = s.position || {};
-          return Math.abs(pos.x - targetPos.x) < tolerance &&
-                 Math.abs(pos.z - targetPos.z) < tolerance;
-        });
-      };
-      
-      let updated = false;
-      if (structType === 'tree' && structures.trees) {
-        const targetPos = selectedStructureRef.current.userData.originalPosition || selectedStructureRef.current.position;
-        const treeIndex = findMatchingStructure(structures.trees, targetPos);
-        if (treeIndex >= 0) {
-          structures.trees[treeIndex].scale = newScale;
-          updated = true;
-        }
-      } else if (structType === 'rock' && structures.rocks) {
-        const targetPos = selectedStructureRef.current.userData.originalPosition || selectedStructureRef.current.position;
-        const rockIndex = findMatchingStructure(structures.rocks, targetPos);
-        if (rockIndex >= 0) {
-          structures.rocks[rockIndex].scale = newScale;
-          updated = true;
-        }
-      } else if (structType === 'building' && structures.buildings) {
-        const targetPos = selectedStructureRef.current.userData.originalPosition || selectedStructureRef.current.position;
-        const buildingIndex = findMatchingStructure(structures.buildings, targetPos);
-        if (buildingIndex >= 0) {
-          // Buildings might have width/height/depth instead of scale
-          if (structures.buildings[buildingIndex].scale !== undefined) {
-            structures.buildings[buildingIndex].scale = newScale;
-          }
-          updated = true;
-        }
-      }
-      
-      if (updated && currentWorld) {
-        setCurrentWorld({ ...currentWorld });
-      }
-    };
-    
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mouseup', handleMouseUp);
-    window.addEventListener('wheel', handleWheel, { passive: false });
-    
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('wheel', handleWheel);
-    };
-  }, [editingMode, currentWorld]);
 
   const createTerrain = (heightmap, colorMapArray, size = 256) => {
     const segments = heightmap.length - 1;
@@ -925,193 +513,6 @@ const VoiceWorldBuilder = () => {
     }
   };
 
-  // Helper function to unmark a radius around a position (set cells back to clear/1)
-  const unmarkRadiusOccupied = (x, z, radius, mask) => {
-    const terrainSize = 256;
-    const maskSize = mask.length;
-    const radiusInCells = Math.ceil((radius / terrainSize) * maskSize);
-    
-    const centerRow = Math.floor((z + 128) / 256 * maskSize);
-    const centerCol = Math.floor((x + 128) / 256 * maskSize);
-    
-    // Unmark all cells within radius (set back to 1 = clear)
-    for (let dr = -radiusInCells; dr <= radiusInCells; dr++) {
-      for (let dc = -radiusInCells; dc <= radiusInCells; dc++) {
-        const row = centerRow + dr;
-        const col = centerCol + dc;
-        
-        // Check bounds
-        if (row < 0 || row >= maskSize || col < 0 || col >= maskSize) continue;
-        
-        // Check distance
-        const dist = Math.sqrt(dr * dr + dc * dc);
-        if (dist <= radiusInCells) {
-          mask[row][col] = 1; // Mark as clear
-        }
-      }
-    }
-  };
-
-  // Create different plant types based on biome
-  const createCactus = (plantData) => {
-    const group = new THREE.Group();
-    const scale = plantData.scale || 1.0;
-    
-    // Main cactus body (tall cylinder)
-    const bodyHeight = 4 * scale;
-    const bodyRadius = 0.5 * scale;
-    const bodyGeometry = new THREE.CylinderGeometry(bodyRadius, bodyRadius * 1.2, bodyHeight, 8);
-    
-    let bodyColor = 0x228B22; // Default green
-    if (plantData.leaf_color) {
-      if (typeof plantData.leaf_color === 'string') {
-        bodyColor = parseInt(plantData.leaf_color.replace('#', ''), 16);
-      } else {
-        bodyColor = plantData.leaf_color;
-      }
-    }
-    
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: bodyColor,
-      roughness: 0.8,
-      flatShading: true
-    });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.position.y = bodyHeight / 2;
-    body.castShadow = true;
-    group.add(body);
-    
-    // Add 2-3 arms (smaller cylinders)
-    const armCount = 2 + Math.floor(Math.random() * 2);
-    for (let i = 0; i < armCount; i++) {
-      const armHeight = (1.5 + Math.random() * 1) * scale;
-      const armRadius = 0.3 * scale;
-      const armGeometry = new THREE.CylinderGeometry(armRadius, armRadius * 1.1, armHeight, 6);
-      const arm = new THREE.Mesh(armGeometry, bodyMaterial);
-      
-      const angle = (i / armCount) * Math.PI * 2;
-      const armY = (1 + Math.random() * 2) * scale;
-      arm.position.set(
-        Math.cos(angle) * bodyRadius * 1.5,
-        armY,
-        Math.sin(angle) * bodyRadius * 1.5
-      );
-      arm.rotation.z = Math.random() * 0.3 - 0.15;
-      arm.castShadow = true;
-      group.add(arm);
-    }
-    
-    group.matrixAutoUpdate = false;
-    group.updateMatrix();
-    return group;
-  };
-
-  const createCreepyPlant = (plantData) => {
-    const group = new THREE.Group();
-    const scale = plantData.scale || 1.0;
-    
-    // Twisted, dark trunk (irregular shape)
-    const trunkHeight = 3.5 * scale;
-    const segments = 8;
-    const trunkGeometry = new THREE.CylinderGeometry(0.4 * scale, 0.5 * scale, trunkHeight, segments);
-    
-    // Twist the trunk vertices
-    const positions = trunkGeometry.attributes.position;
-    for (let i = 0; i < positions.count; i++) {
-      const y = positions.getY(i);
-      const angle = (y / trunkHeight) * Math.PI * 2; // Full twist
-      const radius = 0.4 * scale + Math.sin(y * 2) * 0.1 * scale;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      positions.setXYZ(i, x, y, z);
-    }
-    trunkGeometry.computeVertexNormals();
-    
-    let trunkColor = 0x2d1a1a; // Dark brown/black
-    if (plantData.trunk_color) {
-      if (typeof plantData.trunk_color === 'string') {
-        trunkColor = parseInt(plantData.trunk_color.replace('#', ''), 16);
-      } else {
-        trunkColor = plantData.trunk_color;
-      }
-    }
-    
-    const trunkMaterial = new THREE.MeshStandardMaterial({
-      color: trunkColor,
-      roughness: 1.0,
-      flatShading: true
-    });
-    const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
-    trunk.position.y = trunkHeight / 2;
-    trunk.castShadow = true;
-    group.add(trunk);
-    
-    // Creepy tentacle-like branches (dark, twisted)
-    const branchCount = 4 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < branchCount; i++) {
-      const branchLength = (1.5 + Math.random() * 1.5) * scale;
-      const branchGeometry = new THREE.CylinderGeometry(0.15 * scale, 0.2 * scale, branchLength, 6);
-      
-      // Twist branches
-      const branchPositions = branchGeometry.attributes.position;
-      for (let j = 0; j < branchPositions.count; j++) {
-        const y = branchPositions.getY(j);
-        const angle = (y / branchLength) * Math.PI * 3;
-        const radius = 0.15 * scale;
-        const x = Math.cos(angle) * radius;
-        const z = Math.sin(angle) * radius;
-        branchPositions.setXYZ(j, x, y, z);
-      }
-      branchGeometry.computeVertexNormals();
-      
-      const branch = new THREE.Mesh(branchGeometry, trunkMaterial);
-      const angle = (i / branchCount) * Math.PI * 2;
-      const branchY = (2 + Math.random() * 1.5) * scale;
-      branch.position.set(
-        Math.cos(angle) * 0.6 * scale,
-        branchY,
-        Math.sin(angle) * 0.6 * scale
-      );
-      branch.rotation.z = Math.random() * 0.5 - 0.25;
-      branch.castShadow = true;
-      group.add(branch);
-    }
-    
-    // Dark, spiky leaves/appendages
-    const spikeCount = 6;
-    for (let i = 0; i < spikeCount; i++) {
-      const spikeGeometry = new THREE.ConeGeometry(0.1 * scale, 0.8 * scale, 4);
-      let spikeColor = 0x1a3a1a; // Dark green/black
-      if (plantData.leaf_color) {
-        if (typeof plantData.leaf_color === 'string') {
-          spikeColor = parseInt(plantData.leaf_color.replace('#', ''), 16);
-        } else {
-          spikeColor = plantData.leaf_color;
-        }
-      }
-      const spikeMaterial = new THREE.MeshStandardMaterial({
-        color: spikeColor,
-        roughness: 1.0,
-        flatShading: true
-      });
-      const spike = new THREE.Mesh(spikeGeometry, spikeMaterial);
-      const angle = (i / spikeCount) * Math.PI * 2;
-      spike.position.set(
-        Math.cos(angle) * 0.5 * scale,
-        trunkHeight - 0.5 * scale,
-        Math.sin(angle) * 0.5 * scale
-      );
-      spike.rotation.x = Math.PI / 4;
-      spike.rotation.z = angle;
-      spike.castShadow = true;
-      group.add(spike);
-    }
-    
-    group.matrixAutoUpdate = false;
-    group.updateMatrix();
-    return group;
-  };
-
   const createTree = (treeData) => {
     const group = new THREE.Group();
 
@@ -1121,16 +522,9 @@ const VoiceWorldBuilder = () => {
     const blockCount = Math.floor(trunkHeight / blockHeight);
 
     // Use custom trunk color if provided, otherwise default
-    // Convert hex string to number if needed
-    let trunkColor = 0xab7354; // Default
-    if (treeData.trunk_color) {
-      if (typeof treeData.trunk_color === 'string') {
-        trunkColor = parseInt(treeData.trunk_color.replace('#', ''), 16);
-      } else {
-        trunkColor = treeData.trunk_color;
-      }
-    }
-    console.log('[CREATE TREE] Trunk color:', treeData.trunk_color, '→', trunkColor.toString(16));
+    const trunkColor = treeData.trunk_color ? 
+      (typeof treeData.trunk_color === 'string' ? parseInt(treeData.trunk_color.replace('#', ''), 16) : treeData.trunk_color) 
+      : 0xab7354;
 
     const trunkMaterial = new THREE.MeshStandardMaterial({
       color: trunkColor,
@@ -1170,15 +564,9 @@ const VoiceWorldBuilder = () => {
         const geometry = new THREE.BoxGeometry(w, h, w);
         const colorAttr = [];
         // Use custom leaf color if provided, otherwise default
-        let leafColorValue = 0x4BBB6D; // Default
-        if (treeData.leaf_color) {
-          if (typeof treeData.leaf_color === 'string') {
-            leafColorValue = parseInt(treeData.leaf_color.replace('#', ''), 16);
-          } else {
-            leafColorValue = treeData.leaf_color;
-          }
-        }
-        console.log('[CREATE TREE] Leaf color (leafless):', treeData.leaf_color, '→', '0x' + leafColorValue.toString(16));
+        const leafColorValue = treeData.leaf_color ? 
+          (typeof treeData.leaf_color === 'string' ? parseInt(treeData.leaf_color.replace('#', ''), 16) : treeData.leaf_color) 
+          : 0x4BBB6D;
         const green = new THREE.Color(leafColorValue);
         const white = new THREE.Color(0xffffff);
 
@@ -1217,15 +605,9 @@ const VoiceWorldBuilder = () => {
 
         const colorAttr = [];
         // Use custom leaf color if provided, otherwise default
-        let leafColorValue = 0x9adf8f; // Default
-        if (treeData.leaf_color) {
-          if (typeof treeData.leaf_color === 'string') {
-            leafColorValue = parseInt(treeData.leaf_color.replace('#', ''), 16);
-          } else {
-            leafColorValue = treeData.leaf_color;
-          }
-        }
-        console.log('[CREATE TREE] Leaf color (normal):', treeData.leaf_color, '→', '0x' + leafColorValue.toString(16));
+        const leafColorValue = treeData.leaf_color ? 
+          (typeof treeData.leaf_color === 'string' ? parseInt(treeData.leaf_color.replace('#', ''), 16) : treeData.leaf_color) 
+          : 0x9adf8f;
         // Create light and dark variants for gradient
         const baseColor = new THREE.Color(leafColorValue);
         // Clamp RGB values manually (Three.js Color doesn't have clamp method)
@@ -1298,45 +680,18 @@ const VoiceWorldBuilder = () => {
     return group;
   };
 
-  // Helper function to create plants based on plant_type
-  const createPlant = (plantData, plantType = "tree") => {
-    // Normalize plant type (handle variations)
-    const normalizedType = plantType?.toLowerCase() || "tree";
-    
-    if (normalizedType === "cactus") {
-      return createCactus(plantData);
-    } else if (normalizedType === "creepy_plant" || normalizedType === "creepy") {
-      return createCreepyPlant(plantData);
-    } else {
-      // Default: regular tree (also handles: tree, fern, vine, palm, bamboo, mushroom, crystal_plant, glowing_plant)
-      // For now, all other types render as trees. Can add specific renderers later.
-      return createTree(plantData);
-    }
-  };
-
-  const createRock = (rockData, colorAssignments = null) => {
+  const createRock = (rockData) => {
     const geometry = new THREE.DodecahedronGeometry(1, 0);
-    // Use color from data or color_assignments if available, otherwise default
-    let color = rockData.rock_color || rockData.color;
-    if (!color && colorAssignments) {
-      color = colorAssignments.rock || colorAssignments.mountain_dark;
-    }
-    if (!color) {
-      color = rockData.type === 'ice_rock' ? 0xCCE5FF : 0x808080;
-    }
-    // Convert hex string to number if needed
-    if (typeof color === 'string') {
-      color = parseInt(color.replace('#', ''), 16);
-    }
+    const color = rockData.type === 'ice_rock' ? 0xCCE5FF : 0x808080;
     const material = new THREE.MeshStandardMaterial({ 
       color: color, 
       roughness: 0.8,
       metalness: 0.2
     });
     const rock = new THREE.Mesh(geometry, material);
-    // Always use terrain height to ensure rocks are placed on terrain (not floating)
+    // Calculate terrain height at rock position (ignore y from data if it's 0)
     const terrainY = getHeightAt(rockData.position.x, rockData.position.z);
-    const finalY = terrainY + 0.5; // Place rock on top of terrain (0.5 unit offset for radius)
+    const finalY = rockData.position.y !== 0 ? rockData.position.y + 0.5 : terrainY + 0.5;
     rock.position.set(rockData.position.x, finalY, rockData.position.z);
     rock.scale.setScalar(rockData.scale);
     rock.rotation.set(
@@ -1346,212 +701,6 @@ const VoiceWorldBuilder = () => {
     );
     rock.castShadow = true;
     return rock;
-  };
-
-  // Create room walls and floor for indoor biome
-  const createRoomWall = (wallData) => {
-    const { dimensions, position, color, type, transparent, opacity } = wallData;
-    
-    const geometry = new THREE.BoxGeometry(
-      dimensions.width,
-      dimensions.height,
-      dimensions.depth
-    );
-    
-    let wallColor = color || '#E8E8E8';
-    if (typeof wallColor === 'string' && wallColor.startsWith('#')) {
-      wallColor = parseInt(wallColor.replace('#', ''), 16);
-    } else if (typeof wallColor === 'number') {
-      // Already a hex number
-    } else {
-      wallColor = 0xE8E8E8; // Default gray
-    }
-    
-    const material = new THREE.MeshStandardMaterial({
-      color: wallColor,
-      roughness: type === 'floor' ? 0.9 : 0.7,
-      metalness: 0.1,
-      side: THREE.DoubleSide,
-      transparent: transparent || false,
-      opacity: opacity !== undefined ? opacity : 1.0
-    });
-    
-    const wall = new THREE.Mesh(geometry, material);
-    wall.position.set(position.x, position.y, position.z);
-    wall.receiveShadow = true;
-    wall.castShadow = type !== 'floor' && !transparent;
-    
-    return wall;
-  };
-
-  // Create scanned objects (coffee maker, paper towel, etc.)
-  const createScannedObject = (objData) => {
-    const group = new THREE.Group();
-    const { parts, position, scale, rotation, name, type, model_url } = objData;
-    
-    // Check if this is a GLB model from Tripo3D (Priority 1)
-    if (type === 'glb_model' && model_url) {
-      console.log(`[GLB] Loading Tripo3D model for '${name}': ${model_url}`);
-      
-      // Create placeholder box while loading
-      const placeholderGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-      const placeholderMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0x4A90E2,
-        transparent: true,
-        opacity: 0.5,
-        wireframe: true
-      });
-      const placeholder = new THREE.Mesh(placeholderGeometry, placeholderMaterial);
-      placeholder.position.y = 0.25;
-      group.add(placeholder);
-      
-      // Mark group as loading
-      group.userData.isLoading = true;
-      group.userData.modelUrl = model_url;
-      
-      // Load GLB model asynchronously
-      const loader = new GLTFLoader();
-      loader.load(
-        model_url,
-        (gltf) => {
-          // Success! Replace placeholder with actual model
-          console.log(`[GLB] ✅ Model loaded successfully for '${name}'`);
-          
-          // Remove placeholder
-          group.remove(placeholder);
-          
-          // Add loaded model
-          const model = gltf.scene;
-          
-          // Enable shadows for all meshes
-          model.traverse((child) => {
-            if (child.isMesh) {
-              child.castShadow = true;
-              child.receiveShadow = true;
-            }
-          });
-          
-          // Scale model to reasonable size (Tripo3D models vary in size)
-          const bbox = new THREE.Box3().setFromObject(model);
-          const size = bbox.getSize(new THREE.Vector3());
-          const maxDim = Math.max(size.x, size.y, size.z);
-          
-          // Scale to approximately 1-2 units max dimension
-          if (maxDim > 0) {
-            const targetSize = 1.5;
-            const scaleAdjust = targetSize / maxDim;
-            model.scale.setScalar(scaleAdjust);
-          }
-          
-          // Center the model at origin
-          const center = bbox.getCenter(new THREE.Vector3());
-          model.position.sub(center.multiplyScalar(model.scale.x));
-          
-          // Ensure model sits on ground (y=0)
-          const newBbox = new THREE.Box3().setFromObject(model);
-          const minY = newBbox.min.y;
-          model.position.y -= minY;
-          
-          group.add(model);
-          group.userData.isLoading = false;
-          group.userData.modelLoaded = true;
-        },
-        (progress) => {
-          // Loading progress
-          if (progress.total > 0) {
-            const percent = (progress.loaded / progress.total * 100).toFixed(0);
-            if (percent % 25 === 0) {  // Log every 25%
-              console.log(`[GLB] Loading '${name}': ${percent}%`);
-            }
-          }
-        },
-        (error) => {
-          // Error loading model - fall back to placeholder
-          console.error(`[GLB] ❌ Failed to load model for '${name}':`, error);
-          console.log(`[GLB] Keeping placeholder box for '${name}'`);
-          
-          // Make placeholder solid and colored
-          placeholderMaterial.opacity = 1.0;
-          placeholderMaterial.wireframe = false;
-          placeholderMaterial.color.setHex(0x808080);
-          
-          group.userData.isLoading = false;
-          group.userData.loadFailed = true;
-        }
-      );
-    }
-    // Standard primitive shapes (Priority 2/3)
-    else if (parts && Array.isArray(parts)) {
-      parts.forEach(part => {
-        let geometry;
-        let partColor = part.color || '#808080';
-        if (typeof partColor === 'string') {
-          partColor = parseInt(partColor.replace('#', ''), 16);
-        }
-        
-        const material = new THREE.MeshStandardMaterial({
-          color: partColor,
-          roughness: 0.6,
-          metalness: 0.2
-        });
-        
-        switch (part.shape) {
-          case 'box':
-            geometry = new THREE.BoxGeometry(
-              part.dimensions?.width || 1,
-              part.dimensions?.height || 1,
-              part.dimensions?.depth || 1
-            );
-            break;
-          case 'cylinder':
-            geometry = new THREE.CylinderGeometry(
-              part.radius || 0.5,
-              part.radius || 0.5,
-              part.height || 1,
-              16
-            );
-            break;
-          case 'sphere':
-            geometry = new THREE.SphereGeometry(part.radius || 0.5, 16, 16);
-            break;
-          case 'cone':
-            geometry = new THREE.ConeGeometry(part.radius || 0.5, part.height || 1, 16);
-            break;
-          default:
-            geometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-        }
-        
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(
-          part.position?.x || 0,
-          part.position?.y || 0,
-          part.position?.z || 0
-        );
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        group.add(mesh);
-      });
-    } else {
-      // Fallback: create a simple box (Priority 4)
-      const geometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-      const material = new THREE.MeshStandardMaterial({ color: 0x808080 });
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.y = 0.25;
-      group.add(mesh);
-    }
-    
-    // Position and rotate the group
-    group.position.set(position?.x || 0, position?.y || 0, position?.z || 0);
-    if (scale && type !== 'glb_model') {
-      // Don't apply scale to GLB models (they handle their own scaling)
-      group.scale.setScalar(scale);
-    }
-    if (rotation) group.rotation.y = rotation;
-    
-    // Add label for debugging
-    group.name = name || 'scanned_object';
-    
-    return group;
   };
 
   const createStreetLamp = (lampData, isNight = false) => {
@@ -1822,7 +971,7 @@ const VoiceWorldBuilder = () => {
   };
 
   const getBuildingTypeForBiome = (biomeName, index) => {
-    if (biomeName === 'arctic' || biomeName === 'park') {
+    if (biomeName === 'arctic') {
       return 'igloo';
     }
 
@@ -1939,36 +1088,18 @@ const VoiceWorldBuilder = () => {
     const group = new THREE.Group();
     let mesh;
 
-    // Use color from buildingData, color_assignments from currentWorld or data, or default to city colors
-    let color = buildingData.building_color || buildingData.color;
-    // Try color_assignments from currentWorld first (if state is updated)
-    let assignments = currentWorld?.world?.color_assignments;
-    // If not available, try to get from buildingData if passed directly
-    if (!assignments && buildingData._color_assignments) {
-      assignments = buildingData._color_assignments;
-    }
-    if (!color && assignments) {
-      // Use building color, or variants if available
-      color = assignments.building || assignments.building_light || assignments.building_dark;
-    }
-    if (!color) {
-      // City building colors - light pink and light blue pastels (from second image)
-      const cityColors = [
-        0xFFB6C1,  // Light pink (bright light hitting surface)
-        0xFFC0CB,  // Pink
-        0xFFD1DC,  // Very light pink
-        0xB0E0E6,  // Powder blue
-        0xADD8E6,  // Light blue
-        0xE0F6FF,  // Very light blue
-        0xFFE4E1,  // Misty rose (pink-white)
-        0xF0F8FF   // Alice blue (very light blue)
-      ];
-      color = cityColors[Math.floor(Math.random() * cityColors.length)];
-    }
-    // Convert hex string to number if needed
-    if (typeof color === 'string') {
-      color = parseInt(color.replace('#', ''), 16);
-    }
+    // City building colors - light pink and light blue pastels (from second image)
+    const cityColors = [
+      0xFFB6C1,  // Light pink (bright light hitting surface)
+      0xFFC0CB,  // Pink
+      0xFFD1DC,  // Very light pink
+      0xB0E0E6,  // Powder blue
+      0xADD8E6,  // Light blue
+      0xE0F6FF,  // Very light blue
+      0xFFE4E1,  // Misty rose (pink-white)
+      0xF0F8FF   // Alice blue (very light blue)
+    ];
+    const color = cityColors[Math.floor(Math.random() * cityColors.length)];
 
     if (type === "igloo") {
       const radius = (buildingData.width || 4) * 1.5;
@@ -2327,185 +1458,32 @@ const VoiceWorldBuilder = () => {
   }
 
   const createMountainPeak = (peakData, biome = null) => {
-  const group = new THREE.Group();
-  const baseHeight = 80;
-  const isArctic = biome && (biome.toLowerCase() === 'arctic' || biome.toLowerCase() === 'winter' || biome.toLowerCase() === 'icy' || biome.toLowerCase() === 'snow' || biome.toLowerCase() === 'frozen' || biome.toLowerCase() === 'park');
-  
-  // Create main mountain with more detailed geometry for jagged peaks
-  const mainGeometry = new THREE.ConeGeometry(40, baseHeight, 16, 1); // Increased segments for more detail
-  const positions = mainGeometry.attributes.position;
-  
-  // Create jagged, sharp peaks with aggressive vertex displacement
-  for (let i = 0; i < positions.count; i++) {
-    const x = positions.getX(i);
-    const y = positions.getY(i);
-    const z = positions.getZ(i);
+    const height = 80; 
+    const geometry = new THREE.ConeGeometry(40, height, 4);
     
-    // Don't modify base vertices
-    if (y > -baseHeight / 2 + 5) {
-      // More aggressive displacement for jagged peaks
-      const displacement = (Math.random() - 0.5) * 15;
-      const heightFactor = Math.pow((y + baseHeight / 2) / baseHeight, 1.5); // Non-linear for sharper peaks
-      
-      // More displacement near the peak for dramatic effect
-      const scaledDisplacement = displacement * heightFactor;
-      
-      positions.setX(i, x + scaledDisplacement * 1.2);
-      positions.setZ(i, z + scaledDisplacement * 1.2);
-      positions.setY(i, y + scaledDisplacement * 0.5);
-    }
-  }
-  
-  mainGeometry.computeVertexNormals();
-  
-  // Calculate normals for slope-based coloring
-  const normals = mainGeometry.attributes.normal;
-  
-  // Create realistic colors: white snow at top/gentle slopes, dark rock on steep faces
-  const colors = [];
-  for (let i = 0; i < positions.count; i++) {
-    const y = positions.getY(i);
-    const heightRatio = (y + baseHeight / 2) / baseHeight;
-    
-    // Get surface normal for slope calculation
-    const nx = normals.getX(i);
-    const ny = normals.getY(i);
-    const nz = normals.getZ(i);
-    const slope = Math.acos(Math.max(0, Math.min(1, ny))); // Angle from vertical (0 = flat, PI/2 = vertical)
-    
-    // Always apply snow-capped peaks on top portion of mountains
-    const isSteep = slope > Math.PI / 4; // Steep faces (45+ degrees)
-    const isHigh = heightRatio > 0.5; // Upper 50% of mountain gets snow
-    
-    if (isHigh) {
-      // Snow at high altitudes: bright white with slight blue tint in shadows
-      const snowBrightness = 0.95 + heightRatio * 0.05;
-      const blueTint = 0.08 + (1 - ny) * 0.12; // More blue on vertical faces (shadows)
-      colors.push(snowBrightness, snowBrightness, snowBrightness + blueTint);
-    } else if (isSteep) {
-      // Exposed dark rock on steep lower faces
-      const rockDarkness = 0.3 + (1 - heightRatio) * 0.2;
-      colors.push(rockDarkness, rockDarkness, rockDarkness + 0.05);
-    } else {
-      // Lower gentle slopes: transition from snow to rock
-      const transition = heightRatio * 2; // 0 to 1 in lower half
-      const snowBrightness = 0.85 + transition * 0.1;
-      const rockDarkness = 0.4 + (1 - transition) * 0.15;
-      const r = snowBrightness * transition + rockDarkness * (1 - transition);
-      const g = r;
-      const b = r + 0.05 * transition;
-      colors.push(r, g, b);
-    }
-  }
-  
-  mainGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  
-  // Enhanced material for realistic snow/rock appearance
+    // Use white snow color for arctic biome, grey stone for others
+    const isArctic = biome && biome.toLowerCase() === 'arctic';
     const material = new THREE.MeshStandardMaterial({ 
-    vertexColors: true,
-    roughness: 0.85, // Snow is slightly less rough
-    metalness: 0.05,
-    flatShading: false, // Smooth shading for better lighting
-    envMapIntensity: 0.3
-  });
-  
-  const mainPeak = new THREE.Mesh(mainGeometry, material);
-  mainPeak.castShadow = true;
-  mainPeak.receiveShadow = true;
-  group.add(mainPeak);
-  
-  // Add 2-4 smaller jagged sub-peaks for complexity
-  const subPeakCount = 2 + Math.floor(Math.random() * 3);
-  for (let i = 0; i < subPeakCount; i++) {
-    const subHeight = baseHeight * (0.35 + Math.random() * 0.4);
-    const subRadius = 12 + Math.random() * 18;
-    const subGeometry = new THREE.ConeGeometry(subRadius, subHeight, 12, 1); // More segments
-    const subPositions = subGeometry.attributes.position;
-    
-    // Randomize sub-peak vertices for jagged appearance
-    for (let j = 0; j < subPositions.count; j++) {
-      const x = subPositions.getX(j);
-      const y = subPositions.getY(j);
-      const z = subPositions.getZ(j);
-      
-      if (y > -subHeight / 2 + 3) {
-        const displacement = (Math.random() - 0.5) * 12;
-        const heightFactor = Math.pow((y + subHeight / 2) / subHeight, 1.5);
-        const scaledDisplacement = displacement * heightFactor;
-        
-        subPositions.setX(j, x + scaledDisplacement * 1.0);
-        subPositions.setZ(j, z + scaledDisplacement * 1.0);
-        subPositions.setY(j, y + scaledDisplacement * 0.4);
-      }
-    }
-    
-    subGeometry.computeVertexNormals();
-    const subNormals = subGeometry.attributes.normal;
-    
-    // Color sub-peaks with same logic - always snow-capped
-    const subColors = [];
-    for (let j = 0; j < subPositions.count; j++) {
-      const y = subPositions.getY(j);
-      const heightRatio = (y + subHeight / 2) / subHeight;
-      const ny = subNormals.getY(j);
-      const slope = Math.acos(Math.max(0, Math.min(1, ny)));
-      
-      const isSteep = slope > Math.PI / 4;
-      const isHigh = heightRatio > 0.5;
-      
-      if (isHigh) {
-        // Snow at high altitudes
-        const snowBrightness = 0.95 + heightRatio * 0.05;
-        const blueTint = 0.08 + (1 - ny) * 0.12;
-        subColors.push(snowBrightness, snowBrightness, snowBrightness + blueTint);
-      } else if (isSteep) {
-        // Exposed dark rock on steep lower faces
-        const rockDarkness = 0.3 + (1 - heightRatio) * 0.2;
-        subColors.push(rockDarkness, rockDarkness, rockDarkness + 0.05);
-      } else {
-        // Lower gentle slopes: transition from snow to rock
-        const transition = heightRatio * 2;
-        const snowBrightness = 0.85 + transition * 0.1;
-        const rockDarkness = 0.4 + (1 - transition) * 0.15;
-        const r = snowBrightness * transition + rockDarkness * (1 - transition);
-        const g = r;
-        const b = r + 0.05 * transition;
-        subColors.push(r, g, b);
-      }
-    }
-    
-    subGeometry.setAttribute('color', new THREE.Float32BufferAttribute(subColors, 3));
-    
-    const subPeak = new THREE.Mesh(subGeometry, material.clone());
-    subPeak.castShadow = true;
-    subPeak.receiveShadow = true;
-    
-    // Position sub-peaks around main peak
-    const angle = (i / subPeakCount) * Math.PI * 2 + Math.random() * 0.5;
-    const distance = 18 + Math.random() * 20;
-    subPeak.position.set(
-      Math.cos(angle) * distance,
-      baseHeight * 0.1,
-      Math.sin(angle) * distance
-    );
-    subPeak.rotation.y = Math.random() * Math.PI * 2;
-    
-    group.add(subPeak);
-  }
-  
-  // Position the entire mountain group
-  const terrainY = getHeightAt(peakData.position.x, peakData.position.z);
-  const scaledHeight = baseHeight * peakData.scale;
-  group.position.set(
+      color: isArctic ? 0xFFFFFF : 0xE0E0E0,  // White snow for arctic, grey stone for others
+      roughness: 0.95,  // Very rough surface (0 = smooth, 1 = completely rough)
+      metalness: 0.1,   // Low metalness for matte, non-shiny appearance
+      emissive: isArctic ? 0xCCCCCC : 0x666666,  // Light grey emissive for arctic, darker for others
+      emissiveIntensity: 0.15
+    });
+    const peak = new THREE.Mesh(geometry, material);
+    const terrainY = getHeightAt(peakData.position.x, peakData.position.z)
+    const scaledHeight = height * peakData.scale;
+    peak.position.set(
       peakData.position.x,
-    terrainY + scaledHeight / 2,
+      terrainY +  scaledHeight / 2, // optional offset if you want some lift
       peakData.position.z
     );
-  group.scale.setScalar(peakData.scale);
-  group.rotation.y = Math.random() * Math.PI * 2;
-  
-  return group;
-};
+    peak.scale.setScalar(peakData.scale);
+    peak.rotation.y = Math.random() * Math.PI * 2;
+    peak.castShadow = true;
+    return peak;
+  };
+    
   const getHeightAt = (x, z) => {
     if (!heightmapRef.current) return 0;
     const hm = heightmapRef.current;
@@ -2520,88 +1498,6 @@ const VoiceWorldBuilder = () => {
     const c = Math.max(0, Math.min(size - 1, col));
 
     return hm[r][c] * 10;
-  };
-
-  const placeLebronImageOnTerrain = () => {
-    const scene = sceneRef.current;
-    if (!scene) {
-      console.error('[LEBRON] Scene not available');
-      return;
-    }
-
-    // Remove existing LeBron image if it exists
-    if (lebronBillboardRef.current) {
-      scene.remove(lebronBillboardRef.current);
-      if (lebronBillboardRef.current.geometry) lebronBillboardRef.current.geometry.dispose();
-      if (lebronBillboardRef.current.material) lebronBillboardRef.current.material.dispose();
-      lebronBillboardRef.current = null;
-    }
-
-    // Load texture
-    const textureLoader = new THREE.TextureLoader();
-    textureLoader.load(
-      '/lebron-james.jpg',
-      (texture) => {
-        if (!playerRef.current) {
-          console.error('[LEBRON] Player not available');
-          return;
-        }
-
-        const player = playerRef.current;
-        const playerPosition = player.position;
-        
-        // Player size: SphereGeometry with radius 1, scaled (1, 1, 1.4)
-        // Roughly 1 unit radius, 1.4 units tall = ~2.8 units total height
-        const playerSize = 2.8; // Approximate player height
-        const imageSize = playerSize * 10; // 10 times larger than player
-        
-        // Get camera direction (player's forward direction)
-        const camera = cameraRef.current;
-        let forward = new THREE.Vector3(0, 0, -1); // Default forward
-        
-        if (camera) {
-          // Get camera's forward direction
-          camera.getWorldDirection(forward);
-          forward.y = 0; // Keep horizontal (don't tilt up/down)
-          forward.normalize();
-        }
-        
-        // Position image in front of player (20 units in front)
-        const distanceInFront = 20;
-        const imageX = playerPosition.x + forward.x * distanceInFront;
-        const imageZ = playerPosition.z + forward.z * distanceInFront;
-        
-        // Calculate image dimensions maintaining aspect ratio
-        const aspectRatio = texture.image.height / texture.image.width;
-        const imageWidth = imageSize;
-        const imageHeight = imageSize * aspectRatio;
-        
-        const geometry = new THREE.PlaneGeometry(imageWidth, imageHeight);
-        const material = new THREE.MeshStandardMaterial({
-          map: texture,
-          transparent: true,
-          side: THREE.DoubleSide
-        });
-        
-        const billboard = new THREE.Mesh(geometry, material);
-        billboard.userData.isLebronBillboard = true;
-        
-        // Position on terrain at the calculated position
-        const terrainY = getHeightAt(imageX, imageZ);
-        billboard.position.set(imageX, terrainY + imageHeight / 2, imageZ);
-        
-        // Make it face the player
-        billboard.lookAt(playerPosition);
-        
-        scene.add(billboard);
-        lebronBillboardRef.current = billboard;
-        console.log('[LEBRON] Image placed on terrain at:', billboard.position);
-      },
-      undefined,
-      (error) => {
-        console.error('[LEBRON] Error loading image:', error);
-      }
-    );
   };
 
   const createPlayer = (spawn, customY = null) => {
@@ -2659,7 +1555,7 @@ const VoiceWorldBuilder = () => {
     group.add(beak);
 
     const combGeom = new THREE.BoxGeometry(0.4, 0.4, 0.2);
-    const combMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const combMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
     const comb = new THREE.Mesh(combGeom, combMat);
     comb.position.set(0, 3.1, 0.0);
     group.add(comb);
@@ -2685,327 +1581,9 @@ const VoiceWorldBuilder = () => {
     healthBarBg.add(healthBar);
 
     group.userData = { health: 3, maxHealth: 3, id, healthBar };
-
-    // Set position using terrain height
-    if (position) {
-      const terrainY = getHeightAt(position.x || 0, position.z || 0);
-      const finalY = terrainY + 1; // Place enemy on top of terrain (1 unit offset)
-      group.position.set(position.x || 0, finalY, position.z || 0);
-    }
+    group.position.set(position.x, getHeightAt(position.x, position.z), position.z);
 
     return group;
-  };
-
-  const createCreativeObject = (objData) => {
-    /**
-     * Creates a creative object from Claude's description.
-     * objData should have: name, position, rotation (optional), scale (optional), parts[]
-     * Each part has: shape, position, rotation (optional), dimensions/radius, color, material (optional)
-     */
-    const group = new THREE.Group();
-    const baseScale = objData.scale || 1.0;
-    const basePos = objData.position || { x: 0, y: 0, z: 0 };
-    const baseRot = objData.rotation || { x: 0, y: 0, z: 0 };
-
-    // Set base position and rotation
-    group.position.set(basePos.x, basePos.y, basePos.z);
-    group.rotation.set(baseRot.x, baseRot.y, baseRot.z);
-
-    // Create each part
-    objData.parts.forEach((part, index) => {
-      let geometry;
-      const partScale = baseScale;
-      const partPos = part.position || { x: 0, y: 0, z: 0 };
-      const partRot = part.rotation || { x: 0, y: 0, z: 0 };
-      
-      // Parse color
-      const colorHex = typeof part.color === 'string' 
-        ? parseInt(part.color.replace('#', ''), 16) 
-        : (part.color || 0x888888);
-      
-      // Create material
-      const materialProps = part.material || { roughness: 0.7, metalness: 0.1 };
-      const material = new THREE.MeshStandardMaterial({
-        color: colorHex,
-        roughness: materialProps.roughness || 0.7,
-        metalness: materialProps.metalness || 0.1,
-        emissive: materialProps.emissive ? new THREE.Color(materialProps.emissive) : 0x000000,
-        emissiveIntensity: materialProps.emissiveIntensity || 0
-      });
-
-      // Create geometry based on shape type
-      switch (part.shape.toLowerCase()) {
-        case 'box':
-          const dims = part.dimensions || { width: 1, height: 1, depth: 1 };
-          geometry = new THREE.BoxGeometry(
-            dims.width * partScale,
-            dims.height * partScale,
-            dims.depth * partScale
-          );
-          break;
-        
-        case 'cylinder':
-          const cylRadius = (part.radius || 0.5) * partScale;
-          const cylHeight = (part.height || 1.0) * partScale;
-          const cylSegments = part.segments || 16;
-          geometry = new THREE.CylinderGeometry(cylRadius, cylRadius, cylHeight, cylSegments);
-          break;
-        
-        case 'sphere':
-          const sphereRadius = (part.radius || 0.5) * partScale;
-          const sphereSegments = part.segments || 16;
-          geometry = new THREE.SphereGeometry(sphereRadius, sphereSegments, sphereSegments);
-          break;
-        
-        case 'cone':
-          const coneRadius = (part.radius || 0.5) * partScale;
-          const coneHeight = (part.height || 1.0) * partScale;
-          const coneSegments = part.segments || 16;
-          geometry = new THREE.ConeGeometry(coneRadius, coneHeight, coneSegments);
-          break;
-        
-        case 'torus':
-          const torusRadius = (part.radius || 0.5) * partScale;
-          const torusTube = (part.tube || 0.2) * partScale;
-          const torusSegments = part.segments || 16;
-          const torusArc = part.arc || Math.PI * 2;
-          geometry = new THREE.TorusGeometry(torusRadius, torusTube, torusSegments, 16, torusArc);
-          break;
-        
-        default:
-          console.warn(`Unknown shape type: ${part.shape}, defaulting to box`);
-          geometry = new THREE.BoxGeometry(1 * partScale, 1 * partScale, 1 * partScale);
-      }
-
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(partPos.x * partScale, partPos.y * partScale, partPos.z * partScale);
-      mesh.rotation.set(partRot.x, partRot.y, partRot.z);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      
-      group.add(mesh);
-    });
-
-    // Calculate terrain height at position
-    const terrainY = getHeightAt(basePos.x, basePos.z);
-    group.position.y = terrainY + basePos.y;
-
-    group.userData = {
-      structureType: 'creative_object',
-      name: objData.name || 'creative_object',
-      originalData: objData,
-      detailedModel: objData.detailed_model || false,
-      modelLoading: false,
-      modelLoaded: false
-    };
-
-    // If detailed_model is requested, try to load it
-    if (objData.detailed_model) {
-      loadDetailedModel(group, objData);
-    }
-
-    return group;
-  };
-
-  const loadDetailedModel = async (group, objData) => {
-    /**
-     * Loads a detailed 3D model for a creative object.
-     * First checks cache, then requests generation if needed.
-     */
-    group.userData.modelLoading = true;
-    
-    try {
-      // Check if model exists in cache
-      const cacheKey = objData.name?.toLowerCase().replace(/\s+/g, '_') || 'unknown';
-      const modelUrl = `http://localhost:8000/assets/models_cache/${cacheKey}.glb`;
-      
-      // Try to load from cache first
-      const loader = new GLTFLoader();
-      
-      loader.load(
-        modelUrl,
-        (gltf) => {
-          // Model loaded successfully - replace basic shapes with detailed model
-          const detailedModel = gltf.scene;
-          detailedModel.scale.setScalar(objData.scale || 1.0);
-          
-          // Enhance materials and colors for better appearance
-          detailedModel.traverse((child) => {
-            if (child.isMesh) {
-              // Enhance existing materials
-              if (child.material) {
-                // If material is an array, process each one
-                const materials = Array.isArray(child.material) ? child.material : [child.material];
-                
-                materials.forEach((material) => {
-                  // Enhance material properties for better appearance
-                  if (material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) {
-                    // Improve lighting and color
-                    material.roughness = Math.min(material.roughness || 0.7, 0.8);
-                    material.metalness = Math.max(material.metalness || 0.1, 0.0);
-                    
-                    // Enhance color saturation if color exists
-                    if (material.color) {
-                      const hsl = {};
-                      material.color.getHSL(hsl);
-                      // Increase saturation slightly for more vibrant colors
-                      hsl.s = Math.min(hsl.s * 1.2, 1.0);
-                      // Ensure minimum lightness for visibility
-                      hsl.l = Math.max(hsl.l, 0.3);
-                      material.color.setHSL(hsl.h, hsl.s, hsl.l);
-                    }
-                    
-                    // Ensure shadows work properly
-                    material.needsUpdate = true;
-                  }
-                  
-                  // If no color/texture, apply a default color based on object name
-                  if (!material.map && !material.color || material.color.getHex() === 0xffffff) {
-                    const defaultColor = getDefaultColorForObject(objData.name);
-                    material.color = new THREE.Color(defaultColor);
-                    material.needsUpdate = true;
-                  }
-                });
-                
-                // Update child material reference
-                if (!Array.isArray(child.material)) {
-                  child.material = materials[0];
-                }
-              }
-              
-              // Ensure shadows
-              child.castShadow = true;
-              child.receiveShadow = true;
-            }
-          });
-          
-          // Remove basic shape parts
-          while (group.children.length > 0) {
-            group.remove(group.children[0]);
-          }
-          
-          // Add detailed model
-          group.add(detailedModel);
-          group.userData.modelLoaded = true;
-          group.userData.modelLoading = false;
-          
-          console.log(`[Creative Object] Loaded detailed model for: ${objData.name}`);
-        },
-        (progress) => {
-          // Loading progress
-          console.log(`[Creative Object] Loading model for ${objData.name}: ${(progress.loaded / progress.total * 100).toFixed(1)}%`);
-        },
-        (error) => {
-          // Model not in cache - request generation (but keep basic shapes for now)
-          console.log(`[Creative Object] Model not cached for ${objData.name}, requesting generation...`);
-          requestModelGeneration(objData.name, objData.description || objData.name);
-          group.userData.modelLoading = false;
-        }
-      );
-    } catch (error) {
-      console.error(`[Creative Object] Error loading detailed model:`, error);
-      group.userData.modelLoading = false;
-    }
-  };
-
-  const requestModelGeneration = async (objectName, description) => {
-    /**
-     * Requests generation of a detailed 3D model.
-     * This happens in the background - basic shapes remain visible.
-     */
-    try {
-      const response = await fetch('http://localhost:8000/api/generate-model', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          object_name: objectName,
-          description: description,
-          force_regenerate: false
-        })
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        console.log(`[Creative Object] Model generation requested for: ${objectName}`, result);
-        
-        // Poll for model completion
-        if (result.status === 'generating') {
-          pollModelStatus(result.cache_key, objectName);
-        }
-      } else {
-        const error = await response.json();
-        console.log(`[Creative Object] Model generation not available: ${error.detail}`);
-        // Model generation API not integrated - basic shapes will remain
-      }
-    } catch (error) {
-      console.error(`[Creative Object] Error requesting model generation:`, error);
-    }
-  };
-
-  const getDefaultColorForObject = (objectName) => {
-    /**
-     * Returns a default color based on object name/type.
-     * Used when Replicate models don't have good colors.
-     */
-    const name = objectName.toLowerCase();
-    
-    // Furniture colors
-    if (name.includes('chair') || name.includes('seat')) return 0x8B4513; // Brown wood
-    if (name.includes('table') || name.includes('desk')) return 0xD2691E; // Chocolate
-    if (name.includes('bench')) return 0x654321; // Dark brown
-    
-    // Statues/monuments
-    if (name.includes('statue') || name.includes('monument')) return 0xC0C0C0; // Silver
-    if (name.includes('liberty')) return 0x87CEEB; // Sky blue (Statue of Liberty)
-    
-    // Vehicles
-    if (name.includes('car') || name.includes('vehicle')) return 0xFF0000; // Red
-    if (name.includes('truck')) return 0x0000FF; // Blue
-    
-    // Decorative
-    if (name.includes('fountain')) return 0x4682B4; // Steel blue
-    if (name.includes('lamp') || name.includes('light')) return 0xFFD700; // Gold
-    
-    // Default: neutral gray with slight color tint
-    return 0x888888;
-  };
-
-  const pollModelStatus = async (cacheKey, objectName) => {
-    /**
-     * Polls for model generation status and loads when ready.
-     */
-    const maxAttempts = 60; // 60 attempts = 1 minute (poll every second)
-    let attempts = 0;
-    
-    const poll = async () => {
-      try {
-        const response = await fetch(`http://localhost:8000/api/model-status/${cacheKey}`);
-        const status = await response.json();
-        
-        if (status.status === 'ready' && status.model_url) {
-          // Model is ready - find the object and reload it
-          const creativeObjects = structuresRef.current.filter(
-            obj => obj.userData?.structureType === 'creative_object' && 
-                   obj.userData?.name === objectName &&
-                   !obj.userData?.modelLoaded
-          );
-          
-          creativeObjects.forEach(obj => {
-            const objData = obj.userData.originalData;
-            loadDetailedModel(obj, objData);
-          });
-        } else if (attempts < maxAttempts) {
-          attempts++;
-          setTimeout(poll, 1000); // Poll every second
-        }
-      } catch (error) {
-        console.error(`[Creative Object] Error polling model status:`, error);
-      }
-    };
-    
-    setTimeout(poll, 1000); // Start polling after 1 second
   };
 
   const updateEnemyHealthBars = () => {
@@ -3078,2363 +1656,6 @@ const VoiceWorldBuilder = () => {
     return cloudGroup;
   };
 
-  const createNorthernLights = (scene) => {
-  console.log('[NORTHERN LIGHTS] Creating aurora borealis...');
-  
-  // Remove any existing northern lights
-  const existingLights = scene.children.filter(c => c.userData?.isNorthernLights);
-  existingLights.forEach(light => scene.remove(light));
-  
-  // Create multiple layers of northern lights for depth - matching reference image
-  const layers = [];
-  const layerCount = 6; // More layers for richer depth like reference
-  
-  for (let layer = 0; layer < layerCount; layer++) {
-    // Create geometry for the aurora curtain - very large to match reference sky coverage
-    const width = 1000; // Even wider to cover more sky
-    const height = 200; // Taller for dramatic effect
-    const segments = 80; // More segments for smoother, flowing curves
-    
-    const geometry = new THREE.PlaneGeometry(width, height, segments, segments);
-    
-    // Animate the vertices to create wave effect
-    const positions = geometry.attributes.position;
-    const time = Date.now() * 0.001;
-    
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i);
-      const y = positions.getY(i);
-      
-      // Create flowing wave pattern with more variation
-      const wave1 = Math.sin(x * 0.008 + time + layer) * 8;
-      const wave2 = Math.sin(x * 0.015 - time * 0.7 + layer * 0.5) * 5;
-      const wave3 = Math.cos(y * 0.04 + time * 0.4) * 3;
-      const wave4 = Math.sin(x * 0.025 + y * 0.03 + time * 0.3) * 4;
-      
-      positions.setZ(i, wave1 + wave2 + wave3 + wave4);
-    }
-    
-    positions.needsUpdate = true;
-    geometry.computeVertexNormals();
-    
-    // Create EXTREMELY vibrant gradient colors matching reference image
-    const colors = [];
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i);
-      const y = positions.getY(i);
-      const normalizedX = (x + width / 2) / width; // 0 to 1 (left to right)
-      const normalizedY = (y + height / 2) / height; // 0 to 1 (bottom to top)
-      
-      // Aurora colors: MAXIMUM VIBRANCY like reference (purple, magenta, pink, cyan, green)
-      let r, g, b;
-      
-      // Create color variation based on X position and layer for depth
-      const colorShift = layer * 0.15; // Layer offset for color variation
-      const xOffset = (normalizedX + colorShift) % 1.0;
-      
-      // Reference image analysis: Strong purples, magentas, pinks, and bright greens/cyans
-      // Create dramatic color zones with MAXIMUM saturation
-      if (xOffset < 0.2) {
-        // Zone 1: INTENSE MAGENTA/PINK (like reference)
-        const t = xOffset * 5; // 0 to 1
-        r = 0.95 + t * 0.05; // Maximum bright magenta/pink (0.95-1.0)
-        g = 0.1 + t * 0.15; // Low green for magenta
-        b = 0.85 + t * 0.1; // High blue for magenta (0.85-0.95)
-      } else if (xOffset < 0.4) {
-        // Zone 2: BRIGHT PURPLE (reference has strong purple)
-        const t = (xOffset - 0.2) * 5; // 0 to 1
-        r = 0.9 - t * 0.1; // Bright purple red (0.9-0.8)
-        g = 0.15 + t * 0.1; // Low green
-        b = 0.95 - t * 0.05; // Maximum purple-blue (0.95-0.9)
-      } else if (xOffset < 0.6) {
-        // Zone 3: VIVID CYAN/TURQUOISE (reference transition color)
-        const t = (xOffset - 0.4) * 5; // 0 to 1
-        r = 0.1 - t * 0.05; // Very low red (0.1-0.05)
-        g = 0.7 + t * 0.25; // Increasing bright cyan-green (0.7-0.95)
-        b = 0.95 - t * 0.1; // High cyan-blue (0.95-0.85)
-      } else if (xOffset < 0.8) {
-        // Zone 4: INTENSE GREEN (reference has vibrant green bands)
-        const t = (xOffset - 0.6) * 5; // 0 to 1
-        r = 0.05 + t * 0.15; // Very low red
-        g = 0.95 - t * 0.05; // Maximum bright green (0.95-0.9)
-        b = 0.5 + t * 0.15; // Medium-high blue for cyan-green (0.5-0.65)
-      } else {
-        // Zone 5: GREEN to MAGENTA transition (cycling back)
-        const t = (xOffset - 0.8) * 5; // 0 to 1
-        r = 0.2 + t * 0.7; // Increasing red for magenta (0.2-0.9)
-        g = 0.85 - t * 0.7; // Decreasing green (0.85-0.15)
-        b = 0.6 + t * 0.3; // Increasing blue for magenta (0.6-0.9)
-      }
-      
-      // Add vertical brightness variation (brighter at top like reference)
-      const verticalBrightness = 0.85 + normalizedY * 0.15; // Brighter at top (0.85-1.0)
-      r *= verticalBrightness;
-      g *= verticalBrightness;
-      b *= verticalBrightness;
-      
-      // EXTREME boost for MAXIMUM vibrancy matching reference
-      const maxChannel = Math.max(r, g, b);
-      if (maxChannel > 0) {
-        const boostFactor = 1.5; // 50% boost for extreme vibrancy like reference
-        r = Math.min(1.0, r * boostFactor);
-        g = Math.min(1.0, g * boostFactor);
-        b = Math.min(1.0, b * boostFactor);
-      }
-      
-      // Ensure colors are within valid range
-      r = Math.min(1.0, Math.max(0.0, r));
-      g = Math.min(1.0, Math.max(0.0, g));
-      b = Math.min(1.0, Math.max(0.0, b));
-      
-      colors.push(r, g, b);
-    }
-    
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    
-   // Base opacity: VERY HIGH like reference image - extremely visible day and night
-      const baseOpacity = 0.90; // High opacity for maximum visibility
-      const layerOpacity = baseOpacity - layer * 0.05; // Minimal layer fade for maximum visibility
-    
-    const material = new THREE.MeshBasicMaterial({
-  vertexColors: true,
-  transparent: true,
-  opacity: layerOpacity,
-  side: THREE.DoubleSide,
-  blending: THREE.NormalBlending,  // Changed from AdditiveBlending
-  depthWrite: false
-});
-    
-    const aurora = new THREE.Mesh(geometry, material);
-    
-    // Position the aurora in the sky (moved higher)
-    aurora.position.set(0, 200 + layer * 12, -150 - layer * 35);
-    aurora.rotation.x = Math.PI * 0.3; // Tilt towards viewer
-    aurora.userData.isNorthernLights = true;
-    aurora.userData.layer = layer;
-    aurora.userData.time = time;
-    aurora.userData.baseOpacity = 0.9;
-    
-    // Add gentle downward-pointing directional light for each aurora layer
-    // Use aurora colors (green, cyan, purple, magenta) with low intensity for gentle illumination
-    const auroraLightColor = layer < 2 ? 0x88ffaa : layer < 4 ? 0x88aaff : 0xaa88ff; // Green to blue to purple based on layer
-    const auroraLight = new THREE.DirectionalLight(auroraLightColor, 0.15 - layer * 0.02); // Gentle, decreasing intensity per layer
-    auroraLight.position.set(0, 250 + layer * 12, -150 - layer * 35); // Slightly above aurora
-    auroraLight.target.position.set(0, 0, 0); // Point downward
-    auroraLight.castShadow = false; // Don't cast shadows for performance
-    auroraLight.userData.isNorthernLights = true;
-    auroraLight.userData.isAuroraLight = true;
-    auroraLight.userData.layer = layer;
-    
-    scene.add(auroraLight);
-    scene.add(auroraLight.target);
-    
-    scene.add(aurora);
-    layers.push(aurora);
-  }
-  
-  console.log(`[NORTHERN LIGHTS] Created ${layers.length} aurora layers (MAXIMUM VIBRANCY like reference)`);
-  return layers;
-};
-
-  const animateNorthernLights = (scene) => {
-  const lights = scene.children.filter(c => c.userData?.isNorthernLights);
-  
-  if (lights.length === 0) return;
-  
-  const time = Date.now() * 0.001;
-  
-  // UPDATED: Check current lighting for day/night to adjust opacity
-  const currentLighting = currentWorld?.world?.lighting_config;
-  let isDay = true;
-  if (currentLighting?.background) {
-    const bgColor = new THREE.Color(currentLighting.background);
-    const hsl = {};
-    bgColor.getHSL(hsl);
-    isDay = hsl.l > 0.4;
-  }
-  
-  // Position northern lights to follow player/camera so they're always visible
-  const player = playerRef.current;
-  const cam = cameraRef.current;
-  if (player && cam) {
-    // Get camera's forward direction to position aurora in front of camera view
-    const camForward = new THREE.Vector3();
-    cam.getWorldDirection(camForward);
-    camForward.y = 0; // Keep horizontal
-    camForward.normalize();
-    
-    lights.forEach((object) => {
-      // Skip light targets - they'll be updated with their parent lights
-      if (object.userData?.isAuroraLightTarget) return;
-      
-      const layer = object.userData.layer;
-      // Position in front of player, high in the sky, in the camera's view direction
-      const forwardDistance = 150 + layer * 35;
-      const yPos = 200 + layer * 12;
-      
-      if (object.userData?.isAuroraLight) {
-        // Update aurora light position (slightly above aurora)
-        object.position.set(
-        player.position.x + camForward.x * forwardDistance,
-          yPos + 50, // Slightly above aurora
-        player.position.z + camForward.z * forwardDistance
-      );
-        // Update light target to point downward
-        if (object.target) {
-          object.target.position.set(
-            player.position.x + camForward.x * forwardDistance,
-            player.position.y, // Point at player/ground level
-            player.position.z + camForward.z * forwardDistance
-          );
-        }
-      } else {
-        // Update aurora mesh position
-        object.position.set(
-          player.position.x + camForward.x * forwardDistance,
-          yPos,
-          player.position.z + camForward.z * forwardDistance
-        );
-      }
-    });
-  } else if (player) {
-    // Fallback: position relative to player if camera not available
-    lights.forEach((object) => {
-      // Skip light targets
-      if (object.userData?.isAuroraLightTarget) return;
-      
-      const layer = object.userData.layer;
-      const yPos = 200 + layer * 12;
-      
-      if (object.userData?.isAuroraLight) {
-        // Update aurora light position
-        object.position.set(
-        player.position.x,
-          yPos + 50,
-        player.position.z + 150 + layer * 35
-      );
-        // Update light target
-        if (object.target) {
-          object.target.position.set(
-            player.position.x,
-            player.position.y,
-            player.position.z + 150 + layer * 35
-          );
-        }
-      } else {
-        // Update aurora mesh position
-        object.position.set(
-          player.position.x,
-          yPos,
-          player.position.z + 150 + layer * 35
-        );
-      }
-    });
-  }
-  
-  // Only animate aurora meshes (not lights)
-  const auroraMeshes = lights.filter(l => !l.userData?.isAuroraLight && l.geometry);
-  
-  auroraMeshes.forEach((aurora) => {
-    const layer = aurora.userData.layer;
-    const geometry = aurora.geometry;
-    const positions = geometry.attributes.position;
-    
-    // Animate vertices for flowing effect with more variation
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i);
-      const y = positions.getY(i);
-      
-      // Create flowing wave pattern with more complexity
-      const wave1 = Math.sin(x * 0.008 + time + layer) * 8;
-      const wave2 = Math.sin(x * 0.015 - time * 0.7 + layer * 0.5) * 5;
-      const wave3 = Math.cos(y * 0.04 + time * 0.4) * 3;
-      const wave4 = Math.sin(x * 0.025 + y * 0.03 + time * 0.3) * 4;
-      
-      positions.setZ(i, wave1 + wave2 + wave3 + wave4);
-    }
-    
-    positions.needsUpdate = true;
-    
-    // UPDATED: Adjust opacity based on time of day with gentle pulsing - very high for visibility
-   // UPDATED: Adjust opacity with gentle pulsing - very high for visibility
-    const baseOpacity = 0.90; // High opacity like reference
-    const pulse = Math.sin(time * 0.5 + layer) * 0.05;
-    aurora.material.opacity = baseOpacity - layer * 0.05 + pulse;
-  });
-  };
-
-  // Snowfall particle system for arctic biomes
-  const createSnowfall = (scene) => {
-    console.log('[SNOWFALL] Creating snowfall particle system...');
-    
-    // Remove any existing snowfall
-    const existingSnow = scene.children.find(c => c.userData?.isSnowfall);
-    if (existingSnow) {
-      scene.remove(existingSnow);
-    }
-    
-    // Create particle geometry
-    const particleCount = 15000; // Dense snowfall
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    const velocities = new Float32Array(particleCount * 3);
-    const sizes = new Float32Array(particleCount);
-    
-    const spreadX = 400; // Area width
-    const spreadZ = 400; // Area depth  
-    const heightRange = 200; // How high snow spawns
-    
-    for (let i = 0; i < particleCount; i++) {
-      const i3 = i * 3;
-      
-      // Random position in a large area around the player
-      positions[i3] = (Math.random() - 0.5) * spreadX;
-      positions[i3 + 1] = Math.random() * heightRange + 10; // Height from 10 to 210
-      positions[i3 + 2] = (Math.random() - 0.5) * spreadZ;
-      
-      // Random velocities for wind drift effect
-      velocities[i3] = (Math.random() - 0.5) * 0.3; // Slight horizontal drift
-      velocities[i3 + 1] = -(0.5 + Math.random() * 1.0); // Fall speed (negative Y)
-      velocities[i3 + 2] = (Math.random() - 0.5) * 0.3; // Slight horizontal drift
-      
-      // Random sizes for depth perception
-      sizes[i] = 0.3 + Math.random() * 0.7;
-    }
-    
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('velocity', new THREE.BufferAttribute(velocities, 3));
-    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-    
-    // Create snowflake texture using canvas
-    const canvas = document.createElement('canvas');
-    canvas.width = 32;
-    canvas.height = 32;
-    const ctx = canvas.getContext('2d');
-    
-    // Draw soft circular snowflake
-    const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-    gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.8)');
-    gradient.addColorStop(0.6, 'rgba(230, 240, 255, 0.4)');
-    gradient.addColorStop(1, 'rgba(200, 220, 255, 0)');
-    
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(16, 16, 16, 0, Math.PI * 2);
-    ctx.fill();
-    
-    const snowTexture = new THREE.CanvasTexture(canvas);
-    
-    // Shader material for soft, glowing snowflakes
-    const material = new THREE.PointsMaterial({
-      size: 1.5,
-      map: snowTexture,
-      transparent: true,
-      opacity: 0.9,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      vertexColors: false,
-      color: 0xffffff,
-      sizeAttenuation: true,
-    });
-    
-    const snowParticles = new THREE.Points(geometry, material);
-    snowParticles.userData.isSnowfall = true;
-    snowParticles.userData.spreadX = spreadX;
-    snowParticles.userData.spreadZ = spreadZ;
-    snowParticles.userData.heightRange = heightRange;
-    
-    scene.add(snowParticles);
-    console.log(`[SNOWFALL] Created ${particleCount} snowflakes`);
-    
-    return snowParticles;
-  };
-  
-  // Animate snowfall particles
-  const animateSnowfall = (scene, playerPosition = null) => {
-    const snowParticles = scene?.children?.find(c => c.userData?.isSnowfall);
-    if (!snowParticles) return;
-    
-    const positions = snowParticles.geometry.attributes.position.array;
-    const velocities = snowParticles.geometry.attributes.velocity.array;
-    const { spreadX, spreadZ, heightRange } = snowParticles.userData;
-    
-    // Get player position for centering snow around player
-    const centerX = playerPosition?.x || 0;
-    const centerZ = playerPosition?.z || 0;
-    
-    const time = Date.now() * 0.001;
-    
-    for (let i = 0; i < positions.length / 3; i++) {
-      const i3 = i * 3;
-      
-      // Add wind effect that changes over time
-      const windX = Math.sin(time * 0.3 + i * 0.01) * 0.1;
-      const windZ = Math.cos(time * 0.2 + i * 0.01) * 0.1;
-      
-      // Update position with velocity and wind
-      positions[i3] += velocities[i3] + windX;
-      positions[i3 + 1] += velocities[i3 + 1];
-      positions[i3 + 2] += velocities[i3 + 2] + windZ;
-      
-      // Reset snowflake if it falls below ground or drifts too far
-      if (positions[i3 + 1] < 0) {
-        positions[i3] = centerX + (Math.random() - 0.5) * spreadX;
-        positions[i3 + 1] = heightRange + Math.random() * 20;
-        positions[i3 + 2] = centerZ + (Math.random() - 0.5) * spreadZ;
-      }
-      
-      // Wrap horizontally to keep snow centered around player
-      const halfSpreadX = spreadX / 2;
-      const halfSpreadZ = spreadZ / 2;
-      
-      if (positions[i3] > centerX + halfSpreadX) {
-        positions[i3] = centerX - halfSpreadX + Math.random() * 10;
-      } else if (positions[i3] < centerX - halfSpreadX) {
-        positions[i3] = centerX + halfSpreadX - Math.random() * 10;
-      }
-      
-      if (positions[i3 + 2] > centerZ + halfSpreadZ) {
-        positions[i3 + 2] = centerZ - halfSpreadZ + Math.random() * 10;
-      } else if (positions[i3 + 2] < centerZ - halfSpreadZ) {
-        positions[i3 + 2] = centerZ + halfSpreadZ - Math.random() * 10;
-      }
-    }
-    
-    snowParticles.geometry.attributes.position.needsUpdate = true;
-  };
-
-  // Camera capture functions for Overshoot AI scanning
-  const startCameraCapture = async () => {
-    try {
-      // Prevent concurrent streaming
-      if (streamingActive || overshootVisionRef.current) {
-        console.warn('[CAMERA] Streaming already active, ignoring request');
-        return;
-      }
-
-      // Check if getUserMedia is available
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        alert('Camera API is not supported in this browser. Please use Chrome, Firefox, Edge, or Safari.');
-        return;
-      }
-
-      // Check if we're on HTTPS or localhost (required for camera access)
-      const hostname = location.hostname;
-      const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
-      const isHTTPS = location.protocol === 'https:';
-      
-      // If using IP address (not localhost), warn user
-      if (!isLocalhost && !isHTTPS) {
-        const useLocalhost = confirm(
-          '⚠️ Camera access requires HTTPS or localhost.\n\n' +
-          'You are currently using: ' + hostname + ':3000\n\n' +
-          'SOLUTION: Access the site via localhost instead:\n' +
-          'http://localhost:3000\n\n' +
-          'Click OK to open localhost:3000, or Cancel to continue (may not work).'
-        );
-        
-        if (useLocalhost) {
-          window.location.href = 'http://localhost:3000';
-          return;
-        }
-        console.warn('[CAMERA] Attempting camera access from non-secure context:', hostname);
-      }
-
-      // Start streaming - sends frames to OpenAI and video to Overshoot (both via backend)
-      console.log('[CAMERA] Starting video streaming...');
-      await startStreamingCapture();
-      
-    } catch (error) {
-      console.error('[CAMERA] Error starting streaming or camera:', error);
-    }
-  };
-
-  const startBasicCamera = async () => {
-    try {
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            facingMode: 'environment',
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          } 
-        });
-      } catch (constraintError) {
-        console.log('[CAMERA] Advanced constraints failed, trying basic video...');
-        stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      }
-      
-      setCameraStream(stream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => {
-          console.log('[CAMERA] Camera ready:', videoRef.current.videoWidth, 'x', videoRef.current.videoHeight);
-        };
-      }
-      setScanMode(true);
-      console.log('[CAMERA] Camera access granted (basic mode)');
-    } catch (error) {
-      console.error('[CAMERA] Error accessing camera:', error);
-      handleCameraError(error);
-    }
-  };
-
-  // Ref for streaming interval and video recording
-  const streamingIntervalRef = useRef(null);
-  const overshootResultCountRef = useRef(0);
-  const worldGeneratedFromScanRef = useRef(false); // Prevent multiple world generations
-  const accumulatedObjectsRef = useRef({}); // Accumulate scanned objects across results
-  const processedScenesRef = useRef(new Set()); // Track processed scene descriptions (deduplication)
-  const latestScanDataRef = useRef(null); // Store latest scan result for world generation on stop
-  const frameCounterRef = useRef(0); // Track frame numbers for optimized processing
-
-  // Main streaming function - uses Overshoot SDK directly for real-time video analysis
-  const startStreamingCapture = async () => {
-    try {
-      console.log('[STREAMING] Starting capture with Overshoot SDK...');
-      
-      // Reset previous scan results
-      setLastScanResult(null);
-      overshootResultCountRef.current = 0;
-      worldGeneratedFromScanRef.current = false; // Allow new world generation
-      accumulatedObjectsRef.current = {}; // Reset accumulated objects
-      processedScenesRef.current.clear(); // Clear processed scenes for new scan session
-      frameCounterRef.current = 0; // Reset frame counter
-      latestScanDataRef.current = null; // Reset latest scan data
-      
-      // First, enable the UI
-      setStreamingActive(true);
-      setScanMode(false);
-      
-      // Configuration object for Overshoot SDK (matches official documentation format)
-      const overshootConfig = {
-        apiUrl: OVERSHOOT_API_URL,
-        apiKey: OVERSHOOT_API_KEY,
-        prompt: `Describe the ENTIRE visible scene in extreme detail for 3D model generation. Return JSON with:
-{
-  "scene_description": "Detailed description of everything visible: objects, walls, floor, ceiling, background, their positions, materials, colors (hex), textures, lighting, scale. Example: 'A black coffee maker sits on a white marble countertop. Behind it is a light gray wall extending 4 feet wide. Natural light from the right. The countertop is 36 inches high.'",
-  "scene_type": "indoor|outdoor|landmark|object_closeup",
-  "primary_elements": [{"name": "object", "description": "details", "position": "center", "materials": ["material"], "colors": {"primary": "#HEX"}}],
-  "colors": {"palette": ["#HEX", "#HEX", "#HEX"]},
-  "scale_reference": "real-world dimensions if identifiable"
-}
-Ignore people. Include ALL visible elements - this will create the complete 3D world.`,
-        source: { type: 'camera', cameraFacing: 'environment' },
-        processing: {
-          clip_length_seconds: 1,
-          delay_seconds: 1,
-          fps: 30,
-          sampling_ratio: 0.1  // Default per documentation: 10% of frames (3 fps at 30fps)
-        },
-        onResult: async (result) => {
-          overshootResultCountRef.current++;
-          const resultNum = overshootResultCountRef.current;
-          
-          console.log(`[OVERSHOOT] ✅ Result #${resultNum}:`, result.result);
-          
-          try {
-            // Parse the result (Overshoot returns result.result as the AI response)
-            let parsed = result.result;
-            if (typeof parsed === 'string') {
-              // Try to extract JSON from the response
-              const jsonMatch = parsed.match(/\{[\s\S]*\}/);
-              if (jsonMatch) {
-                try {
-                  // Clean up common JSON issues before parsing
-                  let jsonStr = jsonMatch[0];
-                  // Replace invalid "#HEX" placeholders with valid hex colors
-                  jsonStr = jsonStr.replace(/"#HEX"/g, '"#000000"');
-                  // Fix invalid color patterns: "primary": "#HEX1", "#HEX2" becomes "primary": "#HEX1"
-                  // This pattern has multiple hex values where the second one is invalid (not a key-value pair)
-                  jsonStr = jsonStr.replace(/"primary":\s*"(#[A-F0-9]{6})",\s*"#[A-F0-9]{6}"/g, '"primary": "$1"');
-                  // More aggressive: remove any standalone hex strings after commas (invalid JSON property)
-                  jsonStr = jsonStr.replace(/,\s*"#[A-F0-9]{6}"/g, '');
-                  parsed = JSON.parse(jsonStr);
-                } catch (jsonParseError) {
-                  console.warn(`[OVERSHOOT] JSON parse failed, trying to fix and retry: ${jsonParseError.message}`);
-                  // Try more aggressive fixes
-                  let jsonStr = jsonMatch[0];
-                  // Replace invalid "#HEX" placeholders
-                  jsonStr = jsonStr.replace(/"#HEX"/g, '"#000000"');
-                  // Fix patterns like {"primary": "#HEX1", "#HEX2", "#HEX3"} - keep only first hex
-                  // This regex handles 1 or more trailing hex values after the first
-                  jsonStr = jsonStr.replace(/"primary":\s*"(#[A-F0-9]{6})"(\s*,\s*"#[A-F0-9]{6}")+/g, '"primary": "$1"');
-                  // Remove any standalone hex strings after commas (they're not valid JSON keys)
-                  jsonStr = jsonStr.replace(/,\s*"#[A-F0-9]{6}"/g, '');
-                  try {
-                    parsed = JSON.parse(jsonStr);
-                  } catch (retryError) {
-                    console.error(`[OVERSHOOT] JSON parse failed after fixes: ${retryError.message}`);
-                    // Let it fall through to outer catch block
-                    throw retryError;
-                  }
-                }
-              }
-            }
-            
-            // Accumulate objects across multiple results
-            if (parsed?.objects) {
-              for (const [objName, count] of Object.entries(parsed.objects)) {
-                const currentCount = accumulatedObjectsRef.current[objName] || 0;
-                const newCount = typeof count === 'number' ? count : 1;
-                // Keep the max count seen for each object
-                accumulatedObjectsRef.current[objName] = Math.max(currentCount, newCount);
-              }
-            }
-            
-            setLastScanResult({
-              biome: parsed?.biome || 'unknown',
-              timestamp: new Date().toLocaleTimeString(),
-              frameCount: resultNum,
-              source: 'overshoot',
-              raw_text: typeof result.result === 'string' ? result.result.substring(0, 50) : null,
-              accumulatedObjects: { ...accumulatedObjectsRef.current }
-            });
-            
-            // Store scan data for world generation when streaming stops (defer generation)
-            // Keep the latest scan result with scene description
-            const sceneDesc = parsed?.scene_description;
-            if (sceneDesc && !worldGeneratedFromScanRef.current) {
-              // Store latest scan data for generation on stop
-              latestScanDataRef.current = {
-                sceneDescription: sceneDesc,
-                parsedData: parsed,
-                frameNumber: resultNum
-              };
-              console.log(`[OVERSHOOT] 📸 Storing scan data for world generation on stop (Frame #${resultNum})...`);
-            }
-          } catch (parseError) {
-            console.log('[OVERSHOOT] Could not parse result as JSON:', parseError.message);
-            setLastScanResult({
-              biome: 'unknown',
-              timestamp: new Date().toLocaleTimeString(),
-              frameCount: resultNum,
-              source: 'overshoot',
-              raw_text: typeof result.result === 'string' ? result.result.substring(0, 50) : 'non-string result'
-            });
-          }
-        },
-        onError: (error) => {
-          console.error('[OVERSHOOT] SDK Error:', error);
-          console.error('[OVERSHOOT] Error details:', {
-            message: error.message,
-            name: error.name,
-            stack: error.stack
-          });
-          
-          // Log specific error types
-          if (error.message && error.message.includes('422')) {
-            console.error('[OVERSHOOT] 422 Validation Error detected - SDK may need configuration adjustments');
-            console.error('[OVERSHOOT] This might be an SDK version issue or API format change');
-          } else if (error.message && (error.message.includes('401') || error.message.includes('403'))) {
-            console.error('[OVERSHOOT] Authentication Error - check API key');
-          }
-        }
-      };
-      
-      // Log configuration before creating instance
-      console.log('[OVERSHOOT] Configuration being passed:', {
-        apiUrl: overshootConfig.apiUrl,
-        apiKey: overshootConfig.apiKey ? `${overshootConfig.apiKey.substring(0, 10)}...` : 'NOT SET',
-        hasPrompt: !!overshootConfig.prompt,
-        promptLength: overshootConfig.prompt ? overshootConfig.prompt.length : 0,
-        hasSource: !!overshootConfig.source,
-        sourceType: overshootConfig.source?.type || 'N/A',
-        hasProcessing: !!overshootConfig.processing,
-        processingConfig: overshootConfig.processing
-      });
-      
-      // Create Overshoot RealtimeVision instance
-      const vision = new RealtimeVision(overshootConfig);
-      
-      // Start the Overshoot vision
-      console.log('[OVERSHOOT] Starting RealtimeVision...');
-      
-      await vision.start();
-      console.log('[OVERSHOOT] ✅ RealtimeVision started successfully');
-      
-      // Store reference for cleanup
-      overshootVisionRef.current = vision;
-      
-      // Also get camera stream for the preview video element
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            facingMode: 'environment',
-            width: { ideal: 640 },
-            height: { ideal: 480 }
-          } 
-        });
-        setCameraStream(stream);
-        
-        // Wait for video element and set up preview
-        const setupPreview = () => {
-      if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.play().catch(() => {});
-            return true;
-          }
-          return false;
-        };
-        
-        // Try to set up preview, retry if needed
-        if (!setupPreview()) {
-          let attempts = 0;
-          const checkInterval = setInterval(() => {
-            attempts++;
-            if (setupPreview() || attempts >= 20) {
-              clearInterval(checkInterval);
-            }
-          }, 100);
-        }
-      } catch (previewError) {
-        console.log('[OVERSHOOT] Preview setup skipped (SDK handles camera):', previewError.message);
-      }
-      
-    } catch (error) {
-      console.error('[STREAMING] Error starting Overshoot SDK:', error);
-      console.error('[STREAMING] Error type:', error.constructor.name);
-      console.error('[STREAMING] Error message:', error.message);
-      console.error('[STREAMING] Error stack:', error.stack);
-      
-      let errorMessage = 'Failed to start Overshoot streaming.\n\n';
-      
-      if (error.message && (error.message.includes('fetch') || error.message.includes('network'))) {
-        errorMessage += '⚠️ Network Error: Cannot reach Overshoot API.\n\n';
-      } else if (error.message && (error.message.includes('401') || error.message.includes('403') || error.message.includes('Unauthorized'))) {
-        errorMessage += 'Authentication Error: Invalid API key.\n\n';
-      } else if (error.message && (error.message.includes('422') || error.message.includes('validation'))) {
-        errorMessage += '⚠️ Validation Error (422): SDK request format issue.\n';
-        errorMessage += 'This may be an SDK version issue. Falling back to OpenAI frame analysis.\n\n';
-      } else if (error.message && error.message.includes('NotAllowedError')) {
-        errorMessage += 'Camera permission denied. Please allow camera access.\n\n';
-      } else {
-        errorMessage += `Error: ${error.message || 'Unknown error'}\n\n`;
-      }
-      
-      console.warn(errorMessage);
-      
-      // Try fallback to OpenAI frame analysis
-      console.log('[OVERSHOOT] Falling back to OpenAI frame analysis...');
-      await startFallbackFrameAnalysis();
-    }
-  };
-
-  // Fallback: Use OpenAI via backend for frame-by-frame analysis when Overshoot SDK fails
-  const startFallbackFrameAnalysis = async () => {
-    try {
-      console.log('[FALLBACK] Starting OpenAI frame analysis via backend...');
-      
-      // Get camera stream
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            facingMode: 'environment',
-            width: { ideal: 640 },
-            height: { ideal: 480 }
-          } 
-        });
-      } catch (constraintError) {
-        console.log('[FALLBACK] Advanced constraints failed, trying basic video...');
-        stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      }
-      
-      setCameraStream(stream);
-      setStreamingActive(true);
-      setScanMode(false);
-      
-      // Set up video preview
-      const setupPreview = () => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(() => {});
-          return true;
-        }
-        return false;
-      };
-      
-      // Wait for video element
-      await new Promise((resolve) => {
-        if (setupPreview()) {
-          resolve();
-        } else {
-          let attempts = 0;
-          const checkInterval = setInterval(() => {
-            attempts++;
-            if (setupPreview() || attempts >= 20) {
-              clearInterval(checkInterval);
-              resolve();
-            }
-          }, 100);
-        }
-      });
-      
-      // Start frame capture interval (sends to OpenAI via backend)
-      let frameCount = 0;
-      let isAnalyzing = false;
-      
-      const captureFrame = async () => {
-        if (!videoRef.current || videoRef.current.videoWidth === 0 || isAnalyzing) return;
-        
-        isAnalyzing = true;
-        frameCount++;
-        
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = videoRef.current.videoWidth;
-          canvas.height = videoRef.current.videoHeight;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(videoRef.current, 0, 0);
-          const imageData = canvas.toDataURL('image/jpeg', 0.7);
-          
-          console.log(`[FALLBACK/OPENAI] 📸 Frame #${frameCount} → backend/scan-world`);
-          
-          const res = await fetch(`${API_BASE}/scan-world`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image_data: imageData }),
-          });
-          
-          if (res.ok) {
-            const data = await res.json();
-            console.log(`[FALLBACK/OPENAI] ✅ Frame #${frameCount} analyzed - Biome: ${data.biome || 'unknown'}`);
-            
-            // Check for TripoSR generation result
-            if (data.world?.model_url) {
-              console.log(`[FALLBACK/OPENAI] ✅ TripoSR model generated: ${data.world.model_url}`);
-              console.log(`[FALLBACK/OPENAI] World type: ${data.world.type}`);
-            } else if (data.error) {
-              console.error(`[FALLBACK/OPENAI] ⚠️ Backend Error: ${data.error}`);
-              console.error(`[FALLBACK/OPENAI] 💡 TripoSR generation failed - check backend logs`);
-            } else if (data.world?.type === 'scan_fallback') {
-              console.warn(`[FALLBACK/OPENAI] ⚠️ TripoSR generation failed - using fallback world`);
-              console.warn(`[FALLBACK/OPENAI] 💡 This means AIML_API_KEY or TripoSR API is not working`);
-            }
-            
-            setLastScanResult({
-              biome: data.biome || data.world?.scene_type || 'unknown',
-              timestamp: new Date().toLocaleTimeString(),
-              frameCount: frameCount,
-              source: 'openai-fallback'
-            });
-            
-            if (gameState !== GameState.PLAYING && (data.biome || data.world)) {
-              await loadWorldFromScan(data);
-            }
-          } else {
-            const errorText = await res.text();
-            console.error(`[FALLBACK/OPENAI] ❌ Request failed: ${res.status} - ${errorText}`);
-          }
-        } catch (error) {
-          console.error('[FALLBACK/OPENAI] Frame error:', error);
-        }
-        
-        isAnalyzing = false;
-      };
-      
-      // Optimized frame rate: Capture every 1 second (as per guide: 1 frame per second)
-      // This balances API costs with scene coverage
-      captureFrame();
-      streamingIntervalRef.current = setInterval(captureFrame, 1000); // 1 second = 1 frame/sec (guide recommendation)
-      
-      // Store stop function
-      overshootVisionRef.current = {
-        stop: () => {
-          if (streamingIntervalRef.current) {
-            clearInterval(streamingIntervalRef.current);
-            streamingIntervalRef.current = null;
-          }
-        }
-      };
-      
-    } catch (error) {
-      console.error('[FALLBACK] Error starting frame analysis:', error);
-      alert('Could not access camera. Please check permissions.');
-    }
-  };
-
-  const processStreamingResult = async (analysis) => {
-    try {
-      console.log('[OVERSHOOT] Processing streaming result:', analysis);
-      
-      // Send to backend to generate world from streaming analysis
-      const res = await fetch(`${API_BASE}/scan-world`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          streaming_analysis: analysis,
-          use_streaming: true 
-        }),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('[OVERSHOOT] Backend error:', errorText);
-        return;
-      }
-
-      const data = await res.json();
-      
-      // Only update world if we're not already playing (to avoid interruptions)
-      if (gameState !== GameState.PLAYING) {
-        console.log('[OVERSHOOT] Updating world from streaming analysis...');
-        await loadWorldFromScan(data);
-      } else {
-        // If already playing, we could do incremental updates
-        console.log('[OVERSHOOT] World already active, skipping update');
-      }
-      
-    } catch (error) {
-      console.error('[OVERSHOOT] Error processing result:', error);
-    }
-  };
-
-  const loadWorldFromScan = async (data) => {
-    console.log('[SCAN] Loading scanned world...', data);
-    
-    const scene = sceneRef.current;
-    if (!scene) {
-      console.error('[SCAN] Scene not available');
-      return;
-    }
-
-    // Clear existing world
-    const objectsToRemove = [];
-    scene.children.forEach((child) => {
-      if (!child.isLight && !child.userData?.isSky) objectsToRemove.push(child);
-    });
-    objectsToRemove.forEach((obj) => scene.remove(obj));
-    
-    terrainMeshRef.current = null;
-    enemiesRef.current = [];
-    structuresRef.current = [];
-    occupiedCells.clear();
-
-    // NEW: Check if this is a complete scanned environment
-    if (data.world?.type === 'scanned_environment' && data.world?.model_url) {
-      console.log('[SCAN] 🎨 Loading complete scanned 3D environment...');
-      console.log('[SCAN] Model URL:', data.world.model_url);
-      console.log('[SCAN] Scene:', data.world.scene_description?.substring(0, 100));
-      
-      // Load the single GLB model that represents the entire scanned scene
-      const loader = new GLTFLoader();
-      
-      // Create loading placeholder
-      const placeholderGeometry = new THREE.BoxGeometry(2, 2, 2);
-      const placeholderMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0x4A90E2,
-        transparent: true,
-        opacity: 0.3,
-        wireframe: true
-      });
-      const placeholder = new THREE.Mesh(placeholderGeometry, placeholderMaterial);
-      placeholder.position.set(0, 1, 0);
-      scene.add(placeholder);
-      
-      console.log('[SCAN] ⏳ Loading 3D model... (this may take 10-30 seconds)');
-      
-      loader.load(
-        data.world.model_url,
-        (gltf) => {
-          // Success! Remove placeholder and add actual scene
-          scene.remove(placeholder);
-          
-          const sceneModel = gltf.scene;
-          console.log('[SCAN] ✅ 3D scene loaded successfully!');
-          
-          // Enable shadows for all meshes
-          sceneModel.traverse((child) => {
-            if (child.isMesh) {
-              child.castShadow = true;
-              child.receiveShadow = true;
-            }
-          });
-          
-          // Calculate bounding box for scaling and positioning
-          const bbox = new THREE.Box3().setFromObject(sceneModel);
-          const size = bbox.getSize(new THREE.Vector3());
-          const center = bbox.getCenter(new THREE.Vector3());
-          
-          console.log('[SCAN] Scene size:', size);
-          console.log('[SCAN] Scene center:', center);
-          
-          // Position scene at origin
-          sceneModel.position.set(0, 0, 0);
-          
-          // Ensure scene sits on ground (y=0)
-          const minY = bbox.min.y;
-          sceneModel.position.y -= minY;
-          
-          // Add to scene
-          scene.add(sceneModel);
-          structuresRef.current.push(sceneModel);
-          
-          console.log('[SCAN] 🎉 Complete scanned environment loaded!');
-          
-          // Set spawn point in front of the scene
-          const spawnDistance = Math.max(size.z, 5) * 1.5;  // 1.5x scene depth or 5 units min
-          const spawnPoint = {
-            x: center.x,
-            y: 1.0,
-            z: center.z + spawnDistance
-          };
-          
-          // Create player
-          const playerMesh = createPlayer(
-            { x: spawnPoint.x, z: spawnPoint.z },
-            spawnPoint.y
-          );
-          scene.add(playerMesh);
-          
-          // Set player to look at scene center
-          if (cameraRef.current) {
-            const lookAtPoint = new THREE.Vector3(center.x, center.y + 1, center.z);
-            cameraRef.current.lookAt(lookAtPoint);
-          }
-          
-          console.log('[SCAN] Player spawned at:', spawnPoint);
-        },
-        (progress) => {
-          if (progress.total > 0) {
-            const percent = (progress.loaded / progress.total * 100).toFixed(0);
-            if (percent % 10 === 0) {  // Log every 10%
-              console.log(`[SCAN] Loading: ${percent}%`);
-            }
-          }
-        },
-        (error) => {
-          console.error('[SCAN] ❌ Failed to load scanned environment:', error);
-          scene.remove(placeholder);
-          
-          // Show error message to user
-          alert('Failed to load 3D scene. The model may be too large or corrupted. Try scanning again.');
-        }
-      );
-      
-      // Set appropriate lighting for scanned environment
-      const lighting = data.world.lighting || {};
-      const lightingConfig = {
-        ambient: {
-          color: "#FFFFFF",
-          intensity: 1.2  // Bright for scanning
-        },
-        directional: {
-          color: "#FFFFFF",
-          intensity: 0.8,
-          position: { x: 5, y: 10, z: 5 }
-        },
-        fog: null,
-        background: "#87CEEB"  // Light blue sky
-      };
-      updateLighting(lightingConfig, {});
-      
-      return;  // Done loading scanned environment
-    }
-    
-    // OLD: Legacy room/biome generation (fallback if scan fails)
-    console.warn('[SCAN] ⚠️ Using legacy world generation (scan may have failed)');
-    
-    // Check if TripoSR failed and log details
-    if (data.error) {
-      console.error(`[SCAN] ❌ TripoSR Error: ${data.error}`);
-      console.error(`[SCAN] 💡 Check backend logs for detailed TripoSR error message`);
-      console.error(`[SCAN] 💡 Common causes:`);
-      console.error(`[SCAN]    - AIML_API_KEY not set or invalid`);
-      console.error(`[SCAN]    - No credits in AIMLAPI account`);
-      console.error(`[SCAN]    - Image URL is localhost (AIMLAPI cannot access localhost URLs)`);
-      console.error(`[SCAN]    - BACKEND_URL not set to publicly accessible URL (e.g., use ngrok)`);
-      console.error(`[SCAN]    - Network error`);
-    } else if (data.world?.type === 'scan_fallback') {
-      console.warn(`[SCAN] ⚠️ Backend returned scan_fallback - TripoSR generation failed`);
-      console.warn(`[SCAN] 💡 This means AIML_API_KEY or TripoSR API is not working properly`);
-    } else if (!data.world?.model_url) {
-      console.warn(`[SCAN] ⚠️ No model_url in response - TripoSR generation did not complete`);
-      console.warn(`[SCAN] 💡 Backend response:`, data);
-    }
-    
-    // Create kitchen room for room/indoor/kitchen biomes when scan fails or no model_url
-    const biomeName = data.world?.biome || data.world?.biome_name || data.biome;
-    const isRoomBiome = biomeName && (biomeName.toLowerCase() === 'room' || biomeName.toLowerCase() === 'indoor' || biomeName.toLowerCase() === 'kitchen');
-    const isKitchen = biomeName && biomeName.toLowerCase() === 'kitchen';
-    
-    if (isRoomBiome && (!data.world?.model_url || data.world?.type === 'scan_fallback')) {
-      if (isKitchen) {
-        console.log('[SCAN] 🍳 Creating detailed kitchen matching reference image...');
-      } else {
-        console.log('[SCAN] 🏠 Creating basic room...');
-      }
-      
-      // Ensure structures object exists
-      if (!data.structures) {
-        data.structures = {};
-      }
-      
-      // Create room with white textured walls - make it fill the whole world
-      const wallColor = 0xFFFFFF; // White walls (textured appearance)
-      const roomSize = 256; // Room dimensions - fill the whole world (256x256 terrain size)
-      const wallHeight = 10; // Standard ceiling height
-      
-      // Create four walls, floor, ceiling (room fills entire world)
-      data.structures.walls = [
-        // Back wall (north)
-        {
-          dimensions: { width: roomSize, height: wallHeight, depth: 0.5 },
-          position: { x: 0, y: wallHeight / 2, z: -roomSize / 2 },
-          color: wallColor,
-          type: 'wall'
-        },
-        // Front wall (south)
-        {
-          dimensions: { width: roomSize, height: wallHeight, depth: 0.5 },
-          position: { x: 0, y: wallHeight / 2, z: roomSize / 2 },
-          color: wallColor,
-          type: 'wall'
-        },
-        // Left wall (west)
-        {
-          dimensions: { width: 0.5, height: wallHeight, depth: roomSize },
-          position: { x: -roomSize / 2, y: wallHeight / 2, z: 0 },
-          color: wallColor,
-          type: 'wall'
-        },
-        // Right wall (east)
-        {
-          dimensions: { width: 0.5, height: wallHeight, depth: roomSize },
-          position: { x: roomSize / 2, y: wallHeight / 2, z: 0 },
-          color: wallColor,
-          type: 'wall'
-        },
-        // Floor
-        {
-          dimensions: { width: roomSize, height: 0.2, depth: roomSize },
-          position: { x: 0, y: 0, z: 0 },
-          color: 0xD3D3D3, // Light neutral floor
-          type: 'floor'
-        },
-        // Ceiling
-        {
-          dimensions: { width: roomSize, height: 0.2, depth: roomSize },
-          position: { x: 0, y: wallHeight, z: 0 },
-          color: 0xFFFFFF, // White ceiling
-          type: 'ceiling'
-        }
-      ];
-      
-      // Initialize scanned_objects
-      if (!data.structures.scanned_objects) {
-        data.structures.scanned_objects = [];
-      }
-      
-      // Generate detailed kitchen matching reference image
-      if (isKitchen) {
-        // Kitchen dimensions (matching reference image layout)
-        const cabinetColor = 0xD2B48C; // Light wood cabinets (tan/beige)
-        const counterColor = 0xF5F5DC; // Light beige speckled countertop
-        const backsplashColor = 0xC0C0C0; // Stainless steel backsplash
-        const stoveColor = 0xFFFFFF; // White stove
-        const sinkColor = 0xC0C0C0; // Stainless steel sink
-        const refrigeratorColor = 0xFFFFFF; // White refrigerator
-        const counterHeight = 3; // Standard counter height (36 inches)
-        const counterDepth = 2; // Counter depth (24 inches)
-        const upperCabinetHeight = 3; // Upper cabinet height
-        const upperCabinetBottom = 7; // Upper cabinets start above counter
-        
-        // KITCHEN LAYOUT: Back wall (stove) + Right wall (sink) + Left counter (workspace)
-        // Position kitchen elements in a compact area near center (0,0) for visibility
-        const kitchenCenterX = 0;
-        const kitchenCenterZ = 0;
-        const backWallCabinetZ = kitchenCenterZ - 10; // Back wall area
-        const rightWallCabinetX = kitchenCenterX + 10; // Right wall area
-        const leftCounterX = kitchenCenterX - 10; // Left counter area
-        const lowerCabinetY = counterHeight / 2;
-        const counterTopY = counterHeight + 0.05;
-        
-        // === LOWER CABINETS ===
-        // Back wall cabinets (under stove area)
-        data.structures.scanned_objects.push(
-          {
-            name: 'lower_cabinet_back_1',
-            position: { x: kitchenCenterX - 2, y: lowerCabinetY, z: backWallCabinetZ },
-            scale: 1,
-            rotation: { x: 0, y: 0, z: 0 },
-            parts: [{
-              shape: 'box',
-              dimensions: { width: 4, height: counterHeight, depth: counterDepth },
-              position: { x: 0, y: 0, z: 0 },
-              color: cabinetColor,
-              material: { roughness: 0.7, metalness: 0.1 }
-            }]
-          },
-          {
-            name: 'lower_cabinet_back_2',
-            position: { x: kitchenCenterX + 2, y: lowerCabinetY, z: backWallCabinetZ },
-            scale: 1,
-            rotation: { x: 0, y: 0, z: 0 },
-            parts: [{
-              shape: 'box',
-              dimensions: { width: 4, height: counterHeight, depth: counterDepth },
-              position: { x: 0, y: 0, z: 0 },
-              color: cabinetColor,
-              material: { roughness: 0.7, metalness: 0.1 }
-            }]
-          }
-        );
-        
-        // Right wall cabinets (under sink area)
-        data.structures.scanned_objects.push(
-          {
-            name: 'lower_cabinet_right_1',
-            position: { x: rightWallCabinetX, y: lowerCabinetY, z: kitchenCenterZ - 2 },
-            scale: 1,
-            rotation: { x: 0, y: Math.PI / 2, z: 0 },
-            parts: [{
-              shape: 'box',
-              dimensions: { width: 4, height: counterHeight, depth: counterDepth },
-              position: { x: 0, y: 0, z: 0 },
-              color: cabinetColor,
-              material: { roughness: 0.7, metalness: 0.1 }
-            }]
-          },
-          {
-            name: 'lower_cabinet_right_2',
-            position: { x: rightWallCabinetX, y: lowerCabinetY, z: kitchenCenterZ + 2 },
-            scale: 1,
-            rotation: { x: 0, y: Math.PI / 2, z: 0 },
-            parts: [{
-              shape: 'box',
-              dimensions: { width: 4, height: counterHeight, depth: counterDepth },
-              position: { x: 0, y: 0, z: 0 },
-              color: cabinetColor,
-              material: { roughness: 0.7, metalness: 0.1 }
-            }]
-          }
-        );
-        
-        // === COUNTERTOPS ===
-        // Back wall countertop (stove area)
-        data.structures.scanned_objects.push({
-          name: 'countertop_back',
-          position: { x: kitchenCenterX, y: counterTopY, z: backWallCabinetZ },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 8, height: 0.15, depth: counterDepth },
-            position: { x: 0, y: 0, z: 0 },
-            color: counterColor,
-            material: { roughness: 0.3, metalness: 0.0 }
-          }]
-        });
-        
-        // Right wall countertop (sink area)
-        data.structures.scanned_objects.push({
-          name: 'countertop_right',
-          position: { x: rightWallCabinetX, y: counterTopY, z: kitchenCenterZ },
-          scale: 1,
-          rotation: { x: 0, y: Math.PI / 2, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 8, height: 0.15, depth: counterDepth },
-            position: { x: 0, y: 0, z: 0 },
-            color: counterColor,
-            material: { roughness: 0.3, metalness: 0.0 }
-          }]
-        });
-        
-        // Left counter/workspace (extends into room, for laptop/coffee maker)
-        data.structures.scanned_objects.push({
-          name: 'counter_left_extended',
-          position: { x: leftCounterX, y: counterTopY, z: kitchenCenterZ + 5 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 6, height: 0.15, depth: 1.5 },
-            position: { x: 0, y: 0, z: 0 },
-            color: counterColor,
-            material: { roughness: 0.3, metalness: 0.0 }
-          }]
-        });
-        
-        // === STAINLESS STEEL BACKSPLASH ===
-        const backsplashHeight = 1.5;
-        const backsplashY = counterTopY + backsplashHeight / 2;
-        
-        // Backsplash on back wall (behind stove)
-        data.structures.scanned_objects.push({
-          name: 'backsplash_back',
-          position: { x: kitchenCenterX, y: backsplashY, z: backWallCabinetZ + 0.1 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 8, height: backsplashHeight, depth: 0.1 },
-            position: { x: 0, y: 0, z: 0 },
-            color: backsplashColor,
-            material: { roughness: 0.2, metalness: 0.6 }
-          }]
-        });
-        
-        // Backsplash on right wall (behind sink)
-        data.structures.scanned_objects.push({
-          name: 'backsplash_right',
-          position: { x: rightWallCabinetX - 0.1, y: backsplashY, z: kitchenCenterZ },
-          scale: 1,
-          rotation: { x: 0, y: Math.PI / 2, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 8, height: backsplashHeight, depth: 0.1 },
-            position: { x: 0, y: 0, z: 0 },
-            color: backsplashColor,
-            material: { roughness: 0.2, metalness: 0.6 }
-          }]
-        });
-        
-        // === EXHAUST VENT (circular, in backsplash above stove) ===
-        data.structures.scanned_objects.push({
-          name: 'exhaust_vent',
-          position: { x: kitchenCenterX, y: backsplashY + 0.3, z: backWallCabinetZ + 0.15 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'cylinder',
-            dimensions: { radius: 0.4, height: 0.1 },
-            position: { x: 0, y: 0, z: 0 },
-            color: backsplashColor,
-            material: { roughness: 0.3, metalness: 0.7 }
-          }]
-        });
-        
-        // === WHITE ELECTRIC STOVE (centered on back wall counter) ===
-        data.structures.scanned_objects.push({
-          name: 'stove',
-          position: { x: kitchenCenterX, y: counterTopY, z: backWallCabinetZ + counterDepth / 2 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 3.5, height: 0.5, depth: counterDepth - 0.1 },
-            position: { x: 0, y: 0, z: 0 },
-            color: stoveColor,
-            material: { roughness: 0.6, metalness: 0.3 }
-          }]
-        });
-        
-        // === STAINLESS STEEL SINK (on right wall counter, next to stove) ===
-        data.structures.scanned_objects.push({
-          name: 'sink',
-          position: { x: rightWallCabinetX - counterDepth / 2, y: counterTopY, z: kitchenCenterZ },
-          scale: 1,
-          rotation: { x: 0, y: Math.PI / 2, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 2, height: 0.4, depth: 1.5 },
-            position: { x: 0, y: 0, z: 0 },
-            color: sinkColor,
-            material: { roughness: 0.1, metalness: 0.8 }
-          }]
-        });
-        
-        // === UPPER CABINETS ===
-        const upperCabinetY = upperCabinetBottom + upperCabinetHeight / 2;
-        
-        // Upper cabinets on back wall (above stove, two double-door cabinets like reference)
-        data.structures.scanned_objects.push(
-          {
-            name: 'upper_cabinet_1',
-            position: { x: kitchenCenterX - 2, y: upperCabinetY, z: backWallCabinetZ + 0.3 },
-            scale: 1,
-            rotation: { x: 0, y: 0, z: 0 },
-            parts: [{
-              shape: 'box',
-              dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 },
-              position: { x: 0, y: 0, z: 0 },
-              color: cabinetColor,
-              material: { roughness: 0.7, metalness: 0.1 }
-            }]
-          },
-          {
-            name: 'upper_cabinet_2',
-            position: { x: kitchenCenterX + 2, y: upperCabinetY, z: backWallCabinetZ + 0.3 },
-            scale: 1,
-            rotation: { x: 0, y: 0, z: 0 },
-            parts: [{
-              shape: 'box',
-              dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 },
-              position: { x: 0, y: 0, z: 0 },
-              color: cabinetColor,
-              material: { roughness: 0.7, metalness: 0.1 }
-            }]
-          }
-        );
-        
-        // === WHITE REFRIGERATOR (at end of right wall, next to sink area) ===
-        const refrigeratorY = (counterHeight + 2) / 2;
-        data.structures.scanned_objects.push({
-          name: 'refrigerator',
-          position: { x: rightWallCabinetX + 1.5, y: refrigeratorY, z: kitchenCenterZ + 4 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 2.5, height: counterHeight + 2, depth: 2.5 },
-            position: { x: 0, y: 0, z: 0 },
-            color: refrigeratorColor,
-            material: { roughness: 0.8, metalness: 0.2 }
-          }]
-        });
-        
-        // === ROUND WOODEN STOOL/CHAIR (under left counter, like reference) ===
-        const stoolColor = 0xD2B48C; // Light wood color (matching cabinets)
-        data.structures.scanned_objects.push({
-          name: 'stool',
-          position: { x: leftCounterX, y: 0.3, z: kitchenCenterZ + 5 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [
-            // Round stool seat (cylinder)
-            {
-              shape: 'cylinder',
-              dimensions: { radius: 0.4, height: 0.1 },
-              position: { x: 0, y: 0.3, z: 0 },
-              color: stoolColor,
-              material: { roughness: 0.7, metalness: 0.1 }
-            },
-            // Stool legs (4 legs, angled outward)
-            {
-              shape: 'box',
-              dimensions: { width: 0.08, height: 0.3, depth: 0.08 },
-              position: { x: -0.25, y: 0.15, z: -0.25 },
-              color: stoolColor,
-              material: { roughness: 0.7, metalness: 0.1 }
-            },
-            {
-              shape: 'box',
-              dimensions: { width: 0.08, height: 0.3, depth: 0.08 },
-              position: { x: 0.25, y: 0.15, z: -0.25 },
-              color: stoolColor,
-              material: { roughness: 0.7, metalness: 0.1 }
-            },
-            {
-              shape: 'box',
-              dimensions: { width: 0.08, height: 0.3, depth: 0.08 },
-              position: { x: -0.25, y: 0.15, z: 0.25 },
-              color: stoolColor,
-              material: { roughness: 0.7, metalness: 0.1 }
-            },
-            {
-              shape: 'box',
-              dimensions: { width: 0.08, height: 0.3, depth: 0.08 },
-              position: { x: 0.25, y: 0.15, z: 0.25 },
-              color: stoolColor,
-              material: { roughness: 0.7, metalness: 0.1 }
-            }
-          ]
-        });
-        
-        // === CEILING LIGHT (rectangular surface-mounted fluorescent) ===
-        data.structures.scanned_objects.push({
-          name: 'ceiling_light',
-          position: { x: 0, y: wallHeight - 0.15, z: 0 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 6, height: 0.3, depth: 2 },
-            position: { x: 0, y: 0, z: 0 },
-            color: 0xFFFFFF,
-            material: { roughness: 0.1, metalness: 0.0, emissive: 0xFFFFFF, emissiveIntensity: 0.8 }
-          }]
-        });
-        
-        // === WHITE PVC PIPES (near ceiling, left wall) ===
-        data.structures.scanned_objects.push({
-          name: 'pvc_pipe',
-          position: { x: -roomSize / 2 + 0.5, y: wallHeight - 1, z: -8 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: Math.PI / 2 },
-          parts: [{
-            shape: 'cylinder',
-            dimensions: { radius: 0.15, height: 4 },
-            position: { x: 0, y: 0, z: 0 },
-            color: 0xFFFFFF,
-            material: { roughness: 0.6, metalness: 0.0 }
-          }]
-        });
-        
-        // === OPTIONAL DETAILS: Coffee maker, laptop, water bottle on left counter ===
-        // Coffee maker (black, on left counter, at back)
-        data.structures.scanned_objects.push({
-          name: 'coffee_maker',
-          position: { x: leftCounterX, y: counterTopY + 0.3, z: kitchenCenterZ + 6 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 0.8, height: 0.6, depth: 0.6 },
-            position: { x: 0, y: 0, z: 0 },
-            color: 0x000000,
-            material: { roughness: 0.7, metalness: 0.2 }
-          }]
-        });
-        
-        // Laptop (on left counter, in front of coffee maker)
-        data.structures.scanned_objects.push({
-          name: 'laptop',
-          position: { x: leftCounterX, y: counterTopY + 0.1, z: kitchenCenterZ + 4.5 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'box',
-            dimensions: { width: 1.2, height: 0.05, depth: 0.8 },
-            position: { x: 0, y: 0, z: 0 },
-            color: 0x1a1a1a,
-            material: { roughness: 0.5, metalness: 0.3 }
-          }]
-        });
-        
-        // Water bottle (white, next to laptop)
-        data.structures.scanned_objects.push({
-          name: 'water_bottle',
-          position: { x: leftCounterX + 0.8, y: counterTopY + 0.3, z: kitchenCenterZ + 4.5 },
-          scale: 1,
-          rotation: { x: 0, y: 0, z: 0 },
-          parts: [{
-            shape: 'cylinder',
-            dimensions: { radius: 0.15, height: 0.6 },
-            position: { x: 0, y: 0, z: 0 },
-            color: 0xFFFFFF,
-            material: { roughness: 0.3, metalness: 0.1 }
-          }]
-        });
-        
-        console.log('[SCAN] ✅ Detailed kitchen created with L-shaped layout, cabinets, countertops, stove, sink, backsplash with vent, refrigerator, ceiling light, and details');
-      } else {
-        // Basic room (no kitchen) - no windows for kitchen
-        console.log('[SCAN] ✅ Basic room created with walls, floor, and ceiling');
-      }
-    }
-    
-    // Set color palette from AI-generated palette if available
-    if (data.world?.color_palette && data.world.color_palette.length > 0) {
-      console.log('[SCAN] Setting color palette:', data.world.color_palette);
-      setColorPalette(data.world.color_palette);
-    }
-    
-    const colorAssignments = data.world?.color_assignments || {};
-    setCurrentWorld(data);
-    
-    // biomeName is already declared above for kitchen generation check
-    createGround(scene, biomeName);
-
-    if (data.world && data.world.lighting_config) {
-      updateLighting(data.world.lighting_config, data.world.color_assignments);
-    }
-
-    if (data.world && data.world.heightmap_raw && data.world.colour_map_array) {
-      heightmapRef.current = data.world.heightmap_raw;
-      colorMapRef.current = data.world.colour_map_array;
-      terrainPlacementMaskRef.current = heightmapRef.current.map(row =>
-        row.map(height => (height >= 0 ? 1 : 0))
-      );
-      
-      const terrainMesh = createTerrain(heightmapRef.current, colorMapRef.current, 256);
-      terrainMeshRef.current = terrainMesh;
-      scene.add(terrainMesh);
-    }
-
-    // Get plant_type from world data
-    const plantType = data.world?.plant_type || "tree";
-    console.log(`[OVERSHOOT] Plant type for this world: ${plantType}`);
-
-    // Load structures (same logic as captureAndScanWorld)
-    if (data.structures) {
-      if (data.structures.trees) {
-        console.log(`[OVERSHOOT] Creating ${data.structures.trees.length} plants (type: ${plantType})...`);
-        data.structures.trees.forEach((treeData) => {
-          const scale = treeData.scale || 1.0;
-          let plantRadius;
-          if (plantType === "cactus") {
-            plantRadius = 1.5 * scale + 1;
-          } else if (plantType === "creepy_plant") {
-            plantRadius = 2 * scale + 1;
-          } else {
-          const leafSize = treeData.leafless ? 3 * scale : 2.2 * scale;
-          const randomOffset = 0.6 * scale;
-            plantRadius = leafSize + randomOffset + 1;
-          }
-          
-          if (!checkRadiusClear(
-            treeData.position.x,
-            treeData.position.z,
-            plantRadius,
-            terrainPlacementMaskRef.current
-          )) {
-            return;
-          }
-
-          // Apply AI-generated colors from color_assignments if available
-          const plantDataWithColors = {
-            ...treeData,
-            leaf_color: treeData.leaf_color || colorAssignments.tree_leaves || colorAssignments.tree_leaves_light,
-            trunk_color: treeData.trunk_color || colorAssignments.tree_trunk
-          };
-
-          const plant = createPlant(plantDataWithColors, plantType);
-          const terrainY = getHeightAt(treeData.position.x, treeData.position.z);
-          const finalY = treeData.position.y !== 0 ? treeData.position.y : terrainY;
-          plant.position.set(treeData.position.x, finalY, treeData.position.z);
-          
-          plant.userData = { 
-            structureType: 'tree',
-            plantType: plantType,
-            scale: treeData.scale || 1.0,
-            leafless: treeData.leafless || false
-          };
-          scene.add(plant);
-          structuresRef.current.push(plant);
-          
-          markRadiusOccupied(
-            treeData.position.x,
-            treeData.position.z,
-            plantRadius,
-            terrainPlacementMaskRef.current
-          );
-        });
-        console.log(`[OVERSHOOT] ✅ Added ${structuresRef.current.filter(obj => obj.userData.structureType === 'tree').length} plants (type: ${plantType})`);
-      }
-
-      // Add clouds
-      const cloudCount = 15;
-      const minCloudDistance = 80;
-      const cloudPositions = [];
-      
-      for (let i = 0; i < cloudCount; i++) {
-        let attempts = 0;
-        let validPosition = false;
-        let x, y, z, scale;
-        
-        while (!validPosition && attempts < 50) {
-          x = (Math.random() - 0.5) * 500;
-          y = 60 + Math.random() * 90;
-          z = (Math.random() - 0.5) * 600;
-          scale = 3 + Math.random() * 2;
-          
-          let tooClose = false;
-          for (const existingPos of cloudPositions) {
-            const dist = Math.sqrt(
-              (x - existingPos.x) ** 2 + 
-              (y - existingPos.y) ** 2 + 
-              (z - existingPos.z) ** 2
-            );
-            const requiredDistance = minCloudDistance * (scale / 3);
-            if (dist < requiredDistance) {
-              tooClose = true;
-              break;
-            }
-          }
-          
-          if (!tooClose) {
-            validPosition = true;
-          }
-          attempts++;
-        }
-        
-        if (!validPosition) continue;
-        
-        const cloud = createCloud(x, y, z, scale, biomeName);
-        scene.add(cloud);
-        cloudPositions.push({ x, y, z, scale });
-      }
-
-      if (data.structures.rocks) {
-        data.structures.rocks.forEach(rockData => {
-          // Apply AI-generated colors from color_assignments
-          const rock = createRock(rockData, colorAssignments);
-          rock.userData = { structureType: 'rock' };
-          scene.add(rock);
-          structuresRef.current.push(rock);
-        });
-        console.log(`[OVERSHOOT] ✅ Added ${data.structures.rocks.length} rocks`);
-      }
-      
-      // Mountains are now part of the terrain mesh, not separate structures
-      // Skip rendering separate peak meshes
-      if (data.structures.peaks && data.structures.peaks.length > 0) {
-        console.log(`[OVERSHOOT] Skipping ${data.structures.peaks.length} peaks - mountains are now part of terrain mesh`);
-      }
-
-      if (data.structures.buildings) {
-        data.structures.buildings.forEach((buildingData, idx) => {
-          const gridIndex = Math.floor(
-            idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ)
-          );
-          const localIndex = idx % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
-          const gridOrigin = buildingGridOrigins[gridIndex % buildingGridOrigins.length];
-          const buildingType = getBuildingTypeForBiome(biomeName, idx);
-
-          const building = createBuilding(
-            buildingData,
-            localIndex,
-            buildingType,
-            gridOrigin
-          );
-
-          building.userData = {
-            ...building.userData,
-            structureType: 'building',
-            buildingType,
-          };
-
-          scene.add(building);
-          structuresRef.current.push(building);
-        });
-
-        // Mark building locations as occupied
-        data.structures.buildings.forEach((buildingData, idx) => {
-          const gridIndex = Math.floor(idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ));
-          const localIndex = idx % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
-          const gridOrigin = buildingGridOrigins[gridIndex % buildingGridOrigins.length];
-          const gridPos = getBuildingGridPosition(localIndex, buildingGridConfig, gridOrigin);
-
-          const buildingWidth = (buildingData.width || 4) * 2;
-          const buildingDepth = (buildingData.depth || 4) * 2;
-          const buildingRadius = Math.max(buildingWidth, buildingDepth) / 2 + 2;
-          
-          markRadiusOccupied(
-            gridPos.x,
-            gridPos.z,
-            buildingRadius,
-            terrainPlacementMaskRef.current
-          );
-        });
-      }
-
-      if (data.structures.street_lamps) {
-        const timeOfDay = data.world?.time || 'noon';
-        const isNight = timeOfDay === 'night' || timeOfDay === 'midnight' || timeOfDay === 'evening';
-        let isNightFromLighting = false;
-        if (data.world?.lighting_config?.background) {
-          const bgColor = new THREE.Color(data.world.lighting_config.background);
-          const hsl = {};
-          bgColor.getHSL(hsl);
-          isNightFromLighting = hsl.l < 0.3;
-        }
-        const shouldGlow = isNight || isNightFromLighting;
-        
-        data.structures.street_lamps.forEach(lampData => {
-          const lamp = createStreetLamp(lampData, shouldGlow);
-          lamp.userData = { structureType: 'street_lamp' };
-          scene.add(lamp);
-          structuresRef.current.push(lamp);
-        });
-        console.log(`[OVERSHOOT] ✅ Added ${data.structures.street_lamps.length} street lamps`);
-      }
-
-      if (data.structures.creative_objects) {
-        data.structures.creative_objects.forEach(objData => {
-          try {
-            const creativeObj = createCreativeObject(objData);
-            scene.add(creativeObj);
-            structuresRef.current.push(creativeObj);
-          } catch (error) {
-            console.error(`[OVERSHOOT] Error creating creative object:`, error, objData);
-          }
-        });
-      }
-
-      // Handle room walls (for indoor/room biome)
-      if (data.structures.walls) {
-        console.log(`[OVERSHOOT] Creating ${data.structures.walls.length} room walls...`);
-        data.structures.walls.forEach(wallData => {
-          const wall = createRoomWall(wallData);
-          wall.userData = { structureType: wallData.type || 'wall' };
-          scene.add(wall);
-          structuresRef.current.push(wall);
-        });
-        console.log(`[OVERSHOOT] ✅ Added ${data.structures.walls.length} room walls/floor`);
-      }
-      
-      // Handle windows (transparent glass panels)
-      if (data.structures.windows) {
-        console.log(`[OVERSHOOT] Creating ${data.structures.windows.length} windows...`);
-        data.structures.windows.forEach(windowData => {
-          const window = createRoomWall(windowData);
-          window.userData = { structureType: 'window' };
-          scene.add(window);
-          structuresRef.current.push(window);
-        });
-        console.log(`[OVERSHOOT] ✅ Added ${data.structures.windows.length} windows`);
-      }
-
-      // Handle scanned objects (coffee maker, paper towel, etc.)
-      if (data.structures.scanned_objects) {
-        console.log(`[OVERSHOOT] Creating ${data.structures.scanned_objects.length} scanned objects...`);
-        data.structures.scanned_objects.forEach(objData => {
-          try {
-            const scannedObj = createScannedObject(objData);
-            scannedObj.userData = { 
-              structureType: 'scanned_object',
-              originalName: objData.original_name || objData.name
-            };
-            scene.add(scannedObj);
-            structuresRef.current.push(scannedObj);
-          } catch (error) {
-            console.error(`[OVERSHOOT] Error creating scanned object:`, error, objData);
-          }
-        });
-        console.log(`[OVERSHOOT] ✅ Added ${data.structures.scanned_objects.length} scanned objects`);
-      }
-    }
-
-    // Determine spawn location
-    let spawn = data.spawn_point || { x: 0, z: 0 };
-    let spawnY = null;
-    
-    const spawnBiomeName = data.world?.biome || data.world?.biome_name;
-    // Check if room biome for spawn (reuse isRoomBiome logic, but using spawnBiomeName)
-    // isRoomBiome is already declared at line 4012, but we check spawnBiomeName here for spawn location
-    const isRoomBiomeSpawn = (spawnBiomeName && (spawnBiomeName.toLowerCase() === 'room' || spawnBiomeName.toLowerCase() === 'indoor' || spawnBiomeName.toLowerCase() === 'kitchen')) || isRoomBiome;
-    
-    if (isRoomBiomeSpawn) {
-      // Spawn player inside the room (center of room, slightly forward)
-      // Room is 25x25 units, so spawn at center (0, 0) or slightly forward
-      spawn = { x: 0, z: 0 }; // Center of room (well inside 256x256 room)
-      spawnY = 1.5; // Above floor level (floor is at y=0, player eye level ~1.5 units)
-      console.log(`[SPAWN] Room/kitchen biome - spawning player inside room at (${spawn.x}, ${spawnY}, ${spawn.z})`);
-    } else if (spawnBiomeName && spawnBiomeName.toLowerCase() === 'city') {
-      const buildings = structuresRef.current.filter(
-        s => s.userData?.structureType === 'building'
-      );
-      
-      if (buildings.length > 0) {
-        const building = buildings[Math.floor(Math.random() * buildings.length)];
-        const buildingHeight = building.userData?.buildingHeight || 0;
-        spawn = {
-          x: building.position.x,
-          z: building.position.z
-        };
-        spawnY = building.position.y + buildingHeight + 2;
-      }
-    }
-    
-    const playerMesh = createPlayer(spawn, spawnY);
-    playerRef.current = playerMesh;
-    scene.add(playerMesh);
-
-    // Load enemies
-    if (data.combat && data.combat.enemies) {
-      enemiesRef.current = data.combat.enemies.map((enemyData, idx) => {
-        if (!enemyData.position) enemyData.position = { x: 0, z: 0 };
-        if (typeof enemyData.position.x !== 'number') enemyData.position.x = 0;
-        if (typeof enemyData.position.z !== 'number') enemyData.position.z = 0;
-
-        const terrainHalf = 128;
-        enemyData.position.x = Math.max(-terrainHalf, Math.min(terrainHalf, enemyData.position.x));
-        enemyData.position.z = Math.max(-terrainHalf, Math.min(terrainHalf, enemyData.position.z));
-
-        const enemy = createEnemies(enemyData.position, idx);
-        scene.add(enemy);
-        return enemy;
-      });
-      setEnemyCount(enemiesRef.current.length);
-    }
-    
-    setGameState(GameState.PLAYING);
-  };
-
-  const handleCameraError = (error) => {
-    let errorMessage = 'Could not access camera.\n\n';
-    
-    if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-      errorMessage += 'Camera permission was denied.\n\n' +
-        'SOLUTION:\n' +
-        '1. Click the lock/camera icon in your browser address bar\n' +
-        '2. Find "Camera" → Change to "Allow"\n' +
-        '3. Reload the page and try again\n\n' +
-        'IMPORTANT: If using IP address, switch to:\n' +
-        'http://localhost:3000';
-    } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-      errorMessage += 'No camera found.\n\nPlease connect a camera and try again.';
-    } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
-      errorMessage += 'Camera is already in use.\n\n' +
-        'Please close other applications using the camera and try again.';
-    } else {
-      errorMessage += `Error: ${error.name}\n\n${error.message}\n\n` +
-        'SOLUTION: Try accessing via http://localhost:3000 instead of IP address.';
-    }
-    
-    alert(errorMessage);
-  };
-
-  const stopCameraCapture = async () => {
-    console.log('[STREAMING] Stopping all capture...');
-    
-    // Stop frame capture interval (fallback mode)
-    if (streamingIntervalRef.current) {
-      clearInterval(streamingIntervalRef.current);
-      streamingIntervalRef.current = null;
-      console.log('[STREAMING] Frame capture interval stopped');
-    }
-    
-    // Stop Overshoot SDK RealtimeVision
-    if (overshootVisionRef.current) {
-      try {
-        // Check if it's the actual Overshoot SDK or our fallback object
-        if (typeof overshootVisionRef.current.stop === 'function') {
-        await overshootVisionRef.current.stop();
-          console.log('[OVERSHOOT] RealtimeVision stopped');
-        }
-      } catch (error) {
-        console.log('[OVERSHOOT] Stop error (ignored):', error.message);
-      }
-      overshootVisionRef.current = null;
-    }
-    
-    // Capture video frame BEFORE stopping stream (for world generation)
-    let imageDataForGeneration = null;
-    if (latestScanDataRef.current && !worldGeneratedFromScanRef.current && gameState !== GameState.PLAYING) {
-      if (videoRef.current && videoRef.current.videoWidth > 0) {
-        const canvas = document.createElement('canvas');
-        canvas.width = videoRef.current.videoWidth;
-        canvas.height = videoRef.current.videoHeight;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(videoRef.current, 0, 0);
-        imageDataForGeneration = canvas.toDataURL('image/jpeg', 0.7);
-      }
-    }
-    
-    // Stop camera stream
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop());
-      setCameraStream(null);
-      console.log('[STREAMING] Camera stream stopped');
-    }
-    
-    setStreamingActive(false);
-    setScanMode(false);
-    
-    // Always trigger generateWorld with "kitchen" when streaming stops
-    if (!worldGeneratedFromScanRef.current && gameState !== GameState.PLAYING) {
-      // Log scene description if available
-      if (latestScanDataRef.current) {
-        const scanData = latestScanDataRef.current;
-        console.log(`[STREAMING] 📝 Scene Description:`);
-        console.log(`[STREAMING] ${scanData.sceneDescription}`);
-      }
-      
-      console.log(`[STREAMING] 🎬 Triggering generateWorld with search "kitchen"...`);
-      
-      // Mark as generated to prevent multiple calls
-      worldGeneratedFromScanRef.current = true;
-      
-      // Call generateWorld with "kitchen" as the search/prompt
-      generateWorld('kitchen');
-    }
-    
-    setLastScanResult(null);
-    console.log('[STREAMING] All capture stopped');
-  };
-
-  const captureAndScanWorld = async () => {
-    if (!videoRef.current) return;
-    
-    // Capture current video frame
-    const canvas = document.createElement('canvas');
-    const videoWidth = videoRef.current.videoWidth || 640;
-    const videoHeight = videoRef.current.videoHeight || 480;
-    
-    if (videoWidth === 0 || videoHeight === 0) {
-      alert('Video not ready yet. Please wait for the camera to initialize.');
-      return;
-    }
-    
-    canvas.width = videoWidth;
-    canvas.height = videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(videoRef.current, 0, 0, videoWidth, videoHeight);
-    
-    // Convert to base64
-    const imageData = canvas.toDataURL('image/jpeg', 0.8);
-    
-    console.log('[SCAN] Captured image, sending to backend...');
-    console.log('[SCAN] Image data length:', imageData.length, 'characters');
-    console.log('[SCAN] Video dimensions:', videoWidth, 'x', videoHeight);
-    
-    if (!imageData || imageData.length < 100) {
-      alert('Failed to capture image. Please try again.');
-      return;
-    }
-    setGameState(GameState.GENERATING);
-    stopCameraCapture();
-    
-    try {
-      const res = await fetch(`${API_BASE}/scan-world`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_data: imageData }),
-      });
-      
-      
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('[SCAN] API Error Response:', errorText);
-        
-        // Try to parse as JSON for better error message
-        let errorDetail = errorText;
-        try {
-          const errorJson = JSON.parse(errorText);
-          errorDetail = errorJson.detail || errorText;
-        } catch (e) {
-          // Not JSON, use as-is
-        }
-        
-        throw new Error(`Scan failed: ${res.status}\n\n${errorDetail}`);
-      }
-      
-      const data = await res.json();
-      console.log('[SCAN] World generated from scan:', data);
-      
-      // Set color palette from AI-generated palette if available
-      if (data.world?.color_palette && data.world.color_palette.length > 0) {
-        console.log('[SCAN] Setting AI-generated color palette:', data.world.color_palette);
-        setColorPalette(data.world.color_palette);
-      }
-      
-      // Use the same world loading logic as generateWorld
-      // Since generateWorld does all loading inline, we'll do the same here
-      // The scan response format matches generate-world response format
-      
-      // Simply delegate to generateWorld's loading by calling a helper
-      // Actually, let's just set currentWorld and let the existing logic handle it
-      // But generateWorld loads inline, so we need to replicate...
-      
-      // For now, let's create a helper that both can use, or just duplicate the logic
-      // Simplest: call the same loading code inline like generateWorld does
-      
-      // Get AI-generated color assignments for structures
-      const colorAssignments = data.world?.color_assignments || {};
-      
-      setCurrentWorld(data);
-      
-      const scene = sceneRef.current;
-      if (!scene) {
-        console.error('[SCAN] Scene not available');
-        setGameState(GameState.IDLE);
-        return;
-      }
-
-      const biomeName = data.world?.biome || data.world?.biome_name;
-      createGround(scene, biomeName);
-
-      // Clear existing objects (same as generateWorld)
-      const objectsToRemove = [];
-      scene.children.forEach((child) => {
-        if (!child.isLight && !child.userData?.isSky) objectsToRemove.push(child);
-      });
-      objectsToRemove.forEach((obj) => scene.remove(obj));
-      
-      terrainMeshRef.current = null;
-      enemiesRef.current = [];
-      structuresRef.current = [];
-      occupiedCells.clear();
-
-      if (data.world && data.world.lighting_config) {
-        console.log('[SCAN] Applying lighting:', data.world.lighting_config);
-        // Pass color_assignments to updateLighting so sky uses AI-generated color
-        updateLighting(data.world.lighting_config, data.world.color_assignments);
-      }
-
-      if (data.world && data.world.heightmap_raw && data.world.colour_map_array) {
-        heightmapRef.current = data.world.heightmap_raw;
-        colorMapRef.current = data.world.colour_map_array;
-        terrainPlacementMaskRef.current = heightmapRef.current.map(row =>
-          row.map(height => (height >= 0 ? 1 : 0))
-        );
-        
-        // Create terrain mesh
-        const terrainMesh = createTerrain(heightmapRef.current, colorMapRef.current, 256);
-        terrainMeshRef.current = terrainMesh;
-        scene.add(terrainMesh);
-      }
-
-      // Get plant_type from world data
-      const plantType = data.world?.plant_type || "tree";
-      console.log(`[SCAN] Plant type for this world: ${plantType}`);
-
-      // Load structures (same as generateWorld)
-      if (data.structures) {
-        if (data.structures.trees) {
-          console.log(`[SCAN] Creating ${data.structures.trees.length} plants (type: ${plantType})...`);
-          data.structures.trees.forEach((treeData) => {
-            const scale = treeData.scale || 1.0;
-            let plantRadius;
-            if (plantType === "cactus") {
-              plantRadius = 1.5 * scale + 1;
-            } else if (plantType === "creepy_plant") {
-              plantRadius = 2 * scale + 1;
-            } else {
-            const leafSize = treeData.leafless ? 3 * scale : 2.2 * scale;
-            const randomOffset = 0.6 * scale;
-              plantRadius = leafSize + randomOffset + 1;
-            }
-            
-            if (!checkRadiusClear(
-              treeData.position.x,
-              treeData.position.z,
-              plantRadius,
-              terrainPlacementMaskRef.current
-            )) {
-              return;
-            }
-
-            // Apply AI-generated colors from color_assignments if available
-            const plantDataWithColors = {
-              ...treeData,
-              leaf_color: treeData.leaf_color || colorAssignments.tree_leaves || colorAssignments.tree_leaves_light,
-              trunk_color: treeData.trunk_color || colorAssignments.tree_trunk
-            };
-
-            const plant = createPlant(plantDataWithColors, plantType);
-            const terrainY = getHeightAt(treeData.position.x, treeData.position.z);
-            const finalY = treeData.position.y !== 0 ? treeData.position.y : terrainY;
-            plant.position.set(treeData.position.x, finalY, treeData.position.z);
-            
-            plant.userData = { 
-              structureType: 'tree',
-              plantType: plantType,
-              scale: treeData.scale || 1.0,
-              leafless: treeData.leafless || false
-            };
-            scene.add(plant);
-            structuresRef.current.push(plant);
-            
-            markRadiusOccupied(
-              treeData.position.x,
-              treeData.position.z,
-              plantRadius,
-              terrainPlacementMaskRef.current
-            );
-          });
-          console.log(`[SCAN] ✅ Added ${structuresRef.current.filter(obj => obj.userData.structureType === 'tree').length} plants (type: ${plantType})`);
-        }
-
-        // Add clouds
-        const cloudCount = 15;
-        const minCloudDistance = 80;
-        const cloudPositions = [];
-        
-        for (let i = 0; i < cloudCount; i++) {
-          let attempts = 0;
-          let validPosition = false;
-          let x, y, z, scale;
-          
-          while (!validPosition && attempts < 50) {
-            x = (Math.random() - 0.5) * 500;
-            y = 60 + Math.random() * 90;
-            z = (Math.random() - 0.5) * 600;
-            scale = 3 + Math.random() * 2;
-            
-            let tooClose = false;
-            for (const existingPos of cloudPositions) {
-              const dist = Math.sqrt(
-                (x - existingPos.x) ** 2 + 
-                (y - existingPos.y) ** 2 + 
-                (z - existingPos.z) ** 2
-              );
-              const requiredDistance = minCloudDistance * (scale / 3);
-              if (dist < requiredDistance) {
-                tooClose = true;
-                break;
-              }
-            }
-            
-            if (!tooClose) {
-              validPosition = true;
-            }
-            attempts++;
-          }
-          
-          if (!validPosition) continue;
-          
-          const cloud = createCloud(x, y, z, scale, biomeName);
-          scene.add(cloud);
-          cloudPositions.push({ x, y, z, scale });
-        }
-
-        if (data.structures.rocks) {
-          data.structures.rocks.forEach(rockData => {
-            // Apply AI-generated colors from color_assignments
-            const rock = createRock(rockData, colorAssignments);
-            rock.userData = { structureType: 'rock' };
-            scene.add(rock);
-            structuresRef.current.push(rock);
-          });
-          console.log(`[SCAN] ✅ Added ${data.structures.rocks.length} rocks`);
-        }
-        
-        // Mountains are now part of the terrain mesh, not separate structures
-        if (data.structures.peaks && data.structures.peaks.length > 0) {
-          console.log(`[SCAN] Skipping ${data.structures.peaks.length} peaks - mountains are now part of terrain mesh`);
-        }
-
-        if (data.structures.buildings) {
-          data.structures.buildings.forEach((buildingData, idx) => {
-            const gridIndex = Math.floor(
-              idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ)
-            );
-            const localIndex = idx % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
-            const gridOrigin = buildingGridOrigins[gridIndex % buildingGridOrigins.length];
-            const buildingType = getBuildingTypeForBiome(biomeName, idx);
-
-            const building = createBuilding(
-              buildingData,
-              localIndex,
-              buildingType,
-              gridOrigin
-            );
-
-            building.userData = {
-              ...building.userData,
-              structureType: 'building',
-              buildingType,
-            };
-
-            scene.add(building);
-            structuresRef.current.push(building);
-          });
-
-          // Mark building locations as occupied
-          data.structures.buildings.forEach((buildingData, idx) => {
-            const gridIndex = Math.floor(idx / (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ));
-            const localIndex = idx % (buildingGridConfig.gridSizeX * buildingGridConfig.gridSizeZ);
-            const gridOrigin = buildingGridOrigins[gridIndex % buildingGridOrigins.length];
-            const gridPos = getBuildingGridPosition(localIndex, buildingGridConfig, gridOrigin);
-
-            const buildingWidth = (buildingData.width || 4) * 2;
-            const buildingDepth = (buildingData.depth || 4) * 2;
-            const buildingRadius = Math.max(buildingWidth, buildingDepth) / 2 + 2;
-            
-            markRadiusOccupied(
-              gridPos.x,
-              gridPos.z,
-              buildingRadius,
-              terrainPlacementMaskRef.current
-            );
-          });
-        }
-
-        if (data.structures.street_lamps) {
-          const timeOfDay = data.world?.time || 'noon';
-          const isNight = timeOfDay === 'night' || timeOfDay === 'midnight' || timeOfDay === 'evening';
-          let isNightFromLighting = false;
-          if (data.world?.lighting_config?.background) {
-            const bgColor = new THREE.Color(data.world.lighting_config.background);
-            const hsl = {};
-            bgColor.getHSL(hsl);
-            isNightFromLighting = hsl.l < 0.3;
-          }
-          const shouldGlow = isNight || isNightFromLighting;
-          
-          data.structures.street_lamps.forEach(lampData => {
-            const lamp = createStreetLamp(lampData, shouldGlow);
-            lamp.userData = { structureType: 'street_lamp' };
-            scene.add(lamp);
-            structuresRef.current.push(lamp);
-          });
-          console.log(`[SCAN] ✅ Added ${data.structures.street_lamps.length} street lamps`);
-        }
-      }
-
-      // Determine spawn location
-      let spawn = data.spawn_point || { x: 0, z: 0 };
-      let spawnY = null;
-      
-      const spawnBiomeName = data.world?.biome || data.world?.biome_name;
-      // Check if room biome for spawn (isRoomBiome will be declared later at line 5288, use different name here)
-      const isRoomBiomeSpawnCheck = spawnBiomeName && (spawnBiomeName.toLowerCase() === 'room' || spawnBiomeName.toLowerCase() === 'indoor' || spawnBiomeName.toLowerCase() === 'kitchen');
-      
-      if (isRoomBiomeSpawnCheck) {
-        // Spawn player inside the room (center of room, well inside boundaries)
-        // Room is 256x256 units, walls at -128 and +128, so spawn well inside
-        spawn = { x: 0, z: 0 }; // Center of room
-        spawnY = 1.5; // Above floor level (floor is at y=0, player eye level ~1.5 units)
-        console.log(`[SPAWN] Room/kitchen biome - spawning player inside room at (${spawn.x}, ${spawnY}, ${spawn.z})`);
-      } else if (spawnBiomeName && spawnBiomeName.toLowerCase() === 'city') {
-        const buildings = structuresRef.current.filter(
-          s => s.userData?.structureType === 'building'
-        );
-        
-        if (buildings.length > 0) {
-          const building = buildings[Math.floor(Math.random() * buildings.length)];
-          const buildingHeight = building.userData?.buildingHeight || 0;
-          spawn = {
-            x: building.position.x,
-            z: building.position.z
-          };
-          spawnY = building.position.y + buildingHeight + 2;
-        }
-      }
-      
-      const playerMesh = createPlayer(spawn, spawnY);
-      playerRef.current = playerMesh;
-      scene.add(playerMesh);
-
-      // Load enemies
-      if (data.combat && data.combat.enemies) {
-        enemiesRef.current = data.combat.enemies.map((enemyData, idx) => {
-          if (!enemyData.position) enemyData.position = { x: 0, z: 0 };
-          if (typeof enemyData.position.x !== 'number') enemyData.position.x = 0;
-          if (typeof enemyData.position.z !== 'number') enemyData.position.z = 0;
-
-          const terrainHalf = 128;
-          enemyData.position.x = Math.max(-terrainHalf, Math.min(terrainHalf, enemyData.position.x));
-          enemyData.position.z = Math.max(-terrainHalf, Math.min(terrainHalf, enemyData.position.z));
-
-          const enemy = createEnemies(enemyData.position, idx);
-          scene.add(enemy);
-          return enemy;
-        });
-        setEnemyCount(enemiesRef.current.length);
-      }
-      
-      setGameState(GameState.PLAYING);
-      
-    } catch (error) {
-      console.error('[SCAN ERROR]:', error);
-      
-      let errorMessage = 'Failed to generate world from scan.\n\n';
-      
-      if (error.message.includes('OVERSHOOT') || error.message.includes('API key')) {
-        errorMessage += '⚠️ OVERSHOOT AI API NOT CONFIGURED\n\n' +
-          'The scan feature requires an Overshoot AI API key.\n\n' +
-          'SOLUTION:\n' +
-          '1. Get your Overshoot AI API key from https://cluster1.overshoot.ai/api/v0.2\n' +
-          '2. Add to backend/.env file:\n' +
-          '   OVERSHOOT_API_KEY=your_api_key_here\n' +
-          '3. Restart the backend server\n\n' +
-          'For now, you can use voice/text prompts to generate worlds.';
-      } else if (error.message.includes('Failed to analyze')) {
-        errorMessage += '⚠️ IMAGE ANALYSIS FAILED\n\n' +
-          'The backend could not analyze the captured image.\n\n' +
-          'Check the backend console for detailed error messages.\n\n' +
-          'Possible causes:\n' +
-          '- Overshoot API key missing or invalid\n' +
-          '- Network connectivity issues\n' +
-          '- Invalid API endpoint';
-      } else {
-        errorMessage += `Error: ${error.message}\n\n` +
-          'Check the browser console (F12) and backend terminal for details.';
-      }
-      
-      alert(errorMessage);
-      setGameState(GameState.IDLE);
-    }
-  };
-
   const generateWorld = async (promptText) => {
     setGameState(GameState.GENERATING);
     try {
@@ -5458,39 +1679,12 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         throw new Error('Invalid response: missing world data');
       }
 
-      // Set color palette from AI-generated palette if available
-      if (data.world?.color_palette && data.world.color_palette.length > 0) {
-        console.log('[FRONTEND] Setting AI-generated color palette:', data.world.color_palette);
-        setColorPalette(data.world.color_palette);
-      }
-
-      // Debug: Check color_assignments
-      if (data.world?.color_assignments) {
-        console.log('[FRONTEND] ✅ Color assignments received:', {
-          keys: Object.keys(data.world.color_assignments),
-          sky: data.world.color_assignments.sky,
-          tree_leaves: data.world.color_assignments.tree_leaves,
-          tree_trunk: data.world.color_assignments.tree_trunk,
-          building: data.world.color_assignments.building,
-          mountain: data.world.color_assignments.mountain,
-          rock: data.world.color_assignments.rock
-        });
-      } else {
-        console.log('[FRONTEND] ⚠️ WARNING: No color_assignments in response!');
-      }
-
       setCurrentWorld(data);
 
       const scene = sceneRef.current;
       if (!scene) return;
 
       const biomeName = data.world?.biome || data.world?.biome_name;
-      
-      // Check if this is a kitchen request (check prompt text since backend may return "room" biome)
-      const isKitchenRequest = promptText && promptText.toLowerCase().includes('kitchen');
-      const isRoomBiome = biomeName && (biomeName.toLowerCase() === 'room' || biomeName.toLowerCase() === 'indoor' || biomeName.toLowerCase() === 'kitchen');
-      const shouldGenerateKitchen = isKitchenRequest || (biomeName && biomeName.toLowerCase() === 'kitchen');
-      
       createGround(scene, biomeName);
 
       const objectsToRemove = [];
@@ -5504,124 +1698,9 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       structuresRef.current = [];
       occupiedCells.clear();
 
-      // Generate kitchen if requested (even if backend returned "room" biome)
-      if (shouldGenerateKitchen && isRoomBiome && !data.world?.model_url) {
-        console.log('[FRONTEND] 🍳 Generating detailed kitchen (prompt was "kitchen")...');
-        
-        // Ensure structures object exists
-        if (!data.structures) {
-          data.structures = {};
-        }
-        
-        // Copy kitchen generation logic from loadWorldFromScan (same as before)
-        const wallColor = 0xFFFFFF;
-        const roomSize = 256; // Room fills entire world (256x256 terrain size)
-        const wallHeight = 10;
-        
-        data.structures.walls = [
-          { dimensions: { width: roomSize, height: wallHeight, depth: 0.5 }, position: { x: 0, y: wallHeight / 2, z: -roomSize / 2 }, color: wallColor, type: 'wall' },
-          { dimensions: { width: roomSize, height: wallHeight, depth: 0.5 }, position: { x: 0, y: wallHeight / 2, z: roomSize / 2 }, color: wallColor, type: 'wall' },
-          { dimensions: { width: 0.5, height: wallHeight, depth: roomSize }, position: { x: -roomSize / 2, y: wallHeight / 2, z: 0 }, color: wallColor, type: 'wall' },
-          { dimensions: { width: 0.5, height: wallHeight, depth: roomSize }, position: { x: roomSize / 2, y: wallHeight / 2, z: 0 }, color: wallColor, type: 'wall' },
-          { dimensions: { width: roomSize, height: 0.2, depth: roomSize }, position: { x: 0, y: 0, z: 0 }, color: 0xD3D3D3, type: 'floor' },
-          { dimensions: { width: roomSize, height: 0.2, depth: roomSize }, position: { x: 0, y: wallHeight, z: 0 }, color: 0xFFFFFF, type: 'ceiling' }
-        ];
-        
-        if (!data.structures.scanned_objects) {
-          data.structures.scanned_objects = [];
-        }
-        
-        // Generate detailed kitchen objects (matching reference image layout)
-        const cabinetColor = 0xD2B48C;
-        const counterColor = 0xF5F5DC;
-        const backsplashColor = 0xC0C0C0;
-        const stoveColor = 0xFFFFFF;
-        const sinkColor = 0xC0C0C0;
-        const refrigeratorColor = 0xFFFFFF;
-        const counterHeight = 3;
-        const counterDepth = 2;
-        const upperCabinetHeight = 3;
-        const upperCabinetBottom = 7;
-        
-        // KITCHEN LAYOUT: Back wall (stove) + Right wall (sink) + Left counter (workspace)
-        const kitchenCenterX = 0;
-        const kitchenCenterZ = 0;
-        const backWallCabinetZ = kitchenCenterZ - 10; // Back wall area
-        const rightWallCabinetX = kitchenCenterX + 10; // Right wall area
-        const leftCounterX = kitchenCenterX - 10; // Left counter area
-        const lowerCabinetY = counterHeight / 2;
-        const counterTopY = counterHeight + 0.05;
-        
-        // === LOWER CABINETS ===
-        data.structures.scanned_objects.push(
-          { name: 'lower_cabinet_back_1', position: { x: kitchenCenterX - 2, y: lowerCabinetY, z: backWallCabinetZ }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 4, height: counterHeight, depth: counterDepth }, position: { x: 0, y: 0, z: 0 }, color: cabinetColor, material: { roughness: 0.7, metalness: 0.1 } }] },
-          { name: 'lower_cabinet_back_2', position: { x: kitchenCenterX + 2, y: lowerCabinetY, z: backWallCabinetZ }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 4, height: counterHeight, depth: counterDepth }, position: { x: 0, y: 0, z: 0 }, color: cabinetColor, material: { roughness: 0.7, metalness: 0.1 } }] },
-          { name: 'lower_cabinet_right_1', position: { x: rightWallCabinetX, y: lowerCabinetY, z: kitchenCenterZ - 2 }, scale: 1, rotation: { x: 0, y: Math.PI / 2, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 4, height: counterHeight, depth: counterDepth }, position: { x: 0, y: 0, z: 0 }, color: cabinetColor, material: { roughness: 0.7, metalness: 0.1 } }] },
-          { name: 'lower_cabinet_right_2', position: { x: rightWallCabinetX, y: lowerCabinetY, z: kitchenCenterZ + 2 }, scale: 1, rotation: { x: 0, y: Math.PI / 2, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 4, height: counterHeight, depth: counterDepth }, position: { x: 0, y: 0, z: 0 }, color: cabinetColor, material: { roughness: 0.7, metalness: 0.1 } }] }
-        );
-        
-        // === COUNTERTOPS ===
-        data.structures.scanned_objects.push(
-          { name: 'countertop_back', position: { x: kitchenCenterX, y: counterTopY, z: backWallCabinetZ }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 8, height: 0.15, depth: counterDepth }, position: { x: 0, y: 0, z: 0 }, color: counterColor, material: { roughness: 0.3, metalness: 0.0 } }] },
-          { name: 'countertop_right', position: { x: rightWallCabinetX, y: counterTopY, z: kitchenCenterZ }, scale: 1, rotation: { x: 0, y: Math.PI / 2, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 8, height: 0.15, depth: counterDepth }, position: { x: 0, y: 0, z: 0 }, color: counterColor, material: { roughness: 0.3, metalness: 0.0 } }] },
-          { name: 'counter_left_extended', position: { x: leftCounterX, y: counterTopY, z: kitchenCenterZ + 5 }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 6, height: 0.15, depth: 1.5 }, position: { x: 0, y: 0, z: 0 }, color: counterColor, material: { roughness: 0.3, metalness: 0.0 } }] }
-        );
-        
-        // === BACKSPLASH & VENT ===
-        const backsplashHeight = 1.5;
-        const backsplashY = counterTopY + backsplashHeight / 2;
-        data.structures.scanned_objects.push(
-          { name: 'backsplash_back', position: { x: kitchenCenterX, y: backsplashY, z: backWallCabinetZ + 0.1 }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 8, height: backsplashHeight, depth: 0.1 }, position: { x: 0, y: 0, z: 0 }, color: backsplashColor, material: { roughness: 0.2, metalness: 0.6 } }] },
-          { name: 'backsplash_right', position: { x: rightWallCabinetX - 0.1, y: backsplashY, z: kitchenCenterZ }, scale: 1, rotation: { x: 0, y: Math.PI / 2, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 8, height: backsplashHeight, depth: 0.1 }, position: { x: 0, y: 0, z: 0 }, color: backsplashColor, material: { roughness: 0.2, metalness: 0.6 } }] },
-          { name: 'exhaust_vent', position: { x: kitchenCenterX, y: backsplashY + 0.3, z: backWallCabinetZ + 0.15 }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'cylinder', dimensions: { radius: 0.4, height: 0.1 }, position: { x: 0, y: 0, z: 0 }, color: backsplashColor, material: { roughness: 0.3, metalness: 0.7 } }] }
-        );
-        
-        // === STOVE, SINK ===
-        data.structures.scanned_objects.push(
-          { name: 'stove', position: { x: kitchenCenterX, y: counterTopY, z: backWallCabinetZ + counterDepth / 2 }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 3.5, height: 0.5, depth: counterDepth - 0.1 }, position: { x: 0, y: 0, z: 0 }, color: stoveColor, material: { roughness: 0.6, metalness: 0.3 } }] },
-          { name: 'sink', position: { x: rightWallCabinetX - counterDepth / 2, y: counterTopY, z: kitchenCenterZ }, scale: 1, rotation: { x: 0, y: Math.PI / 2, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 2, height: 0.4, depth: 1.5 }, position: { x: 0, y: 0, z: 0 }, color: sinkColor, material: { roughness: 0.1, metalness: 0.8 } }] }
-        );
-        
-        // === UPPER CABINETS ===
-        const upperCabinetY = upperCabinetBottom + upperCabinetHeight / 2;
-        data.structures.scanned_objects.push(
-          { name: 'upper_cabinet_1', position: { x: kitchenCenterX - 2, y: upperCabinetY, z: backWallCabinetZ + 0.3 }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 }, position: { x: 0, y: 0, z: 0 }, color: cabinetColor, material: { roughness: 0.7, metalness: 0.1 } }] },
-          { name: 'upper_cabinet_2', position: { x: kitchenCenterX + 2, y: upperCabinetY, z: backWallCabinetZ + 0.3 }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 4, height: upperCabinetHeight, depth: 1.5 }, position: { x: 0, y: 0, z: 0 }, color: cabinetColor, material: { roughness: 0.7, metalness: 0.1 } }] }
-        );
-        
-        // === REFRIGERATOR, STOOL, LIGHT, PIPES, DETAILS ===
-        const refrigeratorY = (counterHeight + 2) / 2;
-        const stoolColor = 0xD2B48C; // Light wood color (matching cabinets)
-        data.structures.scanned_objects.push(
-          { name: 'refrigerator', position: { x: rightWallCabinetX + 1.5, y: refrigeratorY, z: kitchenCenterZ + 4 }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 2.5, height: counterHeight + 2, depth: 2.5 }, position: { x: 0, y: 0, z: 0 }, color: refrigeratorColor, material: { roughness: 0.8, metalness: 0.2 } }] },
-          { 
-            name: 'stool', 
-            position: { x: leftCounterX, y: 0.3, z: kitchenCenterZ + 5 }, 
-            scale: 1, 
-            rotation: { x: 0, y: 0, z: 0 }, 
-            parts: [
-              { shape: 'cylinder', dimensions: { radius: 0.4, height: 0.1 }, position: { x: 0, y: 0.3, z: 0 }, color: stoolColor, material: { roughness: 0.7, metalness: 0.1 } },
-              { shape: 'box', dimensions: { width: 0.08, height: 0.3, depth: 0.08 }, position: { x: -0.25, y: 0.15, z: -0.25 }, color: stoolColor, material: { roughness: 0.7, metalness: 0.1 } },
-              { shape: 'box', dimensions: { width: 0.08, height: 0.3, depth: 0.08 }, position: { x: 0.25, y: 0.15, z: -0.25 }, color: stoolColor, material: { roughness: 0.7, metalness: 0.1 } },
-              { shape: 'box', dimensions: { width: 0.08, height: 0.3, depth: 0.08 }, position: { x: -0.25, y: 0.15, z: 0.25 }, color: stoolColor, material: { roughness: 0.7, metalness: 0.1 } },
-              { shape: 'box', dimensions: { width: 0.08, height: 0.3, depth: 0.08 }, position: { x: 0.25, y: 0.15, z: 0.25 }, color: stoolColor, material: { roughness: 0.7, metalness: 0.1 } }
-            ]
-          },
-          { name: 'ceiling_light', position: { x: 0, y: wallHeight - 0.15, z: 0 }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 6, height: 0.3, depth: 2 }, position: { x: 0, y: 0, z: 0 }, color: 0xFFFFFF, material: { roughness: 0.1, metalness: 0.0, emissive: 0xFFFFFF, emissiveIntensity: 0.8 } }] },
-          { name: 'pvc_pipe', position: { x: -roomSize / 2 + 0.5, y: wallHeight - 1, z: -8 }, scale: 1, rotation: { x: 0, y: 0, z: Math.PI / 2 }, parts: [{ shape: 'cylinder', dimensions: { radius: 0.15, height: 4 }, position: { x: 0, y: 0, z: 0 }, color: 0xFFFFFF, material: { roughness: 0.6, metalness: 0.0 } }] },
-          { name: 'coffee_maker', position: { x: leftCounterX, y: counterTopY + 0.3, z: kitchenCenterZ + 6 }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 0.8, height: 0.6, depth: 0.6 }, position: { x: 0, y: 0, z: 0 }, color: 0x000000, material: { roughness: 0.7, metalness: 0.2 } }] },
-          { name: 'laptop', position: { x: leftCounterX, y: counterTopY + 0.1, z: kitchenCenterZ + 4.5 }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'box', dimensions: { width: 1.2, height: 0.05, depth: 0.8 }, position: { x: 0, y: 0, z: 0 }, color: 0x1a1a1a, material: { roughness: 0.5, metalness: 0.3 } }] },
-          { name: 'water_bottle', position: { x: leftCounterX + 0.8, y: counterTopY + 0.3, z: kitchenCenterZ + 4.5 }, scale: 1, rotation: { x: 0, y: 0, z: 0 }, parts: [{ shape: 'cylinder', dimensions: { radius: 0.15, height: 0.6 }, position: { x: 0, y: 0, z: 0 }, color: 0xFFFFFF, material: { roughness: 0.3, metalness: 0.1 } }] }
-        );
-        
-        console.log('[FRONTEND] ✅ Detailed kitchen created matching reference: back wall (stove), right wall (sink), left counter (workspace), cabinets, refrigerator, round stool, ceiling light, and details');
-      }
-
       if (data.world && data.world.lighting_config) {
         console.log('[FRONTEND LIGHTING DEBUG] Applying lighting:', data.world.lighting_config);
-        // Pass color_assignments to updateLighting so sky uses AI-generated color
-        updateLighting(data.world.lighting_config, data.world.color_assignments);
-        // updateLighting now handles northern lights automatically based on lighting_config.northern_lights flag
+        updateLighting(data.world.lighting_config);
       }
 
       if (data.world && data.world.heightmap_raw && data.world.colour_map_array) {
@@ -5637,106 +1716,45 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         scene.add(terrainMesh);
       }
 
-      // Get AI-generated color assignments for structures
-      const colorAssignments = data.world?.color_assignments || {};
-      
-      // Get plant_type from world data
-      const plantType = data.world?.plant_type || "tree";
-      console.log(`[FRONTEND] Plant type for this world: ${plantType}`);
-
-      // Load kitchen structures (walls, scanned_objects) if kitchen is generated
-      if (shouldGenerateKitchen && data.structures) {
-        // Handle room walls (for kitchen)
-        if (data.structures.walls) {
-          console.log(`[FRONTEND] Creating ${data.structures.walls.length} room walls...`);
-          data.structures.walls.forEach(wallData => {
-            const wall = createRoomWall(wallData);
-            wall.userData = { structureType: wallData.type || 'wall' };
-            scene.add(wall);
-            structuresRef.current.push(wall);
-          });
-          console.log(`[FRONTEND] ✅ Added ${data.structures.walls.length} room walls/floor`);
-        }
-        
-        // Handle scanned objects (kitchen items: cabinets, appliances, etc.)
-        if (data.structures.scanned_objects) {
-          console.log(`[FRONTEND] Creating ${data.structures.scanned_objects.length} scanned objects...`);
-          data.structures.scanned_objects.forEach(objData => {
-            try {
-              const scannedObj = createScannedObject(objData);
-              scannedObj.userData = { 
-                structureType: 'scanned_object',
-                originalName: objData.original_name || objData.name
-              };
-              scene.add(scannedObj);
-              structuresRef.current.push(scannedObj);
-            } catch (error) {
-              console.error(`[FRONTEND] Error creating scanned object:`, error, objData);
-            }
-          });
-          console.log(`[FRONTEND] ✅ Added ${data.structures.scanned_objects.length} scanned objects`);
-        }
-      }
-
-      // Load backend structures (trees, rocks, etc.) if NOT generating kitchen
-      if (data.structures && !shouldGenerateKitchen) {
+      if (data.structures) {
         if (data.structures.trees) {
-          console.log(`[FRONTEND] Creating ${data.structures.trees.length} plants (type: ${plantType})...`);
+          console.log(`[FRONTEND] Creating ${data.structures.trees.length} trees...`);
           data.structures.trees.forEach((treeData) => {
-            // Calculate plant radius based on type and scale
+            // Calculate tree radius based on leaf size and scale
+            // Leaf size: max(3 * scale for leafless, 2.2 * scale for normal) + random offset (0.6 * scale)
             const scale = treeData.scale || 1.0;
-            let plantRadius;
-            if (plantType === "cactus") {
-              plantRadius = 1.5 * scale + 1;
-            } else if (plantType === "creepy_plant") {
-              plantRadius = 2 * scale + 1;
-            } else {
-              // Default tree
             const leafSize = treeData.leafless ? 3 * scale : 2.2 * scale;
             const randomOffset = 0.6 * scale;
-              plantRadius = leafSize + randomOffset + 1;
-            }
+            const treeRadius = leafSize + randomOffset + 1; // +1 for safety margin
             
-            // Check if radius around plant position is clear
+            // Check if radius around tree position is clear
             if (!checkRadiusClear(
               treeData.position.x,
               treeData.position.z,
-              plantRadius,
+              treeRadius,
               terrainPlacementMaskRef.current
             )) {
-              return; // Skip this plant if radius is occupied
+              return; // Skip this tree if radius is occupied
             }
 
-            // Apply AI-generated colors from color_assignments if available
-            const plantDataWithColors = {
-              ...treeData,
-              leaf_color: treeData.leaf_color || colorAssignments.tree_leaves || colorAssignments.tree_leaves_light,
-              trunk_color: treeData.trunk_color || colorAssignments.tree_trunk
-            };
-
-            const plant = createPlant(plantDataWithColors, plantType);
-            const terrainY = getHeightAt(treeData.position.x, treeData.position.z);
-            const finalY = treeData.position.y !== 0 ? treeData.position.y : terrainY;
-            plant.position.set(treeData.position.x, finalY, treeData.position.z);
-            
-            plant.userData = { 
+            const tree = createTree(treeData);
+            tree.userData = { 
               structureType: 'tree',
-              plantType: plantType,
               scale: treeData.scale || 1.0,
               leafless: treeData.leafless || false
             };
-            scene.add(plant);
-            structuresRef.current.push(plant);
+            scene.add(tree);
+            structuresRef.current.push(tree);
             
-            // Mark radius around plant as occupied
+            // Mark radius around tree as occupied
             markRadiusOccupied(
               treeData.position.x,
               treeData.position.z,
-              plantRadius,
+              treeRadius,
               terrainPlacementMaskRef.current
             );
           });
-          console.log(`✅ Added ${structuresRef.current.filter(obj => obj.userData.structureType === 'tree').length} plants (type: ${plantType})`);
+          console.log(`✅ Added ${structuresRef.current.filter(obj => obj.userData.structureType === 'tree').length} trees`);
         }
 
         const cloudCount = 15;
@@ -5790,8 +1808,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
 
         if (data.structures.rocks) {
           data.structures.rocks.forEach(rockData => {
-            // Apply AI-generated colors from color_assignments
-            const rock = createRock(rockData, colorAssignments);
+            const rock = createRock(rockData);
             rock.userData = { structureType: 'rock' };
             scene.add(rock);
             structuresRef.current.push(rock);
@@ -5799,30 +1816,14 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
           console.log(`✅ Added ${data.structures.rocks.length} rocks`);
         }
         
-        // Mountains are now part of the terrain mesh, not separate structures
-        if (data.structures.peaks && data.structures.peaks.length > 0) {
-          console.log(`Skipping ${data.structures.peaks.length} peaks - mountains are now part of terrain mesh`);
-        }
-
-        if (data.structures.creative_objects) {
-          console.log(`[FRONTEND] Creating ${data.structures.creative_objects.length} creative objects...`);
-          data.structures.creative_objects.forEach(objData => {
-            try {
-              // Log the full AI output
-              console.log(`[FRONTEND] AI Output for "${objData.name || 'unnamed'}":`, JSON.stringify(objData, null, 2));
-              console.log(`[FRONTEND] Parts breakdown:`, objData.parts?.map((p, i) => 
-                `Part ${i+1}: ${p.shape} at y=${p.position?.y || 0}, color=${p.color || 'default'}`
-              ));
-              
-              const creativeObj = createCreativeObject(objData);
-              scene.add(creativeObj);
-              structuresRef.current.push(creativeObj);
-              console.log(`[FRONTEND] ✓ Created creative object: ${objData.name || 'unnamed'} at (${objData.position?.x?.toFixed(1)}, ${objData.position?.z?.toFixed(1)})`);
-            } catch (error) {
-              console.error(`[FRONTEND] Error creating creative object:`, error, objData);
-            }
+        if (data.structures.peaks) {
+          data.structures.peaks.forEach(peakData => {
+            const peak = createMountainPeak(peakData, biomeName);
+            peak.userData = { structureType: 'peak' };
+            scene.add(peak);
+            structuresRef.current.push(peak);
           });
-          console.log(`✅ Added ${structuresRef.current.filter(obj => obj.userData.structureType === 'creative_object').length} creative objects`);
+          console.log(`✅ Added ${data.structures.peaks.length} mountain peaks`);
         }
 
         if (data.structures.street_lamps) {
@@ -5861,14 +1862,8 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
 
               const buildingType = getBuildingTypeForBiome(biomeName, idx);
 
-              // Pass color_assignments to building data so createBuilding can use them
-              const buildingDataWithColors = {
-                ...buildingData,
-                _color_assignments: colorAssignments
-              };
-
               const building = createBuilding(
-                buildingDataWithColors,
+                buildingData,
                 localIndex,
                 buildingType,
                 gridOrigin
@@ -5914,22 +1909,9 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
           
           console.log(`[SKYSCRAPERS] Debug - biomeName: ${biomeName}, data.world?.biome: ${data?.world?.biome}, currentBiomeName: ${currentBiomeName}`);
           
-          // Check if biome is city or futuristic/cyberpunk/superhero (all should have skyscrapers)
-          const isUrbanBiome = currentBiomeName && (
-            currentBiomeName.toLowerCase() === 'city' ||
-            currentBiomeName.toLowerCase().includes('futuristic') ||
-            currentBiomeName.toLowerCase().includes('cyberpunk') ||
-            currentBiomeName.toLowerCase().includes('neon') ||
-            currentBiomeName.toLowerCase().includes('spiderman') ||
-            currentBiomeName.toLowerCase().includes('gotham') ||
-            currentBiomeName.toLowerCase().includes('metropolis') ||
-            currentBiomeName.toLowerCase().includes('superhero')
-          );
-          
-          if (isUrbanBiome) {
-            const biomeType = (currentBiomeName.toLowerCase().includes('futuristic') || 
-                             currentBiomeName.toLowerCase().includes('cyberpunk')) ? 'futuristic' : 'city';
-            const skyscraperCount = biomeType === 'futuristic' ? 5 : 3; // More skyscrapers for futuristic
+          if (currentBiomeName && currentBiomeName.toLowerCase() === 'city') {
+            console.log('[SKYSCRAPERS] Creating 3 random skyscrapers for city biome');
+            const skyscraperCount = 3;
             const terrainSize = 256;
             const minDistance = 30; // Minimum distance from grid buildings and other skyscrapers
             
@@ -6023,34 +2005,18 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
             }
             console.log(`[SKYSCRAPERS] Total skyscrapers created: ${structuresRef.current.filter(s => s.userData?.buildingType === 'skyscraper').length}`);
           } else {
-            console.log(`[SKYSCRAPERS] Biome is not city/futuristic/superhero (biomeName: ${biomeName}, data.world?.biome: ${data?.world?.biome}), skipping skyscraper creation`);
+            console.log(`[SKYSCRAPERS] Biome is not city (biomeName: ${biomeName}, data.world?.biome_name: ${data.world?.biome_name}), skipping skyscraper creation`);
           }
 
         }
       }
 
-      // Determine spawn location - inside room for room/kitchen, on top of building if city/futuristic biome
+      // Determine spawn location - on top of building if city biome
       let spawn = data.spawn_point || { x: 0, z: 0 };
       let spawnY = null;
       
       const spawnBiomeName = data.world?.biome || data.world?.biome_name;
-      // Check if room biome for spawn (isRoomBiome already declared at line 5288, check spawnBiomeName here)
-      const isRoomBiomeForSpawn = spawnBiomeName && (spawnBiomeName.toLowerCase() === 'room' || spawnBiomeName.toLowerCase() === 'indoor' || spawnBiomeName.toLowerCase() === 'kitchen');
-      
-      if (isRoomBiomeForSpawn || isRoomBiome) {
-        // Spawn player inside the room (center of room, well inside boundaries)
-        // Room is 256x256 units, walls at -128 and +128, so spawn well inside
-        spawn = { x: 0, z: 0 }; // Center of room
-        spawnY = 1.5; // Above floor level (floor is at y=0, player eye level ~1.5 units)
-        console.log(`[SPAWN] Room/kitchen biome - spawning player inside room at (${spawn.x}, ${spawnY}, ${spawn.z})`);
-      } else {
-        const isUrbanSpawnBiome = spawnBiomeName && (
-          spawnBiomeName.toLowerCase() === 'city' ||
-          spawnBiomeName.toLowerCase().includes('futuristic') ||
-          spawnBiomeName.toLowerCase().includes('cyberpunk') ||
-          spawnBiomeName.toLowerCase().includes('neon')
-        );
-        if (isUrbanSpawnBiome) {
+      if (spawnBiomeName && spawnBiomeName.toLowerCase() === 'city') {
         // Find a building to spawn on top of
         const buildings = structuresRef.current.filter(
           s => s.userData?.structureType === 'building'
@@ -6072,7 +2038,6 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
           console.log(`[SPAWN] Spawning player on top at (${spawn.x.toFixed(1)}, ${spawnY.toFixed(1)}, ${spawn.z.toFixed(1)})`);
         } else {
           console.log(`[SPAWN] No buildings found, using default spawn`);
-        }
         }
       }
       
@@ -6153,9 +2118,6 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         console.log("[FRONTEND] Image uploaded, sending to backend. Image data length:", uploadedImage.length);
       }
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/ab4e53c8-3e02-4665-bb8e-bc913babc9ea',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:5322',message:'Direct modification request',data:{method:'PATCH',payload:payload},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
       const res = await fetch(`${API_BASE}/modify-world`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -6336,10 +2298,16 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         }
       }
 
-      // Mountains are now part of terrain mesh, not separate structures
-      // Skip peak removal - terrain regeneration will handle it
       if (newPeakCount < oldPeakCount) {
-        console.log(`[MODIFY] Skipping peak removal - mountains are now part of terrain mesh`);
+        const toRemove = oldPeakCount - newPeakCount;
+        console.log(`[MODIFY] Removing ${toRemove} peaks...`);
+        for (let i = 0; i < toRemove; i++) {
+          const peak = structuresRef.current.find(obj => obj.userData?.structureType === 'peak');
+          if (peak) {
+            scene.remove(peak);
+            structuresRef.current = structuresRef.current.filter(obj => obj !== peak);
+          }
+        }
       }
 
       // Check if street lamps should be replaced (set operation when counts match)
@@ -6399,60 +2367,40 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       // Handle ADDITIONS (if counts increased)
       if (data.structures?.trees && newTreeCount > oldTreeCount) {
         const newTrees = data.structures.trees.slice(oldTreeCount);
-        const plantType = data.world?.plant_type || currentWorld?.world?.plant_type || "tree";
-        console.log(`[MODIFY] Adding ${newTrees.length} new plants (type: ${plantType})...`);
+        console.log(`[MODIFY] Adding ${newTrees.length} new trees...`);
 
         newTrees.forEach(treeData => {
-          // Calculate plant radius based on type and scale
+          // Calculate tree radius based on leaf size and scale
           const scale = treeData.scale || 1.0;
-          let plantRadius;
-          if (plantType === "cactus") {
-            plantRadius = 1.5 * scale + 1;
-          } else if (plantType === "creepy_plant") {
-            plantRadius = 2 * scale + 1;
-          } else {
           const leafSize = treeData.leafless ? 3 * scale : 2.2 * scale;
           const randomOffset = 0.6 * scale;
-            plantRadius = leafSize + randomOffset + 1;
-          }
+          const treeRadius = leafSize + randomOffset + 1; // +1 for safety margin
           
-          // Check if radius around plant position is clear
+          // Check if radius around tree position is clear
           if (!checkRadiusClear(
             treeData.position.x,
             treeData.position.z,
-            plantRadius,
+            treeRadius,
             terrainPlacementMaskRef.current
           )) {
-            return; // Skip this plant if radius is occupied
+            return; // Skip this tree if radius is occupied
           }
 
-          // Apply colors from color_assignments if available
-          const colorAssignments = data.world?.color_assignments || currentWorld?.world?.color_assignments || {};
-          const plantDataWithColors = {
-            ...treeData,
-            leaf_color: treeData.leaf_color || colorAssignments.tree_leaves || colorAssignments.tree_leaves_light,
-            trunk_color: treeData.trunk_color || colorAssignments.tree_trunk
-          };
-
-          const plant = createPlant(plantDataWithColors, plantType);
-          const terrainY = getHeightAt(treeData.position.x, treeData.position.z);
-          const finalY = treeData.position.y !== 0 ? treeData.position.y : terrainY;
-          plant.position.set(treeData.position.x, finalY, treeData.position.z);
-          
-          plant.userData = { 
+          const tree = createTree(treeData);
+          tree.userData = { 
+            ...tree.userData, 
             structureType: 'tree',
-            plantType: plantType,
             scale: treeData.scale || 1.0,
             leafless: treeData.leafless || false
           };
-          scene.add(plant);
-          structuresRef.current.push(plant);
+          scene.add(tree);
+          structuresRef.current.push(tree);
           
-          // Mark radius around plant as occupied
+          // Mark radius around tree as occupied
           markRadiusOccupied(
             treeData.position.x,
             treeData.position.z,
-            plantRadius,
+            treeRadius,
             terrainPlacementMaskRef.current
           );
         });
@@ -6508,48 +2456,17 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
             
       }
 
-      // Handle creative objects
-      const oldCreativeObjectCount = structuresRef.current.filter(obj => obj.userData?.structureType === 'creative_object').length;
-      const newCreativeObjectCount = data.structures?.creative_objects?.length || 0;
-      
-      if (data.structures?.creative_objects && newCreativeObjectCount > oldCreativeObjectCount) {
-        const newCreativeObjects = data.structures.creative_objects.slice(oldCreativeObjectCount);
-        console.log(`[MODIFY] Adding ${newCreativeObjects.length} creative objects...`);
-        
-        newCreativeObjects.forEach(objData => {
-          try {
-            // Log the full AI output
-            console.log(`[MODIFY] AI Output for "${objData.name || 'unnamed'}":`, JSON.stringify(objData, null, 2));
-            console.log(`[MODIFY] Parts breakdown:`, objData.parts?.map((p, i) => 
-              `Part ${i+1}: ${p.shape} at y=${p.position?.y || 0}, color=${p.color || 'default'}`
-            ));
-            
-            const creativeObj = createCreativeObject(objData);
-            scene.add(creativeObj);
-            structuresRef.current.push(creativeObj);
-            console.log(`[MODIFY] ✓ Created creative object: ${objData.name || 'unnamed'} at (${objData.position?.x?.toFixed(1)}, ${objData.position?.z?.toFixed(1)})`);
-          } catch (error) {
-            console.error(`[MODIFY] Error creating creative object:`, error, objData);
-          }
-        });
-      }
-      
-      if (newCreativeObjectCount < oldCreativeObjectCount) {
-        const toRemove = oldCreativeObjectCount - newCreativeObjectCount;
-        console.log(`[MODIFY] Removing ${toRemove} creative objects...`);
-        for (let i = 0; i < toRemove; i++) {
-          const creativeObj = structuresRef.current.find(obj => obj.userData?.structureType === 'creative_object');
-          if (creativeObj) {
-            scene.remove(creativeObj);
-            structuresRef.current = structuresRef.current.filter(obj => obj !== creativeObj);
-          }
-        }
-      }
-
-      // Mountains are now part of terrain mesh, not separate structures
-      // Skip peak addition - terrain regeneration will handle it
       if (data.structures?.peaks && newPeakCount > oldPeakCount) {
-        console.log(`[MODIFY] Skipping peak addition - mountains are now part of terrain mesh`);
+        const newPeaks = data.structures.peaks.slice(oldPeakCount);
+        const currentBiome = data.world?.biome || data.world?.biome_name || biomeName;
+        console.log(`[MODIFY] Adding ${newPeaks.length} new peaks...`);
+        
+        newPeaks.forEach(peakData => {
+          const peak = createMountainPeak(peakData, currentBiome);
+          peak.userData = { ...peak.userData, structureType: 'peak' };
+          scene.add(peak);
+          structuresRef.current.push(peak);
+        });
       }
 
       if (data.structures?.street_lamps && newStreetLampCount > oldStreetLampCount) {
@@ -6591,9 +2508,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
 
       if (data.world?.lighting_config) {
         console.log('[MODIFY] Updating lighting...');
-        // Pass color_assignments to updateLighting so sky uses AI-generated color
-        updateLighting(data.world.lighting_config, data.world.color_assignments);
-        // updateLighting now handles northern lights automatically based on lighting_config.northern_lights flag
+        updateLighting(data.world.lighting_config);
       }
 
       if (data.physics) {
@@ -6603,26 +2518,12 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
 
       setCurrentWorld(data);
       
-      // Add success message to the last conversation session if it exists
-      setChatHistory(prev => {
-        const updated = [...prev];
-        const lastItem = updated[updated.length - 1];
-        if (lastItem && lastItem.type === 'conversation' && lastItem.session) {
-          // Add system message to the conversation session
-          lastItem.session.push({
-            role: 'system',
-            content: '✅ Command executed successfully'
-          });
-        } else {
-          // Fallback: add as separate system message
-          updated.push({
+      // Add success message to chat history
+      setChatHistory(prev => [...prev, {
         command: `✅ Command executed successfully`,
         timestamp: new Date().toLocaleTimeString(),
         type: 'system'
-          });
-        }
-        return updated;
-      });
+      }]);
       
       setGameState(GameState.PLAYING);
       console.log("✅ Modification complete, returned to PLAYING state");
@@ -6634,26 +2535,12 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       }
     } catch (err) {
       console.error("Modify-world error:", err);
-      // Add error message to the last conversation session if it exists
-      setChatHistory(prev => {
-        const updated = [...prev];
-        const lastItem = updated[updated.length - 1];
-        if (lastItem && lastItem.type === 'conversation' && lastItem.session) {
-          // Add error message to the conversation session
-          lastItem.session.push({
-            role: 'system',
-            content: `❌ Error: ${err.message}`
-          });
-        } else {
-          // Fallback: add as separate error message
-          updated.push({
+      // Add error message to chat history
+      setChatHistory(prev => [...prev, {
         command: `❌ Error: ${err.message}`,
         timestamp: new Date().toLocaleTimeString(),
         type: 'error'
-          });
-        }
-        return updated;
-      });
+      }]);
       setGameState(GameState.PLAYING);
     }
   };
@@ -6691,419 +2578,28 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
     if (fileInput) fileInput.value = '';
   };
 
-  // Handle color palette changes from ColorPicker
-  const handleColorPaletteChange = async (palette) => {
-    console.log('[COLOR PICKER] Applying color palette:', palette);
-    setColorPalette(palette);
-    
-    // Apply colors to current world if we have one
-    if (currentWorld && gameState === GameState.PLAYING) {
-      setColorSchemeNotification('Colour scheme is being implemented...');
-      await applyColorPaletteToWorld(palette);
-      setColorSchemeNotification('');
-    }
-  };
-
-  // Apply color palette to terrain
-  const applyColorPaletteToWorld = async (palette) => {
-    if (!currentWorld || !palette || palette.length === 0) {
-      console.warn('[COLOR PICKER] Cannot apply palette: missing world or palette');
-      return;
-    }
-
-    try {
-      const biome = currentWorld.world?.biome || currentWorld.world?.biome_name || 'default';
-      const structure_counts = currentWorld.structures || {};
-      
-      console.log('[COLOR PICKER] Regenerating terrain with palette:', palette);
-      console.log('[COLOR PICKER] Biome:', biome, 'Structures:', structure_counts);
-      
-      // Call backend to regenerate terrain with new colors
-      const res = await fetch(`${API_BASE}/update-colors`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          biome: biome,
-          structures: structure_counts,
-          color_palette: palette
-        })
-      });
-
-      if (!res.ok) {
-        throw new Error(`API error: ${res.status}`);
-      }
-
-      const terrainData = await res.json();
-      
-      // Extract color assignments from response
-      const colorAssignments = terrainData.color_assignments || {};
-      console.log('[COLOR PICKER] Color assignments:', colorAssignments);
-      
-      // Update terrain with new colors
-      const scene = sceneRef.current;
-      if (!scene) {
-        console.error('[COLOR PICKER] Scene not available');
-        return;
-      }
-
-      console.log('[COLOR PICKER] Received terrain data:', {
-        hasHeightmap: !!terrainData.heightmap_raw,
-        hasColorMap: !!terrainData.colour_map_array,
-        heightmapShape: terrainData.heightmap_raw ? `${terrainData.heightmap_raw.length}x${terrainData.heightmap_raw[0]?.length}` : 'none',
-        colorMapShape: terrainData.colour_map_array ? `${terrainData.colour_map_array.length}x${terrainData.colour_map_array[0]?.length}` : 'none'
-      });
-
-      // Remove old terrain mesh - also search scene to ensure we remove it
-      if (terrainMeshRef.current) {
-        console.log('[COLOR PICKER] Removing old terrain mesh (by ref)');
-        scene.remove(terrainMeshRef.current);
-        if (terrainMeshRef.current.geometry) {
-          terrainMeshRef.current.geometry.dispose();
-        }
-        if (terrainMeshRef.current.material) {
-          if (terrainMeshRef.current.material.map) {
-            terrainMeshRef.current.material.map.dispose();
-          }
-          terrainMeshRef.current.material.dispose();
-        }
-        terrainMeshRef.current = null;
-      }
-      
-      // Also search scene for any terrain meshes and remove them (fallback)
-      // Look for meshes with vertex colors (terrain characteristic)
-      const terrainMeshes = scene.children.filter(child => {
-        return child.isMesh && 
-               child.material && 
-               child.material.vertexColors && 
-               child.geometry &&
-               child.geometry.attributes.color && // Has color attribute
-               !child.userData?.isSky && // Not the sky
-               !child.userData?.isGround; // Not the ground plane
-      });
-      
-      if (terrainMeshes.length > 0) {
-        console.log(`[COLOR PICKER] Found ${terrainMeshes.length} potential terrain mesh(es) in scene, removing...`);
-        terrainMeshes.forEach(mesh => {
-          console.log('[COLOR PICKER] Removing terrain mesh:', {
-            id: mesh.id,
-            position: mesh.position.toArray(),
-            rotation: mesh.rotation.toArray()
-          });
-          scene.remove(mesh);
-          if (mesh.geometry) mesh.geometry.dispose();
-          if (mesh.material) {
-            if (mesh.material.map) mesh.material.map.dispose();
-            mesh.material.dispose();
-          }
-        });
-      }
-
-      // Update refs with new terrain data
-      if (terrainData.heightmap_raw && terrainData.colour_map_array) {
-        console.log('[COLOR PICKER] Updating terrain refs and creating new mesh');
-        console.log('[COLOR PICKER] Before update - terrain mesh count:', 
-          scene.children.filter(c => c.isMesh && c.material?.vertexColors).length);
-        
-        // Store old color for comparison (before updating refs)
-        const oldColorSample = colorMapRef.current?.[0]?.[0];
-        
-        heightmapRef.current = terrainData.heightmap_raw;
-        colorMapRef.current = terrainData.colour_map_array;
-        terrainPlacementMaskRef.current = terrainData.placement_mask || 
-          heightmapRef.current.map(row => row.map(height => (height >= 0 ? 1 : 0)));
-        
-        // Log a sample of the new color data to verify it's different
-        if (colorMapRef.current && colorMapRef.current[0] && colorMapRef.current[0][0]) {
-          const newColorSample = colorMapRef.current[0][0];
-          console.log('[COLOR PICKER] Color comparison:', {
-            oldColor: oldColorSample,
-            newColor: newColorSample,
-            colorsChanged: oldColorSample ? JSON.stringify(oldColorSample) !== JSON.stringify(newColorSample) : 'N/A (no old color)'
-          });
-          console.log('[COLOR PICKER] Sample new color (first pixel):', newColorSample);
-          console.log('[COLOR PICKER] Sample new color (middle pixel):', 
-            colorMapRef.current[Math.floor(colorMapRef.current.length / 2)][Math.floor(colorMapRef.current[0].length / 2)]);
-        }
-        
-        // Create new terrain mesh with updated colors
-        const newTerrainMesh = createTerrain(
-          heightmapRef.current,
-          colorMapRef.current,
-          256
-        );
-        
-        if (!newTerrainMesh) {
-          console.error('[COLOR PICKER] Failed to create terrain mesh');
-          return;
-        }
-        
-        // Ensure terrain is positioned correctly (should be at origin)
-        // NOTE: createTerrain already rotates the geometry, so DON'T rotate the mesh again
-        newTerrainMesh.position.set(0, 0, 0);
-        // Don't set rotation.x - geometry is already rotated in createTerrain
-        
-        // Mark color attribute as needing update
-        if (newTerrainMesh.geometry && newTerrainMesh.geometry.attributes.color) {
-          newTerrainMesh.geometry.attributes.color.needsUpdate = true;
-        }
-        
-        terrainMeshRef.current = newTerrainMesh;
-        scene.add(newTerrainMesh);
-        
-        // Verify the new mesh has correct colors
-        if (newTerrainMesh.geometry && newTerrainMesh.geometry.attributes.color) {
-          const colorAttr = newTerrainMesh.geometry.attributes.color;
-          const sampleIdx = Math.floor(colorAttr.count / 2);
-          const firstIdx = 0;
-          console.log('[COLOR PICKER] Terrain mesh color samples:', {
-            firstVertex: {
-              r: colorAttr.array[firstIdx * 3],
-              g: colorAttr.array[firstIdx * 3 + 1],
-              b: colorAttr.array[firstIdx * 3 + 2]
-            },
-            middleVertex: {
-              r: colorAttr.array[sampleIdx * 3],
-              g: colorAttr.array[sampleIdx * 3 + 1],
-              b: colorAttr.array[sampleIdx * 3 + 2]
-            },
-            // Compare with color map array
-            expectedFromColorMap: colorMapRef.current[0]?.[0],
-            matches: colorAttr.array[firstIdx * 3] === colorMapRef.current[0]?.[0]?.[0] / 255 &&
-                     colorAttr.array[firstIdx * 3 + 1] === colorMapRef.current[0]?.[0]?.[1] / 255 &&
-                     colorAttr.array[firstIdx * 3 + 2] === colorMapRef.current[0]?.[0]?.[2] / 255
-          });
-        }
-        
-        console.log('[COLOR PICKER] After update - terrain mesh count:', 
-          scene.children.filter(c => c.isMesh && c.material?.vertexColors).length);
-        
-        
-        console.log('[COLOR PICKER] New terrain mesh added to scene:', {
-          meshId: newTerrainMesh.id,
-          position: newTerrainMesh.position.toArray(),
-          rotation: newTerrainMesh.rotation.toArray(),
-          visible: newTerrainMesh.visible,
-          inScene: scene.children.includes(newTerrainMesh),
-          hasColorAttribute: !!newTerrainMesh.geometry?.attributes?.color,
-          colorCount: newTerrainMesh.geometry?.attributes?.color?.count || 0,
-          sceneChildrenCount: scene.children.length
-        });
-        
-        // Ensure the new terrain mesh is visible and properly positioned
-        newTerrainMesh.visible = true;
-        newTerrainMesh.updateMatrix();
-        
-        // Force render update - use requestAnimationFrame to ensure proper rendering
-        if (rendererRef.current && cameraRef.current) {
-          requestAnimationFrame(() => {
-            if (rendererRef.current && cameraRef.current && sceneRef.current) {
-              rendererRef.current.render(sceneRef.current, cameraRef.current);
-              console.log('[COLOR PICKER] Forced render update after animation frame');
-            }
-          });
-        }
-        
-        // Update sky/background color FIRST (before structures) - this should always happen if color_assignments exist
-        const skyColorFromAssignments = colorAssignments?.sky;
-        if (skyColorFromAssignments) {
-          console.log('[COLOR PICKER] Updating sky color:', skyColorFromAssignments);
-          
-          // Update renderer clear color
-          if (rendererRef.current) {
-            const skyColor = new THREE.Color(skyColorFromAssignments);
-            rendererRef.current.setClearColor(skyColor);
-            console.log('[COLOR PICKER] Updated renderer clear color:', skyColorFromAssignments, 'RGB:', skyColor.r, skyColor.g, skyColor.b);
-          }
-          
-          // Update sky mesh texture
-          const skyMesh = scene.children.find(c => c.userData?.isSky);
-          console.log('[COLOR PICKER] Looking for sky mesh:', {
-            found: !!skyMesh,
-            sceneChildrenCount: scene.children.length,
-            skyMeshes: scene.children.filter(c => c.userData?.isSky).length
-          });
-          
-          if (skyMesh && skyMesh.material) {
-            const skyColor = new THREE.Color(skyColorFromAssignments);
-            
-            // Create gradient from sky color
-            const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 512;
-            const context = canvas.getContext('2d');
-            const gradient = context.createLinearGradient(0, 0, 0, 512);
-            
-            // Create darker top and lighter bottom for gradient effect
-            const topColor = new THREE.Color(skyColorFromAssignments);
-            topColor.multiplyScalar(0.6); // Darker at top
-            const bottomColor = new THREE.Color(skyColorFromAssignments);
-            bottomColor.multiplyScalar(1.2); // Lighter at bottom
-            
-            gradient.addColorStop(0, `#${topColor.getHexString().padStart(6, '0')}`);
-            gradient.addColorStop(0.5, skyColorFromAssignments);
-            gradient.addColorStop(1, `#${bottomColor.getHexString().padStart(6, '0')}`);
-            
-            context.fillStyle = gradient;
-            context.fillRect(0, 0, 512, 512);
-            
-            // Dispose old texture if it exists
-            if (skyMesh.material.map) {
-              skyMesh.material.map.dispose();
-            }
-            
-            // Update sky texture
-            const skyTexture = new THREE.CanvasTexture(canvas);
-            skyMesh.material.map = skyTexture;
-            skyMesh.material.needsUpdate = true;
-            
-            console.log('[COLOR PICKER] Updated sky mesh texture:', skyColorFromAssignments, {
-              topColor: topColor.getHexString(),
-              midColor: skyColor.getHexString(),
-              bottomColor: bottomColor.getHexString()
-            });
-          } else {
-            console.warn('[COLOR PICKER] Sky mesh not found or has no material:', {
-              skyMesh: !!skyMesh,
-              hasMaterial: skyMesh?.material ? true : false
-            });
-          }
-          
-          // Update ambient light color based on sky
-          const ambientLight = scene.children.find(c => c.isAmbientLight);
-          if (ambientLight) {
-            const skyColor = new THREE.Color(skyColorFromAssignments);
-            skyColor.multiplyScalar(0.8); // Darken slightly
-            ambientLight.color.copy(skyColor);
-            console.log('[COLOR PICKER] Updated ambient light color');
-          }
-        } else {
-          console.warn('[COLOR PICKER] No sky color in color_assignments:', colorAssignments);
-        }
-        
-        // Update structures with new colors from color_assignments
-        if (colorAssignments && Object.keys(colorAssignments).length > 0) {
-          console.log('[COLOR PICKER] Updating structure colors...');
-          
-          // Update tree colors
-          structuresRef.current.forEach((structure) => {
-            if (structure.userData?.structureType === 'tree') {
-              const leafColor = colorAssignments.tree_leaves || '#228B22';
-              const trunkColor = colorAssignments.tree_trunk || '#8b4513';
-              
-              // Update leaf colors
-              structure.traverse((child) => {
-                if (child.isMesh && child.material && child.material.vertexColors) {
-                  const colorAttr = child.geometry.attributes.color;
-                  if (colorAttr) {
-                    const color = new THREE.Color(leafColor);
-                    for (let i = 0; i < colorAttr.count; i++) {
-                      colorAttr.setXYZ(i, color.r, color.g, color.b);
-                    }
-                    colorAttr.needsUpdate = true;
-                  }
-                } else if (child.isMesh && child.material && child.material.color) {
-                  // Check if it's a trunk (standard material)
-                  if (child.material.roughness > 1.0) { // Trunk has roughness > 1.0
-                    child.material.color.set(trunkColor);
-                  }
-                }
-              });
-            } else if (structure.userData?.structureType === 'building') {
-              const buildingColor = colorAssignments.building || '#FFB6C1';
-              structure.traverse((child) => {
-                if (child.isMesh && child.material && child.material.color) {
-                  // Update building color, but keep windows darker
-                  if (!child.material.map) { // Not a window (windows have textures)
-                    child.material.color.set(buildingColor);
-                  }
-                }
-              });
-            } else if (structure.userData?.structureType === 'rock') {
-              const rockColor = colorAssignments.rock || '#808080';
-              structure.traverse((child) => {
-                if (child.isMesh && child.material && child.material.color) {
-                  child.material.color.set(rockColor);
-                }
-              });
-            } else if (structure.userData?.structureType === 'mountain') {
-              const mountainColor = colorAssignments.mountain || '#708090';
-              structure.traverse((child) => {
-                if (child.isMesh && child.material && child.material.color) {
-                  child.material.color.set(mountainColor);
-                }
-              });
-            }
-          });
-        }
-        
-        // Update current world with new terrain data and color assignments
-        setCurrentWorld(prev => ({
-          ...prev,
-          world: {
-            ...prev?.world,
-            heightmap_raw: terrainData.heightmap_raw,
-            colour_map_array: terrainData.colour_map_array,
-            placement_mask: terrainData.placement_mask,
-            color_assignments: colorAssignments
-          }
-        }));
-        
-        console.log('[COLOR PICKER] ✅ Terrain and structure colors updated successfully');
-      } else {
-        console.error('[COLOR PICKER] Missing terrain data:', {
-          heightmap: !!terrainData.heightmap_raw,
-          colorMap: !!terrainData.colour_map_array
-        });
-      }
-    } catch (error) {
-      console.error('[COLOR PICKER] Error applying color palette:', error);
-      alert(`Failed to apply color palette: ${error.message}`);
-    }
-  };
-
-  const updateLighting = (lightingConfig, colorAssignments = null) => {
+  const updateLighting = (lightingConfig) => {
     const scene = sceneRef.current;
-    if (!scene || !lightingConfig) return;
+    if (!scene) return;
     
-    console.log('[FRONTEND LIGHTING] Updating scene lighting...', lightingConfig);
-    
-    // PRIORITY: Use AI-generated sky color from color_assignments if available
-    // Check passed parameter first, then currentWorld state (in case of async state updates)
-    const skyColorFromAssignments = colorAssignments?.sky || currentWorld?.world?.color_assignments?.sky;
-    const effectiveBackgroundColor = skyColorFromAssignments || lightingConfig.background;
-    
-    console.log('[FRONTEND LIGHTING] Color assignments check:', {
-      passed: !!colorAssignments,
-      fromState: !!currentWorld?.world?.color_assignments,
-      skyColor: skyColorFromAssignments,
-      lightingBackground: lightingConfig.background,
-      effective: effectiveBackgroundColor
-    });
-    
-    if (skyColorFromAssignments) {
-      console.log('[FRONTEND LIGHTING] ✅ Using AI-generated sky color:', skyColorFromAssignments);
-    } else {
-      console.log('[FRONTEND LIGHTING] ⚠️ No AI sky color, using lighting config background:', lightingConfig.background);
-    }
+    console.log('[FRONTEND LIGHTING] Updating scene lighting...');
     
     const ambientLight = scene.children.find(c => c.isAmbientLight);
-    if (ambientLight && lightingConfig.ambient) {
-      ambientLight.color.setStyle(lightingConfig.ambient.color || '#ffffff');
-      ambientLight.intensity = lightingConfig.ambient.intensity ?? 0.8;
+    if (ambientLight) {
+      ambientLight.color.setStyle(lightingConfig.ambient.color);
+      ambientLight.intensity = lightingConfig.ambient.intensity;
       console.log(`[FRONTEND LIGHTING] Ambient: ${lightingConfig.ambient.color} @ ${lightingConfig.ambient.intensity}`);
     }
     
     const directionalLight = scene.children.find(c => c.isDirectionalLight);
-    if (directionalLight && lightingConfig.directional) {
-      directionalLight.color.setStyle(lightingConfig.directional.color || '#ffffff');
-      directionalLight.intensity = lightingConfig.directional.intensity ?? 0.8;
-      if (lightingConfig.directional.position) {
+    if (directionalLight) {
+      directionalLight.color.setStyle(lightingConfig.directional.color);
+      directionalLight.intensity = lightingConfig.directional.intensity;
       directionalLight.position.set(
-          lightingConfig.directional.position.x ?? 50,
-          lightingConfig.directional.position.y ?? 100,
-          lightingConfig.directional.position.z ?? 50
-        );
-      }
+        lightingConfig.directional.position.x,
+        lightingConfig.directional.position.y,
+        lightingConfig.directional.position.z
+      );
       console.log(`[FRONTEND LIGHTING] Directional: ${lightingConfig.directional.color} @ ${lightingConfig.directional.intensity}`);
     }
     
@@ -7111,35 +2607,6 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
     if (scene.fog) {
       scene.fog = null;
       console.log('[FRONTEND LIGHTING] Fog removed (disabled globally)');
-    }
-    
-    // Handle northern lights based on lighting config or biome (arctic biomes always have northern lights)
-    const hasLights = scene.children.some(c => c.userData?.isNorthernLights);
-    const biomeName = currentWorld?.world?.biome || currentWorld?.world?.biome_name || '';
-    const arcticBiomes = ['arctic', 'winter', 'icy', 'snow', 'frozen', 'park'];
-    const isArctic = arcticBiomes.includes(biomeName.toLowerCase());
-    const shouldHaveLights = lightingConfig.northern_lights === true || isArctic;
-    
-    if (shouldHaveLights && !hasLights) {
-      console.log('[FRONTEND LIGHTING] Creating northern lights (config flag or arctic biome)');
-      createNorthernLights(scene);
-    } else if (!shouldHaveLights && hasLights) {
-      console.log('[FRONTEND LIGHTING] Removing northern lights (not in lighting config and not arctic)');
-      const lights = scene.children.filter(c => c.userData?.isNorthernLights);
-      lights.forEach(light => scene.remove(light));
-    }
-    
-    // Handle snowfall for arctic biomes
-    const hasSnow = scene.children.some(c => c.userData?.isSnowfall);
-    const shouldHaveSnow = lightingConfig.snowfall === true || isArctic;
-    
-    if (shouldHaveSnow && !hasSnow) {
-      console.log('[FRONTEND LIGHTING] Creating snowfall (arctic biome or config flag)');
-      createSnowfall(scene);
-    } else if (!shouldHaveSnow && hasSnow) {
-      console.log('[FRONTEND LIGHTING] Removing snowfall (not arctic biome)');
-      const snow = scene.children.find(c => c.userData?.isSnowfall);
-      if (snow) scene.remove(snow);
     }
         
     // Update gradient sky sphere with time-of-day aware gradients
@@ -7153,8 +2620,8 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       // Create radial gradient from center (horizon) to edge (top of sky)
       const gradient = context.createRadialGradient(256, 256, 0, 256, 256, 256);
       
-      // Parse the background color - USE AI-GENERATED SKY COLOR if available
-      const bgColor = new THREE.Color(effectiveBackgroundColor);
+      // Parse the background color
+      const bgColor = new THREE.Color(lightingConfig.background);
       
       // Get HSL values
       const hsl = {};
@@ -7169,29 +2636,8 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       const timeOfDay = currentWorld?.world?.time;
       const isCityNoon = biomeName?.toLowerCase() === 'city' && 
                         (timeOfDay === 'noon' || hsl.l > 0.6);
-      const isFuturistic = biomeName && (biomeName.toLowerCase().includes('futuristic') || 
-                                         biomeName.toLowerCase().includes('cyberpunk') || 
-                                         biomeName.toLowerCase().includes('neon'));
       
-      if (isFuturistic) {
-        // FUTURISTIC/CYBERPUNK - Dark cyberpunk aesthetic
-        if (isNight || timeOfDay === 'night') {
-          // Night: Very dark with neon cyan accents
-          horizonColor = new THREE.Color(0x1a1a3a); // Dark blue-grey horizon
-          middleColor = new THREE.Color(0x0a0a1a); // Almost black middle
-          topColor = new THREE.Color(0x000011); // Pure black top
-        } else if (timeOfDay === 'sunset') {
-          // Sunset: Dark purple with magenta neon
-          horizonColor = new THREE.Color(0x2d1b3d); // Dark purple horizon
-          middleColor = new THREE.Color(0x1a0a2e); // Darker purple middle
-          topColor = new THREE.Color(0x0a0515); // Very dark purple top
-        } else {
-          // Day: Dark blue-grey with cyan highlights
-          horizonColor = new THREE.Color(0x1a1a2e); // Dark blue-grey horizon
-          middleColor = new THREE.Color(0x0f1419); // Darker middle
-          topColor = new THREE.Color(0x050a0f); // Almost black top
-        }
-      } else if (isCityNoon) {
+      if (isCityNoon) {
         // CITY NOON - #D7AFF5 transitioning to pastel pale butter cream yellow
         topColor = new THREE.Color(0xD7AFF5); // Purple-pink at top
         middleColor = new THREE.Color(0xD7AFF5).lerp(new THREE.Color(0xFFF8DC), 0.5); // Blend between purple and butter cream
@@ -7299,8 +2745,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
       setSubmittedPrompt(transcript);
 
       if (forceModify || gameState === GameState.PLAYING) {
-        setChatConversation([]); // Start fresh chat
-        sendChatMessageForModify(transcript);
+        modifyWorld(transcript);
       } else {
         generateWorld(transcript);
       }
@@ -7318,88 +2763,6 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
     setPhysicsSettings(newSettings);
   }, []);
 
-  const sendChatMessageForModify = async (userMessage) => {
-    // Add user message to conversation
-    const newMessages = [...chatConversation, { role: 'user', content: userMessage }];
-    setChatConversation(newMessages);
-    setIsWaitingForAI(true);
-    // Don't change gameState - keep it as PLAYING so world stays visible
-
-    try {
-      // Get player position and direction for context
-      const playerPos = playerRef.current ? {
-        x: playerRef.current.position.x,
-        y: playerRef.current.position.y,
-        z: playerRef.current.position.z
-      } : null;
-      
-      let playerDirection = null;
-      if (cameraRef.current && playerRef.current) {
-        const camDir = new THREE.Vector3();
-        cameraRef.current.getWorldDirection(camDir);
-        camDir.y = 0;
-        camDir.normalize();
-        playerDirection = {
-          x: camDir.x,
-          z: camDir.z
-        };
-      }
-
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/ab4e53c8-3e02-4665-bb8e-bc913babc9ea',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:5322',message:'Chat modification request',data:{method:'POST',body:{messages: newMessages, current_world: currentWorld}},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
-      // #endregion
-      const res = await fetch(`${API_BASE}/modify-world`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          messages: newMessages,
-          current_world: currentWorld,
-          player_position: playerPos,
-          player_direction: playerDirection
-        }),
-      });
-
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
-
-      const data = await res.json();
-      
-      // Add AI response to conversation
-      const updatedMessages = [...newMessages, { role: 'assistant', content: data.message }];
-      setChatConversation(updatedMessages);
-
-      setIsWaitingForAI(false);
-    } catch (error) {
-      console.error('Chat error:', error);
-      setIsWaitingForAI(false);
-      setChatConversation(prev => [...prev, { 
-        role: 'assistant', 
-        content: 'Sorry, I encountered an error. Please try again.' 
-      }]);
-    }
-  };
-
-  const confirmModification = async () => {
-    // Get the last user message from conversation (most recent intent)
-    const userMessages = chatConversation.filter(m => m.role === 'user');
-    const commandText = userMessages.length > 0 
-      ? userMessages[userMessages.length - 1].content 
-      : modifyPrompt;
-    
-    // Save the entire conversation session to chat history
-    if (chatConversation.length > 0) {
-      setChatHistory(prev => [...prev, {
-        session: [...chatConversation], // Store full conversation
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'conversation'
-      }]);
-    }
-    
-    setChatConversation([]);
-    setIsWaitingForAI(false);
-    setGameState(GameState.GENERATING);
-    await modifyWorld(commandText);
-  };
-
   const handleTextSubmit = () => {
     if (!prompt.trim()) return;
     setSubmittedPrompt(prompt);
@@ -7409,432 +2772,15 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
 
   const handleModifySubmit = () => {
     if (!modifyPrompt.trim()) return;
-    const commandText = modifyPrompt.trim();
+    console.log("Modifying with text:", modifyPrompt);
+    modifyWorld(modifyPrompt);
     setModifyPrompt('');
-    setChatConversation([]); // Start fresh chat
-    sendChatMessageForModify(commandText);
   };
 
-  // Export function for glTF/GLB
-  const exportWorldAsGLTF = (format = 'glb') => {
-    if (!sceneRef.current) {
-      alert('No world to export!');
-      return;
-    }
-
-    const exporter = new GLTFExporter();
-    
-    // Collect all exportable objects (exclude sky, lights, camera, player, enemies)
-    const exportableObjects = [];
-    
-    // Add terrain
-    if (terrainMeshRef.current) {
-      exportableObjects.push(terrainMeshRef.current);
-    }
-    
-    // Add all structures (trees, rocks, peaks, buildings, street lamps, creative objects)
-    structuresRef.current.forEach(struct => {
-      if (struct && struct.parent === sceneRef.current) {
-        exportableObjects.push(struct);
-      }
-    });
-    
-    if (exportableObjects.length === 0) {
-      alert('No objects to export!');
-      return;
-    }
-    
-    // Create a temporary scene with only exportable objects
-    const exportScene = new THREE.Scene();
-    exportableObjects.forEach(obj => {
-      const cloned = obj.clone(true); // Deep clone to preserve geometry/materials
-      exportScene.add(cloned);
-    });
-    
-    // Export options
-    const options = {
-      binary: format === 'glb', // true for GLB, false for glTF
-      trs: false, // Use matrix instead of position/rotation/scale
-      onlyVisible: true,
-      includeCustomExtensions: false
-    };
-    
-    exporter.parse(
-      exportScene,
-      (result) => {
-        // Download the file
-        const output = format === 'glb' ? result : JSON.stringify(result, null, 2);
-        const blob = format === 'glb' 
-          ? new Blob([result], { type: 'application/octet-stream' })
-          : new Blob([output], { type: 'application/json' });
-        
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `world_export.${format}`;
-        link.click();
-        URL.revokeObjectURL(link.href);
-        
-        console.log(`✅ World exported as ${format.toUpperCase()}`);
-      },
-      (error) => {
-        console.error('Export error:', error);
-        alert('Failed to export world: ' + error.message);
-      }
-    );
-  };
-
-  // Export metadata JSON for procedural regeneration
-  const exportWorldMetadata = () => {
-    if (!currentWorld || !heightmapRef.current || !colorMapRef.current) {
-      alert('No world data to export!');
-      return;
-    }
-
-    const metadata = {
-      version: '1.0.0',
-      exportDate: new Date().toISOString(),
-      world: {
-        heightmap_raw: heightmapRef.current,
-        colour_map_array: colorMapRef.current,
-        terrain_size: 256,
-        biome: currentWorld?.world?.biome || currentWorld?.world?.biome_name || 'unknown'
-      },
-      structures: {
-        trees: [],
-        rocks: [],
-        peaks: [],
-        buildings: [],
-        street_lamps: [],
-        creative_objects: []
-      },
-      player: playerRef.current ? {
-        position: {
-          x: playerRef.current.position.x,
-          y: playerRef.current.position.y,
-          z: playerRef.current.position.z
-        }
-      } : null
-    };
-
-    // Extract structure data from scene objects
-    structuresRef.current.forEach(struct => {
-      if (!struct.userData) return;
-      
-      const structType = struct.userData.structureType;
-      const position = struct.position;
-      const scale = struct.scale.x; // Assuming uniform scale
-      
-      const structData = {
-        position: {
-          x: position.x,
-          y: position.y,
-          z: position.z
-        },
-        scale: scale || 1.0
-      };
-
-      switch (structType) {
-        case 'tree':
-          structData.leafless = struct.userData.leafless || false;
-          metadata.structures.trees.push(structData);
-          break;
-        case 'rock':
-          metadata.structures.rocks.push(structData);
-          break;
-        case 'peak':
-          metadata.structures.peaks.push(structData);
-          break;
-        case 'building':
-          // Try to extract building type and dimensions if available
-          if (struct.userData.buildingType) {
-            structData.type = struct.userData.buildingType;
-          }
-          if (struct.userData.buildingWidth) {
-            structData.width = struct.userData.buildingWidth;
-            structData.depth = struct.userData.buildingDepth;
-            structData.height = struct.userData.buildingHeight;
-          }
-          metadata.structures.buildings.push(structData);
-          break;
-        case 'street_lamp':
-          metadata.structures.street_lamps.push(structData);
-          break;
-        case 'creative_object':
-          // Use the originalData stored in userData for full reconstruction
-          if (struct.userData.originalData) {
-            // Include the full original data including parts array
-            metadata.structures.creative_objects.push({
-              ...struct.userData.originalData,
-              position: {
-                x: position.x,
-                y: position.y,
-                z: position.z
-              }
-            });
-          } else {
-            // Fallback if originalData is missing
-            metadata.structures.creative_objects.push(structData);
-          }
-          break;
-      }
-    });
-
-    // Download metadata JSON
-    const blob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'world_metadata.json';
-    link.click();
-    URL.revokeObjectURL(link.href);
-    
-    console.log('✅ World metadata exported');
-  };
-
-  // Combined export function
-  const exportWorld = async (format = 'all') => {
-    if (!sceneRef.current) {
-      alert('No world to export!');
-      return;
-    }
-
-    if (format === 'all' || format === 'glb') {
-      exportWorldAsGLTF('glb');
-    }
-    
-    if (format === 'all' || format === 'gltf') {
-      // Delay to avoid download conflicts
-      setTimeout(() => exportWorldAsGLTF('gltf'), 500);
-    }
-    
-    if (format === 'all' || format === 'metadata') {
-      setTimeout(() => exportWorldMetadata(), 1000);
-    }
-  };
 
   return (
-    <div style={{ 
-      width: '100%', 
-      height: '100vh', 
-      position: 'relative', 
-      background: '#000',
-      cursor: editingMode ? 'crosshair' : 'default'
-    }}>
+    <div style={{ width: '100%', height: '100vh', position: 'relative', background: '#000' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute' }} />
-
-      <div
-        style={{
-          position: 'absolute',
-          top: '20px',
-          left: '20px',
-          zIndex: 20,
-          padding: '6px 12px',
-          borderRadius: '999px',
-          backgroundColor: streamingActive
-            ? 'rgba(34, 197, 94, 0.9)'
-            : scanMode
-            ? 'rgba(59, 130, 246, 0.9)'
-            : 'rgba(75, 85, 99, 0.9)',
-          color: '#fff',
-          fontFamily: 'monospace',
-          fontSize: '12px',
-          pointerEvents: 'none',
-          boxShadow: '0 4px 6px rgba(0,0,0,0.35)',
-        }}
-      >
-        {streamingActive
-          ? 'Camera: Overshoot streaming'
-          : scanMode
-          ? 'Camera: basic mode'
-          : 'Camera: off'}
-      </div>
-
-      {/* Edit Mode Indicator */}
-      {editingMode && (
-        <div
-          style={{
-            position: 'absolute',
-            top: '12px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 20,
-            padding: '8px 16px',
-            borderRadius: '999px',
-            backgroundColor: 'rgba(255, 152, 0, 0.9)',
-            color: '#fff',
-            fontFamily: 'monospace',
-            fontSize: '13px',
-            pointerEvents: 'none',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.35)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}
-        >
-          <span>✏️ EDIT MODE</span>
-          <span style={{ fontSize: '11px', opacity: 0.9 }}>
-            Click structures to move • Scroll to adjust height
-          </span>
-        </div>
-      )}
-
-      {/* Floating Camera Preview while Streaming */}
-      {streamingActive && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: '20px',
-            right: '20px',
-            zIndex: 150,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '10px',
-          }}
-        >
-          {/* Camera Preview Rectangle */}
-          <div
-            style={{
-              width: '280px',
-              height: '210px',
-              borderRadius: '12px',
-              overflow: 'hidden',
-              border: '3px solid #22c55e',
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
-              backgroundColor: '#000',
-              position: 'relative',
-            }}
-          >
-            {/* Live indicator */}
-            <div
-              style={{
-                position: 'absolute',
-                top: '10px',
-                left: '10px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                backgroundColor: 'rgba(220, 38, 38, 0.9)',
-                padding: '4px 10px',
-                borderRadius: '4px',
-                zIndex: 10,
-              }}
-            >
-              <div
-                style={{
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  backgroundColor: '#fff',
-                  animation: 'pulse 1.5s ease-in-out infinite',
-                }}
-              />
-              <span style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                LIVE
-              </span>
-            </div>
-            
-            {/* Analysis status indicator */}
-            <div
-              style={{
-                position: 'absolute',
-                bottom: '10px',
-                left: '10px',
-                right: '10px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-                backgroundColor: lastScanResult ? 'rgba(34, 197, 94, 0.9)' : 'rgba(59, 130, 246, 0.9)',
-                padding: '6px 12px',
-                borderRadius: '4px',
-                zIndex: 10,
-              }}
-            >
-              {lastScanResult ? (
-                <>
-                  <span style={{ fontSize: '14px' }}>✅</span>
-                  <span style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                    #{lastScanResult.frameCount || 1}: {lastScanResult.biome || lastScanResult.raw_text?.substring(0, 20) || 'Received'}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <div
-                    style={{
-                      width: '12px',
-                      height: '12px',
-                      border: '2px solid #fff',
-                      borderTopColor: 'transparent',
-                      borderRadius: '50%',
-                      animation: 'spin 1s linear infinite',
-                    }}
-                  />
-                  <span style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                    Waiting for analysis...
-                  </span>
-                </>
-              )}
-            </div>
-            
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                transform: 'scaleX(-1)', // Mirror for better UX
-              }}
-            />
-          </div>
-          
-          {/* Stop Streaming Button */}
-          <button
-            onClick={stopCameraCapture}
-            style={{
-              padding: '10px 20px',
-              fontSize: '14px',
-              backgroundColor: '#dc2626',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              boxShadow: '0 4px 12px rgba(220, 38, 38, 0.4)',
-              transition: 'background-color 0.2s, transform 0.1s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#b91c1c';
-              e.currentTarget.style.transform = 'scale(1.02)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = '#dc2626';
-              e.currentTarget.style.transform = 'scale(1)';
-            }}
-          >
-            🛑 Stop Streaming
-          </button>
-        </div>
-      )}
-
-      {/* CSS for animations */}
-      <style>
-        {`
-          @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-          }
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-        `}
-      </style>
 
      {gameState === GameState.PLAYING && (
   <GameSettingsPanel 
@@ -7843,143 +2789,41 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
   />
 )}
 
-     {gameState === GameState.PLAYING && (
-  <ColorPicker
-    onColorPaletteChange={handleColorPaletteChange}
-    initialPalette={colorPalette}
-    disabled={!currentWorld}
-  />
-)}
-
-     {colorSchemeNotification && (
-  <div style={{
-    position: 'fixed',
-    top: '20px',
-    left: '50%',
-    transform: 'translateX(-50%)',
-    backgroundColor: '#4CAF50',
-    color: 'white',
-    padding: '12px 24px',
-    borderRadius: '6px',
-    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-    zIndex: 1000,
-    fontSize: '16px',
-    fontWeight: 'bold'
-  }}>
-    {colorSchemeNotification}
-  </div>
-)}
-
-      {/* Pixel Art Button at Top Center - Appears after world generation */}
-      {gameState === GameState.PLAYING && (
-        <button
-          onClick={() => {
-            placeLebronImageOnTerrain();
-          }}
-          style={{
-            position: 'fixed',
-            top: '20px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            padding: '12px 24px',
-            background: 'linear-gradient(to bottom, #FFB347, #FF8C42)',
-            color: '#fff',
-            border: '4px solid #8B4513',
-            boxShadow: 'inset 0 0 0 2px #FFD700, inset 0 0 0 4px #8B4513, 0 2px 4px rgba(0,0,0,0.3)',
-            borderRadius: '12px',
-            cursor: 'pointer',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '4px',
-            fontFamily: '"Courier New", monospace',
-            textTransform: 'uppercase',
-            letterSpacing: '1px',
-            imageRendering: 'pixelated',
-            transition: 'opacity 0.2s',
-            zIndex: 100,
-            lineHeight: '1.2'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.opacity = '0.9';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.opacity = '1';
-          }}
-        >
-          <span style={{ fontSize: '12px', fontWeight: 'bold' }}>CLICK HERE TO SEE</span>
-          <span style={{ fontSize: '18px', fontWeight: 'bold' }}>LEBRON JAMES THE GOAT</span>
-        </button>
-      )}
-
       {gameState === GameState.PLAYING && (
         <>
-          {/* Top-right circular controls: Nintendo Switch-style button cluster */}
-          {/* Central Microphone Button (larger, red) - CENTER */}
-          <div style={{
-            position: 'fixed',
-            top: '145px',
-            right: '95px',
-            zIndex: 20,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-          <button
-              onClick={() => startVoiceCapture(true)}
-            style={{
-                width: '70px',
-                height: '70px',
-              borderRadius: '50%',
-                fontSize: '28px',
-                background: isListening ? '#FF5555' : 'rgba(255, 85, 85, 0.9)',
-              color: '#fff',
-                border: '3px solid rgba(255, 120, 120, 0.9)',
-                cursor: isListening ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-                boxShadow: '0 4px 12px rgba(255,0,0,0.4)',
-                transition: 'all 0.2s',
-                animation: isListening ? 'pulse 1s infinite' : 'none',
-                zIndex: 21
-              }}
-              onMouseEnter={e => !isListening && (e.currentTarget.style.opacity = '1')}
-              onMouseLeave={e => e.currentTarget.style.opacity = '0.9'}
-            >
-              🎤
-          </button>
-          </div>
-
-          {/* Top Row (1 button): Settings button is in GameSettingsPanel component (gear icon) */}
-          
-          {/* Bottom Row Right: Edit Mode (pencil) button - bottom right of pyramid */}
+          {/* Top-right circular controls: Home and Chat History */}
           <button
             onClick={() => {
-              setEditingMode(!editingMode);
-              // Clear selection when exiting edit mode
-              if (editingMode && selectedStructureRef.current) {
-                selectedStructureRef.current.traverse((child) => {
-                  if (child.isMesh && child.material && child.material.emissive) {
-                    child.material.emissive.setHex(0x000000);
-                  }
+              setGameState(GameState.IDLE);
+              // Clear the scene
+              const scene = sceneRef.current;
+              if (scene) {
+                const objectsToRemove = [];
+                scene.children.forEach((child) => {
+                  if (!child.isLight && !child.userData?.isSky) objectsToRemove.push(child);
                 });
-                setSelectedStructure(null);
-                selectedStructureRef.current = null;
+                objectsToRemove.forEach((obj) => scene.remove(obj));
               }
+              terrainMeshRef.current = null;
+              enemiesRef.current = [];
+              structuresRef.current = [];
+              occupiedCells.clear();
+              heightmapRef.current = null;
+              colorMapRef.current = null;
+              terrainPlacementMaskRef.current = null;
+              setCurrentWorld(null);
             }}
             style={{
-              position: 'fixed',
-              top: '225px',
-              right: '130px',
-              zIndex: 20,
+              position: 'absolute',
+              top: 90,
+              right: 40,
+              zIndex: 10,
               width: '56px',
               height: '56px',
               borderRadius: '50%',
-              backgroundColor: editingMode ? 'rgba(255, 152, 0, 0.9)' : 'rgba(156, 39, 176, 0.9)',
+              backgroundColor: 'rgba(100, 100, 200, 0.9)',
               color: '#fff',
-              border: editingMode ? '2px solid rgba(255, 183, 77, 0.9)' : '2px solid rgba(186, 104, 200, 0.9)',
+              border: '2px solid rgba(150, 150, 255, 0.9)',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -7991,157 +2835,24 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
               boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = editingMode ? 'rgba(255, 167, 38, 0.95)' : 'rgba(171, 71, 188, 0.95)';
+              e.currentTarget.style.backgroundColor = 'rgba(120, 120, 220, 0.95)';
               e.currentTarget.style.transform = 'scale(1.05)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = editingMode ? 'rgba(255, 152, 0, 0.9)' : 'rgba(156, 39, 176, 0.9)';
+              e.currentTarget.style.backgroundColor = 'rgba(100, 100, 200, 0.9)';
               e.currentTarget.style.transform = 'scale(1)';
             }}
-            title={editingMode ? 'Exit Edit Mode' : 'Enter Edit Mode - Move & adjust structures'}
           >
-            ✏️
+            H
           </button>
 
-          {/* Export Button - below the black info box with enemies/controls */}
-          <div style={{
-            position: 'fixed',
-            top: '185px',
-            left: '20px',
-            zIndex: 20
-          }}>
-            <button
-              onClick={() => setShowExportMenu(!showExportMenu)}
-              style={{
-                width: '56px',
-                height: '56px',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(76, 175, 80, 0.9)',
-                color: '#fff',
-                border: '2px solid rgba(129, 199, 132, 0.9)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontFamily: 'monospace',
-                fontSize: '22px',
-                fontWeight: 'bold',
-                transition: 'all 0.3s ease',
-                boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(96, 185, 100, 0.95)';
-                e.currentTarget.style.transform = 'scale(1.05)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(76, 175, 80, 0.9)';
-                e.currentTarget.style.transform = 'scale(1)';
-              }}
-            >
-              📥
-            </button>
-            
-            {showExportMenu && (
-              <div style={{
-                position: 'absolute',
-                top: '70px',
-                right: '0',
-                backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                border: '2px solid rgba(76, 175, 80, 0.9)',
-                borderRadius: '8px',
-                padding: '10px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px',
-                minWidth: '200px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                zIndex: 11
-              }}>
-                <button 
-                  onClick={() => { exportWorld('glb'); setShowExportMenu(false); }}
-                  style={{
-                    padding: '10px 15px',
-                    backgroundColor: '#4CAF50',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: 'bold',
-                    transition: 'background-color 0.2s'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#45a049'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#4CAF50'}
-                >
-                  Export as GLB
-                </button>
-                <button 
-                  onClick={() => { exportWorld('gltf'); setShowExportMenu(false); }}
-                  style={{
-                    padding: '10px 15px',
-                    backgroundColor: '#4CAF50',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: 'bold',
-                    transition: 'background-color 0.2s'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#45a049'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#4CAF50'}
-                >
-                  Export as glTF
-                </button>
-                <button 
-                  onClick={() => { exportWorld('metadata'); setShowExportMenu(false); }}
-                  style={{
-                    padding: '10px 15px',
-                    backgroundColor: '#4CAF50',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: 'bold',
-                    transition: 'background-color 0.2s'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#45a049'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#4CAF50'}
-                >
-                  Export Metadata JSON
-                </button>
-                <button 
-                  onClick={() => { exportWorld('all'); setShowExportMenu(false); }}
-                  style={{
-                    padding: '10px 15px',
-                    backgroundColor: '#2196F3',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: 'bold',
-                    transition: 'background-color 0.2s'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1976D2'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2196F3'}
-                >
-                  Export All
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Middle Row (3 buttons): Home (left), Microphone (center), Chat History (right) */}
-          {/* Chat History - right side of middle row */}
           <button
             onClick={() => setShowChatHistory(!showChatHistory)}
             style={{
-              position: 'fixed',
-              top: '145px',
-              right: '25px',
-              zIndex: 20,
+              position: 'absolute',
+              top: 90,
+              right: 120,
+              zIndex: 10,
               width: '56px',
               height: '56px',
               borderRadius: '50%',
@@ -8170,9 +2881,6 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
             C
           </button>
 
-          {/* Left Button: Home - to the left of microphone */}
-          {/* (Home button is defined later in the file, positioning updated above) */}
-
           {/* Chat History Side Panel */}
           {showChatHistory && (
             <div style={{
@@ -8183,9 +2891,8 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
               height: '100vh',
               backgroundColor: 'rgba(20, 20, 30, 0.95)',
               borderLeft: '2px solid rgba(150, 150, 255, 0.5)',
-              zIndex: 300,
-              display: 'flex',
-              flexDirection: 'column',
+              zIndex: 100,
+              overflowY: 'auto',
               boxShadow: '-4px 0 10px rgba(0,0,0,0.5)',
               transition: 'transform 0.3s ease'
             }}>
@@ -8211,166 +2918,13 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
                   ×
                 </button>
               </div>
-              <div style={{ 
-                padding: '20px', 
-                flex: 1, 
-                overflowY: 'auto',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '20px'
-              }}>
-                {/* Show current active conversation if exists */}
-                {chatConversation.length > 0 && (
-                  <div style={{
-                    padding: '12px',
-                    backgroundColor: 'rgba(100, 150, 255, 0.3)',
-                    borderRadius: '8px',
-                    borderLeft: '3px solid rgba(150, 200, 255, 0.8)',
-                    marginBottom: '10px'
-                  }}>
-                    <div style={{
-                      color: '#88aaff',
-                      fontSize: '11px',
-                      marginBottom: '10px',
-                      fontFamily: 'monospace',
-                      borderBottom: '1px solid rgba(150, 200, 255, 0.3)',
-                      paddingBottom: '5px',
-                      fontWeight: 'bold'
-                    }}>
-                      Current Conversation
-                    </div>
-                    {chatConversation.map((msg, msgIndex) => (
-                      <div
-                        key={msgIndex}
-                        style={{
-                          marginBottom: '8px',
-                          padding: '6px 8px',
-                          backgroundColor: msg.role === 'user' 
-                            ? 'rgba(100, 150, 255, 0.15)' 
-                            : msg.role === 'system'
-                            ? (msg.content.includes('✅') 
-                                ? 'rgba(100, 200, 100, 0.15)' 
-                                : msg.content.includes('❌')
-                                ? 'rgba(200, 100, 100, 0.15)'
-                                : 'rgba(200, 200, 200, 0.1)')
-                            : 'rgba(200, 200, 200, 0.1)',
-                          borderRadius: '4px',
-                          marginLeft: msg.role === 'assistant' || msg.role === 'system' ? '0' : '20px',
-                          marginRight: msg.role === 'user' ? '0' : '20px'
-                        }}
-                      >
-                        <div style={{
-                          color: '#fff',
-                          fontSize: '13px',
-                          fontFamily: 'monospace',
-                          wordWrap: 'break-word'
-                        }}>
-                          <strong style={{ 
-                            color: msg.role === 'user' 
-                              ? '#88aaff' 
-                              : msg.role === 'system'
-                              ? (msg.content.includes('✅') ? '#88ff88' : msg.content.includes('❌') ? '#ff8888' : '#88ffaa')
-                              : '#88ffaa',
-                            marginRight: '8px'
-                          }}>
-                            {msg.role === 'user' ? 'You:' : msg.role === 'system' ? 'System:' : 'AI:'}
-                          </strong>
-                          {msg.content}
-                        </div>
-                      </div>
-                    ))}
-                    {isWaitingForAI && (
-                      <div style={{ textAlign: 'left', marginTop: '8px', padding: '6px 8px' }}>
-                        <div style={{
-                          display: 'inline-block',
-                          padding: '6px 8px',
-                          borderRadius: '4px',
-                          backgroundColor: 'rgba(200, 200, 200, 0.1)',
-                          color: '#666',
-                          fontSize: '13px'
-                        }}>
-                          AI is thinking...
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-                
-                {chatHistory.length === 0 && chatConversation.length === 0 ? (
+              <div style={{ padding: '20px' }}>
+                {chatHistory.length === 0 ? (
                   <div style={{ color: '#888', textAlign: 'center', marginTop: '40px' }}>
                     No chat history yet
                   </div>
                 ) : (
-                  chatHistory.map((item, index) => {
-                    // Handle full conversation sessions
-                    if (item.type === 'conversation' && item.session) {
-                      return (
-                        <div
-                          key={index}
-                          style={{
-                            marginBottom: '20px',
-                            padding: '12px',
-                            backgroundColor: 'rgba(100, 100, 200, 0.2)',
-                            borderRadius: '8px',
-                            borderLeft: '3px solid rgba(150, 150, 255, 0.8)'
-                          }}
-                        >
-                          <div style={{
-                            color: '#aaa',
-                            fontSize: '11px',
-                            marginBottom: '10px',
-                            fontFamily: 'monospace',
-                            borderBottom: '1px solid rgba(150, 150, 255, 0.3)',
-                            paddingBottom: '5px'
-                          }}>
-                            Conversation - {item.timestamp}
-                          </div>
-                          {item.session.map((msg, msgIndex) => (
-                            <div
-                              key={msgIndex}
-                              style={{
-                                marginBottom: '8px',
-                                padding: '6px 8px',
-                                backgroundColor: msg.role === 'user' 
-                                  ? 'rgba(100, 150, 255, 0.15)' 
-                                  : msg.role === 'system'
-                                  ? (msg.content.includes('✅') 
-                                      ? 'rgba(100, 200, 100, 0.15)' 
-                                      : msg.content.includes('❌')
-                                      ? 'rgba(200, 100, 100, 0.15)'
-                                      : 'rgba(200, 200, 200, 0.1)')
-                                  : 'rgba(200, 200, 200, 0.1)',
-                                borderRadius: '4px',
-                                marginLeft: msg.role === 'assistant' || msg.role === 'system' ? '0' : '20px',
-                                marginRight: msg.role === 'user' ? '0' : '20px'
-                              }}
-                            >
-                              <div style={{
-                                color: '#fff',
-                                fontSize: '13px',
-                                fontFamily: 'monospace',
-                                wordWrap: 'break-word'
-                              }}>
-                                <strong style={{ 
-                                  color: msg.role === 'user' 
-                                    ? '#88aaff' 
-                                    : msg.role === 'system'
-                                    ? (msg.content.includes('✅') ? '#88ff88' : msg.content.includes('❌') ? '#ff8888' : '#88ffaa')
-                                    : '#88ffaa',
-                                  marginRight: '8px'
-                                }}>
-                                  {msg.role === 'user' ? 'You:' : msg.role === 'system' ? 'System:' : 'AI:'}
-                                </strong>
-                                {msg.content}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    }
-                    
-                    // Handle legacy single command format (backward compatibility)
-                    return (
+                  chatHistory.map((item, index) => (
                     <div
                       key={index}
                       style={{
@@ -8414,101 +2968,16 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
                         )}
                       </div>
                     </div>
-                    );
-                  })
-                )}
-              </div>
-              
-              {/* Chat Input Area */}
-              <div style={{
-                padding: '15px',
-                borderTop: '1px solid rgba(150, 150, 255, 0.3)',
-                backgroundColor: 'rgba(20, 20, 30, 0.95)',
-                display: 'flex',
-                gap: '8px',
-                alignItems: 'center'
-              }}>
-                <input
-                  type="text"
-                  value={historyChatInput}
-                  onChange={e => setHistoryChatInput(e.target.value)}
-                  onKeyPress={e => {
-                    if (e.key === 'Enter' && !isWaitingForAI && historyChatInput.trim()) {
-                      const message = historyChatInput.trim();
-                      setHistoryChatInput('');
-                      sendChatMessageForModify(message);
-                    }
-                  }}
-                  placeholder={isWaitingForAI ? "AI is responding..." : "Type your message..."}
-                  disabled={isWaitingForAI || gameState !== GameState.PLAYING}
-                  style={{
-                    flex: 1,
-                    border: '1px solid rgba(150, 150, 255, 0.3)',
-                    borderRadius: '6px',
-                    padding: '8px 12px',
-                    fontSize: '14px',
-                    fontFamily: 'monospace',
-                    backgroundColor: 'rgba(30, 30, 40, 0.8)',
-                    color: '#fff',
-                    outline: 'none'
-                  }}
-                />
-                <button
-                  onClick={() => {
-                    if (!isWaitingForAI && historyChatInput.trim() && gameState === GameState.PLAYING) {
-                      const message = historyChatInput.trim();
-                      setHistoryChatInput('');
-                      sendChatMessageForModify(message);
-                    }
-                  }}
-                  disabled={isWaitingForAI || !historyChatInput.trim() || gameState !== GameState.PLAYING}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: (isWaitingForAI || !historyChatInput.trim() || gameState !== GameState.PLAYING)
-                      ? 'rgba(100, 100, 100, 0.5)'
-                      : 'rgba(100, 150, 255, 0.8)',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: (isWaitingForAI || !historyChatInput.trim() || gameState !== GameState.PLAYING)
-                      ? 'not-allowed'
-                      : 'pointer',
-                    fontSize: '14px',
-                    fontWeight: 'bold',
-                    fontFamily: 'monospace',
-                    transition: 'background-color 0.2s'
-                  }}
-                >
-                  Send
-                </button>
-                {chatConversation.length > 0 && 
-                 chatConversation[chatConversation.length - 1].role === 'assistant' &&
-                 !isWaitingForAI && (
-                  <button
-                    onClick={confirmModification}
-                    style={{
-                      padding: '8px 16px',
-                      backgroundColor: '#4CAF50',
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                      fontWeight: 'bold',
-                      fontFamily: 'monospace'
-                    }}
-                  >
-                    Apply
-                  </button>
+                  ))
                 )}
               </div>
             </div>
           )}
 
           <div style={{
-            position: 'absolute', top: 68, left: 20, zIndex: 10,
+            position: 'absolute', top: 20, left: 20, zIndex: 10,
             backgroundColor: 'rgba(0,0,0,0.7)',
-            padding: '14px', borderRadius: '8px',
+            padding: '15px', borderRadius: '8px',
             color: '#fff', fontFamily: 'monospace', fontSize: '14px'
           }}>
             <div>Enemies: {enemyCount}</div>
@@ -8695,6 +3164,14 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
                 background: rgba(220, 220, 220, 0.95);
               }
               
+              .speech-bubble-wrapper:hover .speech-bubble-blue-accent {
+                background: #0000ff;
+                top: 2px;
+                right: 2px;
+                bottom: -8px;
+                width: 2px;
+              }
+              
               .speech-bubble-wrapper:hover .speech-bubble-tail::after {
                 border-top-color: rgba(220, 220, 220, 0.95);
               }
@@ -8732,65 +3209,38 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
                 background: rgba(220, 220, 220, 0.95);
               }
               
-
+              .speech-bubble-button:hover::before {
+                background: #0000ff;
+              }
             `}</style>
           </div>
 
-          {/* Home Button (right of the C button) */}
+          <div style={{
+            position: 'fixed', top: 80, right: 80, zIndex: 20
+          }}>
             <button
-            onClick={() => {
-              setGameState(GameState.IDLE);
-              // Clear the scene
-              const scene = sceneRef.current;
-              if (scene) {
-                const objectsToRemove = [];
-                scene.children.forEach((child) => {
-                  if (!child.isLight && !child.userData?.isSky) objectsToRemove.push(child);
-                });
-                objectsToRemove.forEach((obj) => scene.remove(obj));
-              }
-              terrainMeshRef.current = null;
-              enemiesRef.current = [];
-              structuresRef.current = [];
-              occupiedCells.clear();
-              heightmapRef.current = null;
-              colorMapRef.current = null;
-              terrainPlacementMaskRef.current = null;
-              setCurrentWorld(null);
-            }}
+              onClick={() => startVoiceCapture(true)}
               style={{
-              position: 'fixed',
-              top: '145px',
-              right: '175px',
-              zIndex: 20,
-              width: '56px',
-              height: '56px',
+                width: '60px',
+                height: '60px',
                 borderRadius: '50%',
-              backgroundColor: 'rgba(100, 100, 200, 0.9)',
+                fontSize: '24px',
+                background: isListening ? '#FF5555' : 'rgba(255, 85, 85, 0.6)',
                 color: '#fff',
-              border: '2px solid rgba(150, 150, 255, 0.9)',
-              cursor: 'pointer',
+                border: 'none',
+                cursor: isListening ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-              fontFamily: 'monospace',
-              fontSize: '22px',
-              fontWeight: 'bold',
-              transition: 'all 0.3s ease',
-              boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(120, 120, 220, 0.95)';
-              e.currentTarget.style.transform = 'scale(1.05)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(100, 100, 200, 0.9)';
-              e.currentTarget.style.transform = 'scale(1)';
-            }}
-          >
-            🏠
+                boxShadow: '0 4px 12px rgba(255,0,0,0.4)',
+                transition: 'all 0.2s',
+                animation: isListening ? 'pulse 1s infinite' : 'none',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '0.9'}
+            >
+              {isListening ? '🎤' : '🎮'}
             </button>
-
             <style>{`
               @keyframes pulse {
                 0% { transform: scale(1); box-shadow: 0 0 12px rgba(255,0,0,0.4); }
@@ -8798,6 +3248,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
                 100% { transform: scale(1); box-shadow: 0 0 12px rgba(255,0,0,0.4); }
               }
             `}</style>
+          </div>
         </>
       )}
 
@@ -8805,7 +3256,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
         <div style={{
           position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100,
           display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
-          flexDirection: 'column', fontFamily: 'sans-serif',
+          flexDirection: 'column', fontFamily: 'Sans-serif',
           textAlign: 'center', padding: '20px', paddingBottom: '120px', overflow: 'hidden'
         }}>
           <video
@@ -8836,7 +3287,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              padding: '8px 16px',
+              padding: '12px 16px',
               gap: '12px'
             }}>
               <input
@@ -8851,7 +3302,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
                   outline: 'none',
                   fontSize: '16px',
                   color: '#666',
-                  fontFamily: 'sans-serif',
+                  fontFamily: 'Sans-serif',
                   background: 'transparent'
                 }}
               />
@@ -8884,8 +3335,8 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
             }} />
 
             {/* Suggestions */}
-            <div style={{ padding: '4px 0' }}>
-              {["look for a friend? eh.", 'look for a new home? sure!'].map((suggestion, index) => (
+            <div style={{ padding: '8px 0' }}>
+              {['look for a world', 'look for a friend', 'look for a new home'].map((suggestion, index) => (
                 <div
                   key={index}
                   onClick={() => {
@@ -8896,7 +3347,7 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    padding: '6px 16px',
+                    padding: '10px 16px',
                     cursor: 'pointer',
                     gap: '12px',
                     transition: 'background-color 0.2s'
@@ -8910,288 +3361,13 @@ Ignore people. Include ALL visible elements - this will create the complete 3D w
                   <span style={{
                     color: '#999',
                     fontSize: '16px',
-                    fontFamily: 'sans-serif'
+                    fontFamily: 'Sans-serif'
                   }}>
                     {suggestion}
                   </span>
                 </div>
               ))}
             </div>
-
-            {/* Scan Mode Button */}
-            <div style={{ padding: '12px 16px', borderTop: '1px solid #e0e0e0' }}>
-              <button
-                onClick={scanMode ? stopCameraCapture : startCameraCapture}
-                style={{
-                  width: '100%',
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                  background: scanMode 
-                    ? 'linear-gradient(to bottom, #FF6B35, #C44536)' 
-                    : 'linear-gradient(to bottom, #FFB347, #FF8C42)',
-                  color: '#fff',
-                  border: '4px solid #8B4513',
-                  boxShadow: 'inset 0 0 0 2px #FFD700, inset 0 0 0 4px #8B4513, 0 2px 4px rgba(0,0,0,0.3)',
-                  borderRadius: '12px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '10px',
-                  fontFamily: '"Courier New", monospace',
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                  imageRendering: 'pixelated',
-                  transition: 'opacity 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.opacity = '0.9';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.opacity = '1';
-                }}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style={{ imageRendering: 'pixelated' }}>
-                  <path d="M12 12.5c1.38 0 2.5-1.12 2.5-2.5S13.38 7.5 12 7.5 9.5 8.62 9.5 10s1.12 2.5 2.5 2.5zm0-7c2.49 0 4.5 2.01 4.5 4.5S14.49 14.5 12 14.5 7.5 12.49 7.5 10 9.51 5.5 12 5.5zM12 19c-7 0-11-4.03-11-9V6h2v4c0 4.97 3.51 7 9 7s9-2.03 9-7V6h2v4c0 4.97-4 9-11 9z"/>
-                </svg>
-                {scanMode ? (streamingActive ? '🛑 Stop Streaming' : 'Cancel Scan') : 'start video streaming'}
-          </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Camera View Overlay */}
-      {scanMode && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100%',
-          height: '100%',
-          backgroundColor: '#000',
-          zIndex: 200,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}>
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            style={{
-              width: '100%',
-              maxWidth: '800px',
-              maxHeight: '80vh',
-              borderRadius: '12px',
-              transform: 'scaleX(-1)' // Mirror the video for better UX
-            }}
-          />
-          
-          <div style={{
-            marginTop: '30px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '15px'
-          }}>
-            <button
-              onClick={captureAndScanWorld}
-              style={{
-                padding: '10px 30px',
-                fontSize: '16px',
-                background: streamingActive 
-                  ? 'linear-gradient(to bottom, #FF6B35, #C44536)' 
-                  : 'linear-gradient(to bottom, #FFB347, #FF8C42)',
-                color: '#fff',
-                border: '4px solid #8B4513',
-                boxShadow: 'inset 0 0 0 2px #FFD700, inset 0 0 0 4px #8B4513, 0 2px 4px rgba(0,0,0,0.3)',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                fontWeight: 'bold',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '10px',
-                fontFamily: '"Courier New", monospace',
-                textTransform: 'uppercase',
-                letterSpacing: '1px',
-                imageRendering: 'pixelated',
-                transition: 'opacity 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
-              onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ imageRendering: 'pixelated' }}>
-                <path d="M12 12.5c1.38 0 2.5-1.12 2.5-2.5S13.38 7.5 12 7.5 9.5 8.62 9.5 10s1.12 2.5 2.5 2.5zm0-7c2.49 0 4.5 2.01 4.5 4.5S14.49 14.5 12 14.5 7.5 12.49 7.5 10 9.51 5.5 12 5.5zM12 19c-7 0-11-4.03-11-9V6h2v4c0 4.97 3.51 7 9 7s9-2.03 9-7V6h2v4c0 4.97-4 9-11 9z"/>
-              </svg>
-              {streamingActive ? 'streaming...' : 'start video streaming'}
-            </button>
-            
-            <button
-              onClick={stopCameraCapture}
-              style={{
-                padding: '12px 24px',
-                fontSize: '14px',
-                backgroundColor: 'transparent',
-                color: '#fff',
-                border: '2px solid #fff',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {(gameState === GameState.CHATTING || (gameState === GameState.PLAYING && chatConversation.length > 0)) && (
-        <div style={{
-          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100,
-          display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
-          flexDirection: 'column', fontFamily: 'sans-serif',
-          textAlign: 'center', padding: '20px', paddingBottom: '120px', overflow: 'hidden',
-          pointerEvents: 'none' // Allow clicks to pass through to world
-        }}>
-          {/* Only show video background if NOT in PLAYING state (i.e., if in CHATTING state from homescreen) */}
-          {gameState === GameState.CHATTING && (
-            <video
-              autoPlay
-              muted
-              playsInline
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                zIndex: -1
-              }}
-            >
-              <source src="/hot_yolk.mp4" type="video/mp4" />
-            </video>
-          )}
-
-          {/* Chat Container */}
-          <div style={{
-            position: 'relative', zIndex: 1,
-            width: '100%', maxWidth: '500px',
-            backgroundColor: '#fff',
-            borderRadius: '12px',
-            border: '2px solid #1e3a8a',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-            maxHeight: '60vh',
-            display: 'flex',
-            flexDirection: 'column',
-            pointerEvents: 'auto' // Re-enable pointer events for the chat container
-          }}>
-            {/* Chat Messages */}
-            <div style={{
-              padding: '16px',
-              overflowY: 'auto',
-              flex: 1,
-              minHeight: '200px',
-              maxHeight: '400px'
-            }}>
-              {chatConversation.map((msg, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    marginBottom: '12px',
-                    textAlign: msg.role === 'user' ? 'right' : 'left'
-                  }}
-                >
-                  <div style={{
-                    display: 'inline-block',
-                    padding: '8px 12px',
-                    borderRadius: '8px',
-                    backgroundColor: msg.role === 'user' ? '#4A90E2' : '#f0f0f0',
-                    color: msg.role === 'user' ? '#fff' : '#333',
-                    maxWidth: '80%',
-                    fontSize: '14px',
-                    fontFamily: 'sans-serif'
-                  }}>
-                    {msg.content}
-                  </div>
-                </div>
-              ))}
-              {isWaitingForAI && (
-                <div style={{ textAlign: 'left', marginTop: '12px' }}>
-                  <div style={{
-                    display: 'inline-block',
-                    padding: '8px 12px',
-                    borderRadius: '8px',
-                    backgroundColor: '#f0f0f0',
-                    color: '#666',
-                    fontSize: '14px'
-                  }}>
-                    Thinking...
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Input Area */}
-            <div style={{
-              borderTop: '1px solid #e0e0e0',
-              padding: '12px 16px',
-              display: 'flex',
-              gap: '8px'
-            }}>
-              <input
-                type="text"
-                value={modifyPrompt}
-                onChange={e => setModifyPrompt(e.target.value)}
-                onKeyPress={e => {
-                  if (e.key === 'Enter' && !isWaitingForAI) {
-                    const userMessage = modifyPrompt.trim();
-                    if (userMessage) {
-                      setModifyPrompt('');
-                      sendChatMessageForModify(userMessage);
-                    }
-                  }
-                }}
-                placeholder={isWaitingForAI ? "AI is responding..." : "Type your response..."}
-                disabled={isWaitingForAI}
-                style={{
-                  flex: 1,
-                  border: '1px solid #ddd',
-                  borderRadius: '6px',
-                  padding: '8px 12px',
-                  fontSize: '14px',
-                  fontFamily: 'sans-serif',
-                  outline: 'none'
-                }}
-              />
-              {chatConversation.length > 0 && 
-               chatConversation[chatConversation.length - 1].role === 'assistant' &&
-               !isWaitingForAI && (
-                <button
-                  onClick={confirmModification}
-                  disabled={isWaitingForAI}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: '#4CAF50',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: isWaitingForAI ? 'not-allowed' : 'pointer',
-                    fontSize: '14px',
-                    fontWeight: 'bold',
-                    fontFamily: 'sans-serif'
-                  }}
-                >
-                  Apply
-                </button>
-              )}
-          </div>
           </div>
         </div>
       )}

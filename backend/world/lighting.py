@@ -76,12 +76,26 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
     config = presets.get(time, presets["noon"]).copy()
     
     # Apply biome-specific modifications for arctic/icy/winter environments
-    is_winter = biome.lower() in ["arctic", "winter", "icy", "park"]
-    is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen", "park"]
+    is_winter = biome.lower() in ["arctic", "winter", "icy"]
+    is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen"]
     is_lava = biome.lower() in ["lava", "volcanic", "volcano", "magma"]
     
-    # Arctic biome time-specific lighting (don't override time-based settings)
-    # The time-based modifications below will handle arctic differently
+    # Arctic cave: bright light from above (simulating cave opening)
+    if is_arctic:
+        # Cave lighting: bright overhead light (like cave opening)
+        config["background"] = "#E0F4FF"  # Bright icy blue (light from cave opening)
+        config["ambient"]["color"] = "#B0E0FF"  # Cool blue ambient
+        config["ambient"]["intensity"] = 0.6  # Moderate brightness
+        config["directional"]["color"] = "#FFFFFF"  # Bright white overhead light
+        config["directional"]["intensity"] = 1.2  # Very bright directional (cave opening)
+        config["directional"]["position"] = {"x": 0, "y": 200, "z": 0}  # Directly overhead
+        config["fog"] = {
+            "color": "#C8E6FF",  # Light blue fog for cave atmosphere
+            "near": 50,
+            "far": 200
+        }
+        # Ensure northern lights are enabled for arctic
+        config["northern_lights"] = True
     
     if is_lava:
         if time == "night":
@@ -221,47 +235,26 @@ def get_lighting_preset(time: str, biome: str = "city") -> dict:
         config["fog"] = None
     
     if is_winter:
-        # Ensure fog exists for winter biomes
-        if "fog" not in config or config["fog"] is None:
-            config["fog"] = {
-                "color": "#FFFFFF",
-                "near": 50,
-                "far": 200
-            }
-        
-        # Add time-specific fog and lighting for arctic landscapes
+        # Add very light white fog for arctic landscapes (very faint, closer but not blocking sky)
         if time == "noon":
             config["fog"]["color"] = "#FFFFFF"  # Very light white fog
             config["fog"]["near"] = 80   # Start fog a bit closer than before
             config["fog"]["far"] = 500   # Long range so fog stays very subtle
             config["background"] = "#87CEEB"  # Blue sky visible
             config["ambient"]["color"] = "#ffffff"  # Slightly blue-tinted ambient
-            config["ambient"]["intensity"] = 0.8
-            config["directional"]["color"] = "#ffffff"
-            config["directional"]["intensity"] = 0.8
-            config["directional"]["position"] = {"x": 50, "y": 100, "z": 50}
         elif time == "sunset":
             config["fog"]["color"] = "#FFF5E6"  # Warm white fog for sunset
             config["fog"]["near"] = 120
             config["fog"]["far"] = 350
             config["background"] = "#D85365"
-            config["ambient"]["color"] = "#D85365"
-            config["ambient"]["intensity"] = 0.5
-            config["directional"]["color"] = "#D5A29D"
-            config["directional"]["intensity"] = 0.9
         elif time == "night":
             config["fog"]["color"] = "#E6E6FF"  # Slightly blue-tinted white fog at night
             config["fog"]["near"] = 80
             config["fog"]["far"] = 250
-            config["background"] = "#001133"  # Dark blue night sky (consistent with standard night)
-            config["ambient"]["color"] = "#4444ff"  # Cool blue ambient
-            config["ambient"]["intensity"] = 0.2
-            config["directional"]["color"] = "#6666ff"  # Moonlight blue
-            config["directional"]["intensity"] = 0.3
-            config["directional"]["position"] = {"x": 50, "y": 80, "z": 50}
+            config["background"] = "#130039"
     
-    # Add northern lights flag for arctic biomes (but not park)
-    config["northern_lights"] = is_arctic and biome.lower() != "park"
+    # Add northern lights flag for arctic biomes
+    config["northern_lights"] = is_arctic
     
     return config
 
@@ -277,7 +270,7 @@ def get_sky_color(time: str, biome: str = "city") -> str:
     Returns:
         Hex color string
     """
-    if biome in ["arctic", "park"]:
+    if biome == "arctic":
         colors = {
             "noon": "#CCE5FF",    # Icy blue
             "sunset": "#B3D9FF",  # Cool sunset
@@ -325,7 +318,7 @@ def interpolate_lighting(from_time: str, to_time: str, progress: float, biome: s
         return f"#{r:02x}{g:02x}{b:02x}"
     
     # Northern lights flag doesn't interpolate - it's based on biome
-    is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen", "park"]
+    is_arctic = biome.lower() in ["arctic", "winter", "icy", "snow", "frozen"]
     
     return {
         "ambient": {
@@ -347,7 +340,7 @@ def interpolate_lighting(from_time: str, to_time: str, progress: float, biome: s
             "far": lerp(from_preset["fog"]["far"], to_preset["fog"]["far"], progress)
         },
         "background": lerp_color(from_preset["background"], to_preset["background"], progress),
-        "northern_lights": is_arctic and biome.lower() != "park"
+        "northern_lights": is_arctic
     }
 
 

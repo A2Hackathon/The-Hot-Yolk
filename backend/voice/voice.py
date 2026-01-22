@@ -1,5 +1,5 @@
 # voice.py
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 import sounddevice as sd
 import numpy as np
 import queue
@@ -36,164 +36,6 @@ def record_audio(duration: float = 5.0, fs: int = 44100) -> np.ndarray:
     return recording.flatten()
 
 
-def handle_chat_conversation(
-    messages: List[Dict],
-    current_world: Optional[Dict] = None,
-    player_position: Optional[Dict] = None
-) -> Dict:
-    """
-    Handle interactive chat conversation for world modifications.
-    Uses Claude to have a conversation with the user before modifying.
-    
-    Args:
-        messages: List of conversation messages with 'role' and 'content'
-        current_world: Optional dict of current world state
-        player_position: Optional player position dict
-    
-    Returns:
-        Dict with 'message' (AI response) and 'ready_to_modify' (bool)
-    """
-    # Build comprehensive world state context
-    world_context = ""
-    
-    if current_world:
-        world_data = current_world.get("world", {})
-        biome = world_data.get("biome", "unknown")
-        time_of_day = world_data.get("time", "unknown")
-        
-        # Extract structure information
-        structures = current_world.get("structures", {})
-        structure_counts = {k: len(v) if isinstance(v, list) else v for k, v in structures.items()}
-        
-        # Extract tree color information if available
-        tree_info = ""
-        trees = structures.get("trees", [])
-        if trees:
-            # Check for color information
-            trees_with_colors = [t for t in trees if "leaf_color" in t or "trunk_color" in t]
-            if trees_with_colors:
-                sample_tree = trees_with_colors[0]
-                leaf_color = sample_tree.get("leaf_color", "default")
-                trunk_color = sample_tree.get("trunk_color", "default")
-                tree_info = f" Trees currently have leaf_color={leaf_color}, trunk_color={trunk_color}."
-            
-            # Check for scale information
-            scales = [t.get("scale", 1.0) for t in trees if "scale" in t]
-            if scales:
-                avg_scale = sum(scales) / len(scales)
-                tree_info += f" Average tree scale: {avg_scale:.2f}."
-        
-        world_context = f"""
-CURRENT WORLD STATE:
-- Biome: {biome}
-- Time of day: {time_of_day}
-- Structures: {structure_counts}
-{tree_info}
-"""
-        
-        if player_position:
-            world_context += f"- Player position: ({player_position.get('x', 0):.1f}, {player_position.get('y', 0):.1f}, {player_position.get('z', 0):.1f})\n"
-    
-    # Note: Full conversation history is passed in messages array - no need for summary
-    # The AI will see all messages in the conversation
-    
-    system_message = {
-        "role": "system",
-        "content": """You are a helpful AI assistant that helps users modify their 3D game world. 
-Your job is to understand what the user wants to change, handle corrections and clarifications, and ask questions only when truly needed.
-
-CRITICAL: CONVERSATION MEMORY & CONTEXT
-- You have access to the ENTIRE conversation history - read ALL previous messages carefully
-- Every message in the conversation is important - don't just focus on the last one
-- Build a complete understanding by reading the full conversation from start to finish
-- Track what was discussed, what was agreed upon, and what was corrected throughout the conversation
-
-CRITICAL: CONVERSATION FLOW & CORRECTION HANDLING
-- First message: Initial request → parse fully
-- Follow-up messages: May be corrections, clarifications, or additions
-- If user says "no", "actually", "instead", "I want X instead" → This is a CORRECTION to previous request
-- When user corrects: Combine ALL previous context + new correction = final intent
-- Example conversation:
-  Message 1 (User): "make trees pink"
-  Message 2 (AI): "I'll change all trees to pink color."
-  Message 3 (User): "no, I want the trees to be typical height. the pink should be shade #fa9bcb"
-  → You must remember: User originally wanted pink trees, now wants typical height + pink #fa9bcb
-- Always maintain context: "the trees" = trees from previous discussion
-- "typical height" or "normal height" = default height for that structure type
-- When user references something from earlier ("the trees", "those buildings", "it"), trace back through the conversation to find what they're referring to
-
-UNDERSTANDING REQUESTS:
-1. STRUCTURES: 
-   - BASIC STRUCTURES: trees, buildings, rocks, peaks, street_lamps, enemies
-   - CUSTOM OBJECTS: Use "creative_objects" for ANY object NOT in the basic list
-   - CRITICAL: If user asks for ANY object NOT in basic structures (e.g., "switch controller", "chair", "car", "statue", "furniture", "vehicle", "controller", "gadget", etc.), you MUST use "creative_objects" to build it from shapes
-   - Examples: "Nintendo Switch controller" → creative_objects, "chair" → creative_objects, "car" → creative_objects, "table" → creative_objects
-2. QUANTITIES: numbers, "all", "some", "a few", "many"
-3. COLORS: 
-   - Hex codes: #fa9bcb, #FF5733, etc. (ALWAYS preserve exact hex format)
-   - Color names: pink, red, blue, etc.
-   - Accept both formats and understand they're equivalent
-   - For Nintendo Switch: red Joy-Con = #FF0000, blue Joy-Con = #0000FF
-4. HEIGHT/SCALE:
-   - "typical height", "normal height", "default height" = default scale (1.0)
-   - "taller", "bigger" = increase scale
-   - "shorter", "smaller" = decrease scale
-   - Specific numbers: "height 2.0" = scale 2.0
-
-RESPONSE GUIDELINES:
-1. If the user's request is vague or unclear, ask ONE specific clarifying question
-2. If you understand the request clearly (including corrections), summarize what you'll modify
-3. Be friendly and conversational
-4. Keep responses concise (1-2 sentences for questions, 2-3 for confirmations)
-5. When user corrects: Acknowledge the correction and confirm the new intent
-6. Always reference previous context when user uses "the", "those", "it", etc.
-
-EXAMPLES:
-- User: "make trees pink"
-  AI: "I'll change all trees to pink color."
-  
-- User: "no, I want the trees to be typical height. the pink should be shade #fa9bcb"
-  AI: "Got it! I'll set the trees to typical/default height and change the pink color to #fa9bcb."
-
-- User: "add 5 trees"
-  AI: "I'll add 5 new trees to the world."
-
-- User: "make them taller"
-  AI: "I'll increase the height/scale of the trees."
-
-Return ONLY your response text, no JSON, no markdown formatting.
-
-REMEMBER: Read the ENTIRE conversation history above - every message matters for understanding the full context.""" + world_context
-    }
-    
-    # Build messages array with system message and conversation history
-    chat_messages = [system_message] + messages
-    
-    try:
-        completion = claude_client.chat.completions.create(
-            model="anthropic/claude-opus-4",
-            messages=chat_messages,
-            temperature=0.85,
-            max_tokens=500
-        )
-        
-        response_text = completion.choices[0].message.content.strip()
-        
-        # Check if AI is ready to modify (after AI responds, user can always confirm)
-        # Consider ready if this is not the first message exchange
-        ready_to_modify = len(messages) >= 2
-        
-        return {
-            "message": response_text,
-            "ready_to_modify": ready_to_modify
-        }
-    except Exception as e:
-        print(f"[Chat Conversation ERROR] {e}")
-        import traceback
-        traceback.print_exc()
-        raise
-
-
 def summarize_world(world: Dict) -> Dict:
     """
     Produce a lightweight summary of the world for AI input.
@@ -219,46 +61,22 @@ def summarize_world(world: Dict) -> Dict:
     }
 
 
-def generate_new_buildings(count: int, biome: str, existing_buildings: list, terrain_size: float = 256.0, force_type: Optional[str] = None) -> list:
-    """Generate new building objects with proper positions and types (skyscraper/house)"""
-    if not biome or not isinstance(biome, str):
-        print(f"[VOICE] ⚠️ Invalid biome: {biome} (type: {type(biome)})")
-        return []
+def generate_new_buildings(count: int, biome: str, existing_buildings: list, terrain_size: float = 256.0) -> list:
+    """Generate new building objects with proper positions"""
     if biome.lower() != "city":
         return []
     
     buildings = []
-    # Use same building types as generate_buildings in generate.py
-    if force_type == "skyscraper":
-        # Only generate skyscrapers
-        building_types = [
-            {"type": "skyscraper", "height": 70, "width": 10, "depth": 10, "color": 0x666666},
-            {"type": "skyscraper", "height": 50, "width": 8, "depth": 8, "color": 0x555555},
-            {"type": "skyscraper", "height": 60, "width": 9, "depth": 9, "color": 0x444444},
-        ]
-    elif force_type == "house":
-        # Only generate houses
-        building_types = [
-            {"type": "house", "height": 40, "width": 7, "depth": 10, "color": 0x777777},
-            {"type": "house", "height": 20, "width": 10, "depth": 7, "color": 0x888888},
-            {"type": "house", "height": 30, "width": 8, "depth": 9, "color": 0x999999},
-        ]
-    else:
-        # Mix of both (default)
-        building_types = [
-            {"type": "skyscraper", "height": 70, "width": 10, "depth": 10, "color": 0x666666},
-            {"type": "house", "height": 40, "width": 7, "depth": 10, "color": 0x777777},
-            {"type": "skyscraper", "height": 50, "width": 8, "depth": 8, "color": 0x555555},
-            {"type": "house", "height": 20, "width": 10, "depth": 7, "color": 0x888888},
-        ]
+    building_types = [
+        {"height": 25, "width": 8, "depth": 8, "color": 0x666666},
+        {"height": 18, "width": 10, "depth": 7, "color": 0x888888},
+        {"height": 15, "width": 7, "depth": 10, "color": 0x777777},
+        {"height": 35, "width": 8, "depth": 8, "color": 0x555555},
+        {"height": 28, "width": 9, "depth": 9, "color": 0x444444},
+    ]
     
-    # Extract existing positions (handle missing position data gracefully)
-    existing_positions = []
-    for b in existing_buildings:
-        if isinstance(b, dict) and "position" in b:
-            pos = b["position"]
-            if isinstance(pos, dict) and "x" in pos and "z" in pos:
-                existing_positions.append((pos["x"], pos["z"]))
+    # Extract existing positions
+    existing_positions = [(b["position"]["x"], b["position"]["z"]) for b in existing_buildings]
     min_distance = 25
     
     attempts = 0
@@ -282,12 +100,12 @@ def generate_new_buildings(count: int, biome: str, existing_buildings: list, ter
         if too_close:
             continue
         
-        # Choose random building type (includes both skyscrapers and houses)
+        # Choose random building type
         building_type = random.choice(building_types)
         rotation = random.choice([0, math.pi/2, math.pi, 3*math.pi/2])
         
         building = {
-            "type": building_type["type"],  # "skyscraper" or "house", not "building"
+            "type": "building",
             "height": building_type["height"],
             "width": building_type["width"],
             "depth": building_type["depth"],
@@ -299,9 +117,7 @@ def generate_new_buildings(count: int, biome: str, existing_buildings: list, ter
         buildings.append(building)
         existing_positions.append((world_x, world_z))
     
-    skyscraper_count = sum(1 for b in buildings if b["type"] == "skyscraper")
-    house_count = sum(1 for b in buildings if b["type"] == "house")
-    print(f"[VOICE] Generated {len(buildings)} new buildings ({skyscraper_count} skyscrapers, {house_count} houses)")
+    print(f"[VOICE] Generated {len(buildings)} new buildings")
     return buildings
 
 
@@ -439,22 +255,6 @@ def detect_and_remove_blocking_structures(diff: Dict, current_world: Dict, colli
                                     else:
                                         diff["remove"][struct_type] = diff["remove"].get(struct_type, 0) + 1
                                     print(f"[COLLISION] Auto-removing blocking {struct_type} for peak placement")
-            
-            # Ensure peaks have varied heights (scales) for visual variety
-            if len(peaks_to_add) > 1:
-                scales = [p.get("scale", 1.0) for p in peaks_to_add]
-                # Check if all scales are the same (or missing)
-                if len(set(scales)) == 1:
-                    print(f"[PEAKS] All peaks have same scale ({scales[0]}), varying heights...")
-                    # Generate varied scales between 0.7 and 1.5
-                    for i, peak in enumerate(peaks_to_add):
-                        # Create varied scale: 0.7 to 1.5 with some randomness
-                        base_scale = 0.7 + (i % 3) * 0.3  # 0.7, 1.0, 1.3, 0.7, 1.0, 1.3...
-                        variation = random.uniform(-0.15, 0.15)  # ±0.15 variation
-                        peak["scale"] = max(0.6, min(1.6, base_scale + variation))
-                        print(f"[PEAKS] Peak {i+1} scale set to {peak['scale']:.2f}")
-                else:
-                    print(f"[PEAKS] Peaks already have varied scales: {scales}")
     
     return diff
 
@@ -675,9 +475,9 @@ You are a game world editor AI.
 Rules:
 - Output ONLY valid JSON matching this structure:
 {
-  "add": {"trees": [], "buildings": [], "peaks": [], "rocks": [], "street_lamps": [], "enemies": [], "creative_objects": []},
-  "remove": {"trees": 0, "buildings": 0, "skyscrapers": 0, "houses": 0, "peaks": 0, "rocks": 0, "street_lamps": 0, "enemies": 0, "creative_objects": 0},
-  "set": {"trees": null, "buildings": null, "skyscrapers": null, "houses": null, "peaks": null, "rocks": null, "street_lamps": null, "enemies": null, "creative_objects": null},
+  "add": {"trees": [], "buildings": [], "peaks": [], "rocks": [], "street_lamps": [], "enemies": []},
+  "remove": {"trees": 0, "buildings": 0, "skyscrapers": 0, "houses": 0, "peaks": 0, "rocks": 0, "street_lamps": 0, "enemies": 0},
+  "set": {"trees": null, "buildings": null, "skyscrapers": null, "houses": null, "peaks": null, "rocks": null, "street_lamps": null, "enemies": null},
   "physics": null,
   "lighting": null,
   "combat": null,
@@ -692,9 +492,6 @@ MODIFICATION TYPES:
    - "add 4 enemies" → {"add": {"enemies": 4}}      // Just the count!
    - "add 10 street lamps" → {"add": {"street_lamps": 10}}  // Just the count!
    - "add street lamps" → {"add": {"street_lamps": 10}}  // Default to 10 if no number
-   - "add a chair" → {"add": {"creative_objects": [{name: "chair", parts: [...]}]}}  // Use creative_objects for custom objects!
-   - "add Nintendo Switch controller" → {"add": {"creative_objects": [{name: "nintendo_switch_controller", parts: [red box, blue box, center box, buttons]}]}}
-   - CRITICAL: When user asks for ANY object NOT in basic structures, use "creative_objects" - DO NOT say you can't create it!
    
 2. REMOVE: Use "remove" to delete structures
    - "remove 3 buildings" → {"remove": {"buildings": 3}}  // Removes any buildings
@@ -718,29 +515,6 @@ CRITICAL: When user says "remove all X", ONLY remove X. Do NOT remove other stru
    - "set houses to 10" → {"set": {"houses": 10}}
    - "set street lamps to 15" → {"set": {"street_lamps": 15}}
 
-4. REPLACE: Use "remove" + "add" together to replace one structure type with another
-   - "replace trees with rocks" → {"remove": {"trees": 999}, "add": {"rocks": [rock objects with EXACT SAME positions]}}
-   - "replace buildings with trees" → {"remove": {"buildings": 999}, "add": {"trees": [tree objects at building positions]} }
-   - "replace all rocks with peaks" → {"remove": {"rocks": 999}, "add": {"peaks": [peak objects at rock positions]} }
-   - CRITICAL: When replacing, you MUST PRESERVE EXACT POSITIONS:
-     * First, extract positions from existing objects being replaced (check world summary for structure positions)
-     * The world summary includes position data for trees, rocks, and peaks
-     * Then remove ALL of the old structure type (use 999 to remove all)
-     * Then add the new structure type using THE EXACT SAME POSITIONS from the removed objects
-     * Example: If replacing trees at positions [(10,0,20), (15,0,25), (20,0,30)], add new objects at those EXACT positions
-     * DO NOT generate random positions - USE THE POSITIONS FROM THE OBJECTS BEING REPLACED
-   - How to get positions for replacement:
-     * Check the world summary - it includes position data for structures
-     * For trees/rocks/peaks: Extract position from each existing object: {"position": {"x": 10.0, "y": 0.0, "z": 20.0}}
-     * For trees/rocks/peaks: You MUST include full position data in your "add" array
-   - Examples:
-     * "replace trees with rocks": 
-       - Get all tree positions from world summary: [{"position": {"x": 10, "y": 0, "z": 20}}, {"position": {"x": 15, "y": 0, "z": 25}}]
-       - Remove all trees: {"remove": {"trees": 999}}
-       - Add rocks at SAME positions: {"add": {"rocks": [{"type": "granite", "position": {"x": 10, "y": 0, "z": 20}, "scale": 1.0, "rotation": 0}, {"type": "granite", "position": {"x": 15, "y": 0, "z": 25}, "scale": 1.0, "rotation": 0}]}}
-     * "replace 5 rocks with trees" → Remove 5 rocks, add 5 trees at the EXACT positions of those 5 rocks
-     * "replace all enemies with trees" → Remove all enemies, add trees at enemy positions (if available in world summary)
-
 IMPORTANT FOR BUILDINGS, ENEMIES, AND STREET_LAMPS:
 - For "add buildings", "add enemies", or "add street_lamps", return ONLY THE COUNT as a number
 - Backend will generate positions and full objects automatically
@@ -752,7 +526,7 @@ IMPORTANT FOR OTHER STRUCTURES (trees, rocks, peaks):
 - For trees/rocks/peaks, you must generate full objects with positions
 - Example: {"add": {"trees": [{"type": "oak", "position": {...}, ...}]}}
 
-5. CLEAR: Use remove with high number
+4. CLEAR: Use remove with high number
    - "remove all buildings" → {"remove": {"buildings": 999}}  // Removes all buildings (both types)
    - "remove all skyscrapers" → {"remove": {"skyscrapers": 999}}  // Removes only skyscrapers
    - "remove all houses" → {"remove": {"houses": 999}}  // Removes only houses
@@ -773,9 +547,6 @@ TREE/ROCK/PEAK GENERATION:
 - Trees need: type, leafless, position {x, y, z}, scale, rotation
 - Rocks need: type, position {x, y, z}, scale, rotation
 - Peaks need: type, position {x, y, z}, scale
-- CRITICAL FOR PEAKS: When adding multiple peaks/mountains, use VARIED scales (0.7 to 1.5) so they have different heights
-  - Example: If adding 3 peaks, use scales like [0.8, 1.2, 1.0] or [1.1, 0.9, 1.3] - NOT all 1.0
-  - This creates visual variety with mountains of different heights
 
 TREE STYLING FROM IMAGES:
 - If an image is provided with the command, analyze the tree(s) in the image
@@ -838,144 +609,10 @@ AUTOMATIC COLLISION REMOVAL:
 
 BUILDING/ENEMY/STREET_LAMP GENERATION:
 - Just return count as number, backend handles generation
-- Example: "add 5 buildings" → {"add": {"buildings": 5}}  // Backend will generate mix of houses and skyscrapers
-- Example: "add 10 buildings and skyscrapers" → {"add": {"buildings": 10}}  // Same as above - backend generates mix
-- Example: "add 5 skyscrapers" → {"add": {"skyscrapers": 5}}  // Backend will generate only skyscrapers
+- Example: "add 5 buildings" → {"add": {"buildings": 5}}
 - Example: "add 3 enemies" → {"add": {"enemies": 3}}
 - Example: "add 10 street lamps" → {"add": {"street_lamps": 10}}
 - Example: "add street lamps" or "streetlamps" → {"add": {"street_lamps": 10}}
-- IMPORTANT: When user says "buildings and skyscrapers", treat as "buildings" (backend generates mix automatically)
-
-CREATIVE OBJECT CREATION (USE THIS FOR ANY CUSTOM OBJECT):
-You can create ANY object creatively using "creative_objects" field. This allows you to build objects from basic shapes.
-CRITICAL: When user asks for ANY object NOT in the basic structure list (trees, buildings, rocks, peaks, street_lamps, enemies), 
-you MUST use "creative_objects" to build it. DO NOT say you can't create it - use creative_objects instead!
-Examples: "switch controller" → creative_objects, "chair" → creative_objects, "car" → creative_objects, "Nintendo Switch" → creative_objects
-
-OBJECT DECOMPOSITION PRINCIPLES:
-When creating ANY object, follow these steps:
-
-1. VISUALIZE THE REAL OBJECT:
-   - First, imagine what the object looks like in real life
-   - What does it actually look like? What are its visual characteristics?
-   - Example: "sunny side up egg" = flat white circular base with yellow dome on top
-
-2. IDENTIFY ALL VISUAL COMPONENTS:
-   - Break down the object into its distinct visual parts
-   - Each part that looks different or has a different color becomes a separate component
-   - Example: Sunny side up egg = (1) white egg white base, (2) yellow yolk on top
-   - Example: Chair = (1) seat, (2) backrest, (3) four legs
-
-3. MAP COMPONENTS TO SHAPES:
-   - For each component, choose the best matching shape:
-     * Flat/circular base → cylinder (flattened with small height)
-     * Round/dome → sphere or hemisphere
-     * Rectangular → box
-     * Long/thin → cylinder
-   - Example: Egg white (flat circle) → cylinder with small height
-   - Example: Yolk (dome) → sphere
-
-4. ASSIGN REALISTIC COLORS:
-   - Use colors that match the real-world object
-   - Each component can have its own color
-   - Common colors: white (#FFFFFF), yellow (#FFD700), red (#FF0000), blue (#0000FF), brown (#8B4513), etc.
-   - Example: Egg white → #FFFFFF (white), Yolk → #FFD700 (yellow)
-
-5. POSITION PARTS RELATIVE TO EACH OTHER:
-   - Think about how parts connect or sit on each other
-   - Use relative positioning within the object's coordinate system
-   - Consider geometry centering:
-     * CylinderGeometry: center is at (0,0,0), so bottom is at -height/2, top is at +height/2
-     * SphereGeometry: center is at (0,0,0), so bottom is at -radius, top is at +radius
-   - Example: If white cylinder height=0.2 and sits on ground (y=0):
-     * White position.y = 0.1 (center of cylinder, so bottom at 0, top at 0.2)
-   - Example: If yolk sphere radius=0.8 and sits ON TOP of white (at y=0.2):
-     * Yolk position.y = 0.2 + 0.8 = 1.0 (center of sphere, so bottom at 0.2, top at 1.8)
-   - Key: Position parts so they connect properly (on top, beside, inside, etc.)
-
-6. THINKING PROCESS EXAMPLE - "Sunny Side Up Egg":
-   Step 1: Visualize → Flat white circular base with yellow dome yolk on top
-   Step 2: Components → (1) White egg white, (2) Yellow yolk
-   Step 3: Shapes → (1) Cylinder (flattened), (2) Sphere
-   Step 4: Colors → (1) #FFFFFF white, (2) #FFD700 yellow
-   Step 5: Positioning → White cylinder: height=0.2, position.y=0.1 (sits on ground)
-                          Yolk sphere: radius=0.8, position.y=1.0 (sits on white at y=0.2)
-   Result: Two parts that visually represent a sunny side up egg correctly
-
-CRITICAL POSITIONING RULES:
-- CylinderGeometry: If you want it to sit on ground (y=0), set position.y = height/2
-- SphereGeometry: If you want it to sit on something at y=X, set position.y = X + radius
-- BoxGeometry: If you want it to sit on ground, set position.y = height/2
-- Always account for geometry centering when positioning parts relative to each other
-
-CREATIVE_OBJECTS FORMAT:
-Each creative object is a composition of basic shapes. Use this format:
-{
-  "add": {
-    "creative_objects": [
-      {
-        "name": "chair",  // Descriptive name
-        "position": {"x": 10.0, "y": 0.0, "z": 20.0},
-        "rotation": {"x": 0, "y": 0, "z": 0},  // Optional: rotation in radians
-        "scale": 1.0,  // Optional: overall scale multiplier
-        "detailed_model": false,  // Optional: if true, request detailed 3D model (slower but higher quality)
-        "parts": [
-          {
-            "shape": "box",  // "box", "cylinder", "sphere", "cone", "torus"
-            "position": {"x": 0, "y": 0.5, "z": 0},  // Relative to object position
-            "rotation": {"x": 0, "y": 0, "z": 0},  // Optional
-            "dimensions": {"width": 1.0, "height": 0.1, "depth": 1.0},  // For box
-            // OR "radius": 0.5, "height": 1.0 for cylinder/cone
-            // OR "radius": 0.5 for sphere
-            // OR "radius": 0.5, "tube": 0.2, "segments": 16 for torus
-            "color": "#8B4513",  // Hex color
-            "material": {"roughness": 0.8, "metalness": 0.1}  // Optional
-          },
-          // ... more parts
-        ]
-      }
-    ]
-  }
-}
-
-AVAILABLE SHAPES & THEIR PROPERTIES:
-1. "box": Requires "dimensions" with "width", "height", "depth"
-2. "cylinder": Requires "radius", "height" (optional: "segments" default 16)
-3. "sphere": Requires "radius" (optional: "segments" default 16)
-4. "cone": Requires "radius", "height" (optional: "segments" default 16)
-5. "torus": Requires "radius", "tube", "segments" (optional: "arc" default Math.PI*2)
-
-CREATIVE EXAMPLES:
-- Chair: Box for seat + box for back + 4 cylinders for legs
-- Statue of Liberty: Cylinder base + cone body + box head + torus crown + cone torch
-- Car: Box body + box roof + 4 spheres for wheels
-- Table: Box top + 4 cylinders for legs
-- Fountain: Cylinder base + cone center + multiple small cylinders for water jets
-- Bench: Long box seat + 2 boxes for back supports + 4 cylinders for legs
-- Nintendo Switch Controller: Two boxes (red #FF0000 and blue #0000FF Joy-Cons) + one box (center console/grip) + small boxes/spheres for buttons and joysticks
-- Game Controller: Box body + 2 small boxes/spheres for joysticks + small boxes for buttons + 2 boxes for handles/grips
-
-CREATIVE GUIDELINES:
-- ALWAYS follow the OBJECT DECOMPOSITION PRINCIPLES above
-- Visualize the real object first, then break it down into components
-- Each component gets its own part with appropriate shape, color, and position
-- Use realistic colors that match the real-world appearance
-- Position parts relative to each other, accounting for geometry centering
-- Think about how parts connect: on top, beside, inside, etc.
-- For objects with many parts, break them down into logical components
-- Consider scale: A chair might be 1-2 units tall, a statue might be 10-20 units tall
-- When user asks for something specific (e.g., "add a chair", "build Statue of Liberty", "sunny side up egg"), use creative_objects to build it from shapes following the decomposition principles
-
-DETAILED MODELS (HYBRID APPROACH):
-- By default, objects are created with basic shapes (instant rendering)
-- If user requests "detailed", "high quality", "realistic", or emphasizes importance, set "detailed_model": true
-- Examples:
-  * "add a basic chair" → detailed_model: false (instant)
-  * "add a detailed chair" → detailed_model: true (will generate 3D model)
-  * "build a statue of liberty" → detailed_model: false (instant basic version)
-  * "build a realistic statue of liberty" → detailed_model: true (detailed model)
-- Detailed models are cached - same object name will reuse cached model
-- Use detailed_model sparingly - only for important or special objects
 """
 
     # Build player context for relative positioning
@@ -996,48 +633,14 @@ DETAILED MODELS (HYBRID APPROACH):
             example_trees = all_trees[:5]  # First 5 as examples
             existing_trees_info = f"\n\nIMPORTANT: There are {tree_count} existing trees in the world. Example trees (first 5):\n{json.dumps(example_trees, indent=2)}\n\nCRITICAL: When using 'set' to style trees based on the image, you MUST include ALL {tree_count} existing trees with their original properties (type, position, scale, rotation, leafless) PLUS add the new leaf_color and trunk_color fields extracted from the image. Do NOT just include the example trees - include ALL trees from the current world."
     
-    # Include position data for structures when doing replacements
-    # This helps AI preserve positions when replacing objects
-    structure_positions_info = ""
-    structures = current_world.get("structures", {})
-    
-    # Include position data for structures when doing replacements
-    # This helps AI preserve positions when replacing objects
-    structure_positions_info = ""
-    structures = current_world.get("structures", {})
-    
-    # Include positions for trees, rocks, peaks (needed for replacements)
-    for struct_type in ["trees", "rocks", "peaks"]:
-        struct_list = structures.get(struct_type, [])
-        if struct_list:
-            # Include all positions (not just examples) for replacement operations
-            positions = [{"position": obj.get("position", {})} for obj in struct_list if "position" in obj]
-            if positions:
-                structure_positions_info += f"\n\n{struct_type.upper()} POSITIONS (for replacements):\n"
-                structure_positions_info += f"Total count: {len(struct_list)}\n"
-                # Include all positions - if too many, show examples but emphasize ALL must be used
-                if len(positions) <= 50:
-                    structure_positions_info += json.dumps(positions, indent=2)
-                    structure_positions_info += f"\n\nCRITICAL: Use ALL {len(positions)} positions above when replacing {struct_type}."
-                else:
-                    # Show first 30 as examples
-                    structure_positions_info += json.dumps(positions[:30], indent=2)
-                    structure_positions_info += f"\n\n... and {len(positions) - 30} more positions (total: {len(positions)})\n"
-                    structure_positions_info += f"CRITICAL: When replacing {struct_type}, you MUST use ALL {len(positions)} positions. "
-                    structure_positions_info += f"The pattern shown above continues for all remaining positions. "
-                    structure_positions_info += f"Extract positions from the full world data - every {struct_type} has a position that must be preserved."
-    
     user_prompt = f"""
 World summary:
 {json.dumps(world_summary)}
 {player_context}
 {existing_trees_info}
-{structure_positions_info}
 
 Player command:
 "{command}"
-
-IMPORTANT: If command involves REPLACING objects, use the positions listed above to preserve exact locations.
 """
 
     # Build messages array - include image if provided
@@ -1207,13 +810,6 @@ IMPORTANT: If command involves REPLACING objects, use the positions listed above
         # Try to parse JSON
         try:
             diff = json.loads(raw)
-            # #region agent log
-            try:
-                import json as json_log
-                with open('c:\\Projects\\NexHacks26\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(json_log.dumps({"location":"voice.py:1162","message":"AI response parsed diff","data":{"peaks":diff.get("add", {}).get("peaks", [])},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","hypothesisId":"H3"})+'\n')
-            except: pass
-            # #endregion
             print(f"[VOICE] ✓ Successfully parsed JSON")
         except json.JSONDecodeError as e:
             print(f"[VOICE] JSON parsing error: {e}")
@@ -1458,66 +1054,13 @@ IMPORTANT: If command involves REPLACING objects, use the positions listed above
                         # Don't remove it, just log warning - let the AI's decision stand for now
         
         # Handle building additions - generate actual building objects
-        try:
-            if "add" not in diff:
-                diff["add"] = {}
-            if not isinstance(diff["add"], dict):
-                print(f"[VOICE] ⚠️ diff['add'] is not a dict, resetting to empty dict")
-                diff["add"] = {}
-            
-            existing_buildings = current_world.get("structures", {}).get("buildings", [])
-            if not isinstance(existing_buildings, list):
-                existing_buildings = []
-            all_new_buildings = []
-            
-            print(f"[VOICE] Building addition check - diff['add']: {diff.get('add', {})}")
-            print(f"[VOICE] Current biome: {current_biome}, existing buildings: {len(existing_buildings)}")
-            
-            # First handle "skyscrapers" if specified separately
-            if diff["add"].get("skyscrapers"):
-                skyscraper_count = diff["add"]["skyscrapers"]
-                print(f"[VOICE] Found skyscrapers in diff: {skyscraper_count} (type: {type(skyscraper_count)})")
-                if isinstance(skyscraper_count, int) and skyscraper_count > 0:
-                    # Generate only skyscrapers
-                    new_skyscrapers = generate_new_buildings(skyscraper_count, current_biome, existing_buildings, force_type="skyscraper")
-                    all_new_buildings.extend(new_skyscrapers)
-                    existing_buildings.extend(new_skyscrapers)  # Update for next check
-                    print(f"[VOICE] ✅ Converted skyscraper count {skyscraper_count} to {len(new_skyscrapers)} skyscrapers")
-                # Remove the separate skyscrapers field (we merged it into buildings)
-                del diff["add"]["skyscrapers"]
-            
-            # Handle "buildings" (general buildings - mix of houses and skyscrapers)
-            if diff["add"].get("buildings"):
-                count = diff["add"]["buildings"]
-                print(f"[VOICE] Found buildings in diff: {count} (type: {type(count)})")
-                if isinstance(count, int) and count > 0:
-                    # Generate mix of houses and skyscrapers
-                    new_buildings = generate_new_buildings(count, current_biome, existing_buildings)
-                    all_new_buildings.extend(new_buildings)
-                    print(f"[VOICE] ✅ Converted building count {count} to {len(new_buildings)} objects")
-                elif isinstance(count, list):
-                    # Already a list of building objects (shouldn't happen, but handle gracefully)
-                    print(f"[VOICE] ⚠️ Buildings already a list ({len(count)} items), using as-is")
-                    all_new_buildings.extend(count)
-            
-            # Set the final buildings array
-            if all_new_buildings:
-                diff["add"]["buildings"] = all_new_buildings
-                skyscraper_count = sum(1 for b in all_new_buildings if b.get("type") == "skyscraper")
-                house_count = sum(1 for b in all_new_buildings if b.get("type") == "house")
-                print(f"[VOICE] ✅ Total buildings to add: {len(all_new_buildings)} ({skyscraper_count} skyscrapers, {house_count} houses)")
-            else:
-                print(f"[VOICE] ⚠️ No buildings generated - check if biome is city and counts are valid")
-        except Exception as e:
-            print(f"[VOICE] ❌ Error in building generation: {e}")
-            import traceback
-            traceback.print_exc()
-            # Don't fail the whole request - just log and continue
-        except Exception as e:
-            print(f"[VOICE] ❌ Error in building generation: {e}")
-            import traceback
-            traceback.print_exc()
-            # Don't fail the whole request - just log and continue
+        if diff.get("add", {}).get("buildings"):
+            count = diff["add"]["buildings"]
+            if isinstance(count, int):
+                existing_buildings = current_world.get("structures", {}).get("buildings", [])
+                new_buildings = generate_new_buildings(count, current_biome, existing_buildings)
+                diff["add"]["buildings"] = new_buildings
+                print(f"[VOICE] Converted building count {count} to {len(new_buildings)} objects")
         
         # Handle street lamp additions - generate actual street lamp objects if count provided
         if diff.get("add", {}).get("street_lamps"):
